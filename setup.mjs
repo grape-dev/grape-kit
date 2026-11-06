@@ -1,0 +1,223 @@
+#!/usr/bin/env node
+/**
+ * grape-mcp 安装器 —— 面向无 UI agent 的装配 + doctor + 卸载。
+ *
+ * 设计对齐 devkit v2 installer 模式（install/doctor/uninstall 生命周期 + receipt 所有权）：
+ * - opencode：mcp.grape 条目做「文本外科手术」插入 opencode.jsonc（保注释、先备份、幂等）；
+ *   native skill 副本进 ~/.config/opencode/skills/，配 .grape-mcp-native.json receipt；
+ * - 凭据不落配置文件：GRAPE_BASE_URL / GRAPE_API_TOKEN 由用户环境提供（写入配置会泄漏 token）。
+ *
+ * 用法：
+ *   node setup.mjs install --target opencode [--script /abs/grape-mcp.mjs]
+ *   node setup.mjs uninstall --target opencode
+ *   node setup.mjs doctor [--probe]
+ */
+import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync, readdirSync, statSync } from 'node:fs'
+import { homedir, tmpdir } from 'node:os'
+import { join, dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { spawnSync } from 'node:child_process'
+
+const HERE = dirname(fileURLToPath(import.meta.url))
+const DEFAULT_SCRIPT = resolve(HERE, 'grape-mcp.mjs')
+const RECEIPT = '.grape-mcp-native.json'
+
+const arg = (name, def = undefined) => {
+  const i = process.argv.indexOf(`--${name}`)
+  return i >= 0 ? (process.argv[i + 1] && !process.argv[i + 1].startsWith('--') ? process.argv[i + 1] : true) : def
+}
+const cmd = process.argv[2] || 'help'
+const target = arg('target', 'opencode')
+
+function opencodePaths() {
+  const home = homedir()
+  return {
+    config: join(home, '.config', 'opencode', 'opencode.jsonc'),
+    configAlt: join(home, '.config', 'opencode', 'opencode.json'),
+    skillsDir: join(home, '.config', 'opencode', 'skills'),
+  }
+}
+
+/* ---------- mcp.jsonc 文本外科手术 ---------- */
+
+function findMcpBlockStart(text) {
+  const m = text.match(/"mcp"\s*:\s*\{/)
+  if (!m) return -1
+  return m.index + m[0].length
+}
+
+/** 在 mcp 块的闭合大括号前定位（跳过字符串字面量内的花括号） */
+function findBlockEnd(text, from) {
+  let depth = 1
+  let inStr = false
+  let esc = false
+  for (let i = from; i < text.length; i++) {
+    const c = text[i]
+    if (inStr) {
+      if (esc) esc = false
+      else if (c === '\\') esc = true
+      else if (c === '"') inStr = false
+      continue
+    }
+    if (c === '"') inStr = true
+    else if (c === '{') depth++
+    else if (c === '}') {
+      depth--
+      if (depth === 0) return i
+    }
+  }
+  return -1
+}
+
+function buildEntry(scriptAbs) {
+  return JSON.stringify({
+    grape: {
+      type: 'local',
+      command: [process.execPath, scriptAbs],
+      enabled: true,
+      timeout: 600000,
+    },
+  }, null, 6).replace(/\n/g, '\n    ')
+}
+
+function installOpencode(scriptAbs) {
+  const p = opencodePaths()
+  const cfgPath = existsSync(p.config) ? p.config : p.configAlt
+  if (!existsSync(cfgPath)) {
+    console.error(`未找到 opencode 配置: ${p.config}（或 opencode.json）`)
+    process.exit(1)
+  }
+  const text = readFileSync(cfgPath, 'utf8')
+  if (/"grape"\s*:/.test(text.slice(findMcpBlockStart(text)))) {
+    // 已有 grape 条目：删除旧条目后重插（幂等升级）
+    const removed = removeGrapeEntry(text)
+    if (!removed) { console.error('grape 条目已存在但移除失败，请手动检查'); process.exit(1) }
+    return writeEntry(removed, cfgPath, scriptAbs)
+  }
+  return writeEntry(text, cfgPath, scriptAbs)
+}
+
+function writeEntry(text, cfgPath, scriptAbs) {
+  const start = findMcpBlockStart(text)
+  if (start < 0) {
+    console.error('配置文件中未找到 "mcp": { 块；请手动添加（README 有片段）')
+    process.exit(1)
+  }
+  const backup = `${cfgPath}.bak-grapemcp-${new Date().toISOString().replace(/[-:T]/g, '').slice(0, 12)}`
+  writeFileSync(backup, text)
+  const inner = buildEntry(scriptAbs)
+  // 插在块首：后续已有条目自带逗号结构，前插 "grape": {...}, 恒合法
+  const next = text.slice(0, start) + '\n    ' + inner + ',' + text.slice(start)
+  writeFileSync(cfgPath, next)
+  console.log(`已写入 ${cfgPath}（备份: ${backup}）`)
+  return true
+}
+
+function removeGrapeEntry(text) {
+  const start = findMcpBlockStart(text)
+  if (start < 0) return null
+  const m = text.slice(start).match(/"grape"\s*:\s*\{/)
+  if (!m) return null
+  const entryStart = start + m.index
+  // 回溯吃掉前置换行与（可能存在的）前置逗号
+  let s = entryStart
+  while (s > start && /[\s,]/.test(text[s - 1])) s--
+  const end = findBlockEnd(text, entryStart + m[0].length - 1)
+  if (end < 0) return null
+  // 吃掉后置逗号（若条目后有兄弟条目）
+  let e = end + 1
+  if (text[e] === ',') e++
+  return text.slice(0, s) + text.slice(e)
+}
+
+/* ---------- skill 副本 + receipt ---------- */
+
+function copySkill() {
+  const p = opencodePaths()
+  const src = join(HERE, 'skills', 'grape-remote')
+  if (!existsSync(src)) { console.warn('skill 源缺失，跳过'); return }
+  mkdirSync(p.skillsDir, { recursive: true })
+  const dst = join(p.skillsDir, 'grape-remote')
+  rmSync(dst, { recursive: true, force: true })
+  mkdirSync(dst, { recursive: true })
+  for (const f of readdirSync(src)) {
+    if (statSync(join(src, f)).isFile()) writeFileSync(join(dst, f), readFileSync(join(src, f)))
+  }
+  writeFileSync(join(p.skillsDir, RECEIPT), JSON.stringify({
+    installedBy: 'grape-mcp-setup',
+    version: JSON.parse(readFileSync(join(HERE, 'package.json'), 'utf8')).version,
+    skills: ['grape-remote'],
+    placedAt: new Date().toISOString(),
+  }, null, 2))
+  console.log(`skill 已安装: ${dst}`)
+}
+
+function uninstallSkill() {
+  const p = opencodePaths()
+  const receiptPath = join(p.skillsDir, RECEIPT)
+  let skills = ['grape-remote']
+  if (existsSync(receiptPath)) {
+    try { skills = JSON.parse(readFileSync(receiptPath, 'utf8')).skills || skills } catch { /* 用默认 */ }
+  }
+  for (const s of skills) rmSync(join(p.skillsDir, s), { recursive: true, force: true })
+  rmSync(receiptPath, { force: true })
+  console.log(`skill 已卸载: ${skills.join(', ')}`)
+}
+
+/* ---------- doctor ---------- */
+
+function doctor(probe) {
+  const p = opencodePaths()
+  const checks = []
+  checks.push(['node >= 20', Number(process.versions.node.split('.')[0]) >= 20 ? 'ok' : 'FAIL'])
+  const bin = process.env.GRAPE_CLI_BIN || 'grape'
+  const which = spawnSync(bin, ['--version'], { encoding: 'utf8', timeout: 10_000 })
+  checks.push([`grape CLI（${bin}）`, which.status === 0 ? `ok（${String(which.stdout).trim()}）` : 'FAIL（pip install git+https://gitcode.com/grape-dev/grape-cli.git）'])
+  const baseUrl = process.env.GRAPE_BASE_URL
+  checks.push(['GRAPE_BASE_URL', baseUrl || '未设置（FAIL）：export GRAPE_BASE_URL=https://www.grapedev.cn'])
+  checks.push(['GRAPE_API_TOKEN', process.env.GRAPE_API_TOKEN ? 'ok（已设置，不回显）' : '未设置（FAIL）：在 Grape WebUI 生成用户级 API Key'])
+  const cfgText = existsSync(p.config) ? readFileSync(p.config, 'utf8') : ''
+  checks.push(['opencode mcp.grape 条目', /"grape"\s*:\s*\{/.test(cfgText) ? 'ok' : '未安装（node setup.mjs install --target opencode）'])
+  checks.push(['opencode skill 副本', existsSync(join(p.skillsDir, 'grape-remote', 'SKILL.md')) ? 'ok' : '未安装'])
+  if (probe && baseUrl) {
+    const ok = spawnSync(process.execPath, ['-e', `fetch(process.argv[1]+'/static/openapi.json').then(r=>console.log('contract',r.status)).catch(()=>console.log('contract unreachable'))`, baseUrl], { encoding: 'utf8', timeout: 20_000 })
+    checks.push(['契约连通性', String(ok.stdout).trim() || '探测失败'])
+  }
+  for (const [k, v] of checks) console.log(`  ${String(v).startsWith('ok') ? '[ok]' : '[!!]'} ${k}: ${v}`)
+}
+
+/* ---------- main ---------- */
+
+if (cmd === 'install') {
+  if (target !== 'opencode') {
+    console.error(`MVP 仅支持 --target opencode（${target} 未支持；hermes 走 skill 手动复制，见 README）`)
+    process.exit(1)
+  }
+  const scriptAbs = resolve(String(arg('script', DEFAULT_SCRIPT)))
+  installOpencode(scriptAbs)
+  copySkill()
+  console.log('\n完成。环境变量（用户侧一次性）：')
+  console.log('  export GRAPE_BASE_URL=https://www.grapedev.cn')
+  console.log('  export GRAPE_API_TOKEN=grape_xxx   # WebUI 生成')
+  console.log('重启 opencode 会话后生效；用 node setup.mjs doctor 验证。')
+} else if (cmd === 'uninstall') {
+  const p = opencodePaths()
+  const cfgPath = existsSync(p.config) ? p.config : p.configAlt
+  if (existsSync(cfgPath)) {
+    const text = readFileSync(cfgPath, 'utf8')
+    const removed = removeGrapeEntry(text)
+    if (removed) {
+      const backup = `${cfgPath}.bak-grapemcp-${new Date().toISOString().replace(/[-:T]/g, '').slice(0, 12)}`
+      writeFileSync(backup, text)
+      writeFileSync(cfgPath, removed)
+      console.log(`已移除 mcp.grape 条目（备份: ${backup}）`)
+    } else {
+      console.log('未发现 grape 条目，跳过')
+    }
+  }
+  uninstallSkill()
+} else if (cmd === 'doctor') {
+  doctor(!!arg('probe'))
+} else {
+  console.log('用法: node setup.mjs install|uninstall|doctor [--target opencode] [--probe]')
+}

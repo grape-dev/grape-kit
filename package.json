@@ -1,0 +1,36 @@
+{
+  "name": "grape-mcp",
+  "version": "0.1.0",
+  "description": "Grape DevOps pipeline tools for headless coding agents (opencode/hermes etc.) — contract-driven thin shell over grape CLI",
+  "type": "module",
+  "main": "src/server.mjs",
+  "bin": {
+    "grape-mcp": "./grape-mcp.mjs",
+    "grape-mcp-setup": "./setup.mjs"
+  },
+  "files": [
+    "src",
+    "skills",
+    "grape-mcp.mjs",
+    "setup.mjs",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "smoke": "node scripts/smoke.mjs"
+  },
+  "keywords": [
+    "grape",
+    "mcp",
+    "devops",
+    "agent",
+    "opencode"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0"
+  }
+}
