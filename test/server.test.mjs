@@ -15,7 +15,7 @@ async function pair(deps) {
 test('initialize 返回 instructions（零调用自举）', async () => {
   const client = await pair()
   const info = client.getServerVersion()
-  assert.equal(info.name, 'grape-mcp')
+  assert.equal(info.name, 'grape-kit')
   assert.match(INSTRUCTIONS, /只触发、只观察/)
   await client.close()
 })

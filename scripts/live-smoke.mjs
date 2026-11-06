@@ -8,7 +8,7 @@ import { spawn } from 'node:child_process'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-const SERVER = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'grape-mcp.mjs')
+const SERVER = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'grape-kit-mcp.mjs')
 const proc = spawn(process.execPath, [SERVER], { env: process.env })
 let buf = ''
 const pending = new Map()

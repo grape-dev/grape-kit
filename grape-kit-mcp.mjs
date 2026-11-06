@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/** stdio 入口：node grape-mcp.mjs */
+/** stdio 入口：node grape-kit-mcp.mjs */
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { createServer } from './src/server.mjs'
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * 冒烟：以真实 stdio 方式拉起 grape-mcp.mjs，走完整 JSON-RPC 往返。
+ * 冒烟：以真实 stdio 方式拉起 grape-kit-mcp.mjs，走完整 JSON-RPC 往返。
  * 验收：initialize 带 instructions → tools/list 13 个 → tools/call 返回 Markdown。
  * 运行：GRAPE_CLI_BIN 指向 fake grape（默认），或指向真实 grape CLI + 真实服务端。
  */
@@ -11,10 +11,10 @@ import { join, dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
-const SERVER = resolve(HERE, '..', 'grape-mcp.mjs')
+const SERVER = resolve(HERE, '..', 'grape-kit-mcp.mjs')
 const FAKE = join(HERE, 'fake-grape.mjs')
 
-const dir = mkdtempSync(join(tmpdir(), 'grape-mcp-smoke-'))
+const dir = mkdtempSync(join(tmpdir(), 'grape-kit-smoke-'))
 const fakeBin = join(dir, 'fake-grape')
 writeFileSync(fakeBin, `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} ${JSON.stringify(FAKE)} "$@"\n`)
 chmodSync(fakeBin, 0o755)

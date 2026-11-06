@@ -4,11 +4,11 @@
  *
  * 设计对齐 devkit v2 installer 模式（install/doctor/uninstall 生命周期 + receipt 所有权）：
  * - opencode：mcp.grape 条目做「文本外科手术」插入 opencode.jsonc（保注释、先备份、幂等）；
- *   native skill 副本进 ~/.config/opencode/skills/，配 .grape-mcp-native.json receipt；
+ *   native skill 副本进 ~/.config/opencode/skills/，配 .grape-kit-native.json receipt；
  * - 凭据不落配置文件：GRAPE_BASE_URL / GRAPE_API_TOKEN 由用户环境提供（写入配置会泄漏 token）。
  *
  * 用法：
- *   node setup.mjs install --target opencode [--script /abs/grape-mcp.mjs]
+ *   node setup.mjs install --target opencode [--script /abs/grape-kit-mcp.mjs]
  *   node setup.mjs uninstall --target opencode
  *   node setup.mjs doctor [--probe]
  */
@@ -19,8 +19,8 @@ import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
-const DEFAULT_SCRIPT = resolve(HERE, 'grape-mcp.mjs')
-const RECEIPT = '.grape-mcp-native.json'
+const DEFAULT_SCRIPT = resolve(HERE, 'grape-kit-mcp.mjs')
+const RECEIPT = '.grape-kit-native.json'
 
 const arg = (name, def = undefined) => {
   const i = process.argv.indexOf(`--${name}`)
@@ -165,7 +165,7 @@ function copySkill() {
     if (statSync(join(src, f)).isFile()) writeFileSync(join(dst, f), readFileSync(join(src, f)))
   }
   writeFileSync(join(p.skillsDir, RECEIPT), JSON.stringify({
-    installedBy: 'grape-mcp-setup',
+    installedBy: 'grape-kit',
     version: JSON.parse(readFileSync(join(HERE, 'package.json'), 'utf8')).version,
     skills: ['grape-remote'],
     placedAt: new Date().toISOString(),

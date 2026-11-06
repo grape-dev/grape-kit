@@ -5,10 +5,10 @@ import { mkdtempSync, readFileSync, writeFileSync, existsSync, rmSync, mkdirSync
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-const SETUP = new URL('../setup.mjs', import.meta.url).pathname
+const SETUP = new URL('../grape-kit.mjs', import.meta.url).pathname
 
 function home() {
-  return mkdtempSync(join(tmpdir(), 'grape-mcp-home-'))
+  return mkdtempSync(join(tmpdir(), 'grape-kit-home-'))
 }
 
 function run(args, h) {

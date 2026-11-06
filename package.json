@@ -1,18 +1,18 @@
 {
-  "name": "grape-mcp",
+  "name": "@grape-dev/grape-kit",
   "version": "0.1.0",
   "description": "Grape DevOps pipeline tools for headless coding agents (opencode/hermes etc.) — contract-driven thin shell over grape CLI",
   "type": "module",
   "main": "src/server.mjs",
   "bin": {
-    "grape-mcp": "./grape-mcp.mjs",
-    "grape-mcp-setup": "./setup.mjs"
+    "grape-kit-mcp": "./grape-kit-mcp.mjs",
+    "grape-kit": "./grape-kit.mjs"
   },
   "files": [
     "src",
     "skills",
-    "grape-mcp.mjs",
-    "setup.mjs",
+    "grape-kit-mcp.mjs",
+    "grape-kit.mjs",
     "README.md"
   ],
   "engines": {
@@ -30,6 +30,14 @@
     "opencode"
   ],
   "license": "MIT",
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://gitcode.com/grape-dev/grape-kit.git"
+  },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.0"
   }

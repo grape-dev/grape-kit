@@ -1,11 +1,11 @@
-# grape-mcp
+# @grape-dev/grape-kit
 
 Grape DevOps 流水线工具的无 UI agent 插件（MCP stdio 薄壳），面向 opencode / hermes 等无 Web UI 的编码 agent。
 厚能力全在 [grape-cli](https://gitcode.com/grape-dev/grape-cli)（契约驱动命令树 = 官方 SDK），壳只做三件事：**发现、转发、渲染**。
 
 ```
 agent 宿主（opencode: MCP stdio / hermes: skill 引导 bash）
-  → grape-mcp（契约精选 13 工具 · Markdown 渲染 · initialize instructions 自举）
+  → grape-kit（契约精选 13 工具 · Markdown 渲染 · initialize instructions 自举）
     → spawn grape CLI（token 走 env，不进 argv）
       → grape 服务端（流水线 / events / takeover-context）
 ```
@@ -34,10 +34,17 @@ pip install git+https://gitcode.com/grape-dev/grape-cli.git
 export GRAPE_BASE_URL=https://www.grapedev.cn
 export GRAPE_API_TOKEN=grape_xxx      # Grape WebUI → 设置 → API Key
 
-# 装配（写 opencode.jsonc mcp.grape 条目 + skill 副本 + receipt，带备份幂等）
-node setup.mjs install --target opencode
-node setup.mjs doctor --probe         # node / grape CLI / 契约连通性逐项检查
+# 装配（npm 发布后；写 opencode.json mcp.grape 条目 + skill 副本 + receipt，带备份幂等）
+npx -y @grape-dev/grape-kit install --target opencode
+npx -y @grape-dev/grape-kit doctor --probe   # node / grape CLI / 契约连通性逐项检查
 # 重启 opencode 会话后生效
+```
+
+从源码运行（开发模式）：
+
+```bash
+node grape-kit.mjs install --target opencode
+node grape-kit.mjs doctor --probe
 ```
 
 hermes（无 MCP client）：复制 `skills/grape-remote/` 到其 skill 目录，agent 以 bash 调 `grape` CLI 即可。
@@ -46,15 +53,21 @@ hermes（无 MCP client）：复制 `skills/grape-remote/` 到其 skill 目录�
 
 ```bash
 npm install
-npm test        # 22 个单测（fake-grape 替身，不依赖真实服务端）
+npm test        # 23 个单测（fake-grape 替身，不依赖真实服务端）
 npm run smoke   # 真实 stdio JSON-RPC 往返：initialize → tools/list → tools/call
 ```
 
-对真实服务端冒烟：
+对真实服务端冒烟（只读）：
 
 ```bash
 export GRAPE_BASE_URL=https://www.grapedev.cn GRAPE_API_TOKEN=grape_xxx
-node scripts/smoke.mjs   # 把 FAKE 换成真实 grape CLI 后同流程验证
+node scripts/live-smoke.mjs
+```
+
+## 发布
+
+```bash
+npm publish --access public    # 需要 @grape-dev org 成员身份；publishConfig 已固定 npmjs + public
 ```
 
 ## 设计依据

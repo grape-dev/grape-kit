@@ -16,7 +16,7 @@ function fakeBin(dir) {
 }
 
 test('runGrape 解析 --json-out 单行 JSON', async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'grape-mcp-'))
+  const dir = mkdtempSync(join(tmpdir(), 'grape-kit-'))
   try {
     const { json } = await runGrape(['issues', 'list', '--owner', 'acme', '--repo', 'demo'], {
       bin: fakeBin(dir), env: env(),
@@ -27,7 +27,7 @@ test('runGrape 解析 --json-out 单行 JSON', async () => {
 })
 
 test('runGrape 透传非零退出码与 stderr 末行', async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'grape-mcp-'))
+  const dir = mkdtempSync(join(tmpdir(), 'grape-kit-'))
   try {
     const bin = fakeBin(dir)
     // 注：POSIX 退出码会被截断为低 8 位（401 & 0xFF = 145，grape-cli 文档已知行为），
@@ -41,13 +41,13 @@ test('runGrape 透传非零退出码与 stderr 末行', async () => {
 
 test('runGrape ENOENT 给出安装指引', async () => {
   await assert.rejects(
-    runGrape(['issues', 'list'], { bin: '/nonexistent/grape-mcp-missing-bin', env: env() }),
+    runGrape(['issues', 'list'], { bin: '/nonexistent/grape-kit-missing-bin', env: env() }),
     (err) => err.code === 127 && /pip install/.test(err.message),
   )
 })
 
 test('runGrape 超时 kill 并报 124', async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'grape-mcp-'))
+  const dir = mkdtempSync(join(tmpdir(), 'grape-kit-'))
   try {
     const slow = join(dir, 'slow')
     writeFileSync(slow, '#!/bin/sh\nsleep 5\n')
@@ -60,7 +60,7 @@ test('runGrape 超时 kill 并报 124', async () => {
 })
 
 test('waitTask 轮询到终态返回', async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'grape-mcp-'))
+  const dir = mkdtempSync(join(tmpdir(), 'grape-kit-'))
   try {
     const bin = fakeBin(dir)
     const seq = 8000 + Math.floor(Math.random() * 1000) // 随机 seq 避免计数器文件跨次运行污染
@@ -72,7 +72,7 @@ test('waitTask 轮询到终态返回', async () => {
 })
 
 test('waitTask 超时标记 timedOut', async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'grape-mcp-'))
+  const dir = mkdtempSync(join(tmpdir(), 'grape-kit-'))
   try {
     const bin = fakeBin(dir)
     const r = await waitTask(86, { timeoutSec: 0.3, intervalSec: 0.1, opts: { bin, env: { ...env(), GRAPE_FAKE_TASK_STATUS: 'running' } } })

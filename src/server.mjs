@@ -1,5 +1,5 @@
 /**
- * grape-mcp MCP server（stdio）—— 无 UI agent 插件壳。
+ * grape-kit MCP server（stdio）—— 无 UI agent 插件壳。
  *
  * 职责只有三件：发现（tools/list）、转发（tools/call → grape CLI）、渲染（Markdown）。
  * 厚能力全在 grape CLI（契约/认证/错误包装）；壳零 token 处理（env 直通）。
@@ -31,7 +31,7 @@ export function createServer(deps = {}) {
   const _waitTask = deps.waitTask || waitTask
 
   const server = new Server(
-    { name: 'grape-mcp', version: '0.1.0' },
+    { name: 'grape-kit', version: '0.1.0' },
     { capabilities: { tools: { listChanged: false } }, instructions: INSTRUCTIONS },
   )
 
