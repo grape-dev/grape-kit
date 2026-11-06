@@ -195,9 +195,9 @@ function doctor(probe) {
   const which = spawnSync(bin, ['--version'], { encoding: 'utf8', timeout: 10_000 })
   checks.push([`grape CLI（${bin}）`, which.status === 0 ? `ok（${String(which.stdout).trim()}）` : 'FAIL（pip install git+https://gitcode.com/grape-dev/grape-cli.git）'])
   const baseUrl = process.env.GRAPE_BASE_URL
-  checks.push(['GRAPE_BASE_URL', baseUrl || '未设置（FAIL）：export GRAPE_BASE_URL=https://www.grapedev.cn'])
+  checks.push(['GRAPE_BASE_URL', baseUrl ? `ok（${baseUrl}）` : '未设置（FAIL）：export GRAPE_BASE_URL=https://www.grapedev.cn'])
   checks.push(['GRAPE_API_TOKEN', process.env.GRAPE_API_TOKEN ? 'ok（已设置，不回显）' : '未设置（FAIL）：在 Grape WebUI 生成用户级 API Key'])
-  const cfgText = existsSync(p.config) ? readFileSync(p.config, 'utf8') : ''
+  const cfgText = [p.config, p.configAlt].filter(existsSync).map((f) => readFileSync(f, 'utf8')).join('\n')
   checks.push(['opencode mcp.grape 条目', /"grape"\s*:\s*\{/.test(cfgText) ? 'ok' : '未安装（node setup.mjs install --target opencode）'])
   checks.push(['opencode skill 副本', existsSync(join(p.skillsDir, 'grape-remote', 'SKILL.md')) ? 'ok' : '未安装'])
   if (probe && baseUrl) {
