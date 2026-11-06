@@ -7,6 +7,8 @@ export function asArray(data) {
   if (Array.isArray(data)) return data
   if (data && Array.isArray(data.items)) return data.items
   if (data && Array.isArray(data.issues)) return data.issues
+  if (data && Array.isArray(data.scenes)) return data.scenes
+  if (data && Array.isArray(data.results)) return data.results
   if (data && Array.isArray(data.list)) return data.list
   return null
 }

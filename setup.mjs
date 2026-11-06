@@ -46,9 +46,9 @@ function findMcpBlockStart(text) {
   return m.index + m[0].length
 }
 
-/** 在 mcp 块的闭合大括号前定位（跳过字符串字面量内的花括号） */
+/** 在 mcp 块内定位某条目闭合大括号（from 指向条目自身的 '{'；跳过字符串字面量内的花括号） */
 function findBlockEnd(text, from) {
-  let depth = 1
+  let depth = 0
   let inStr = false
   let esc = false
   for (let i = from; i < text.length; i++) {
@@ -70,14 +70,17 @@ function findBlockEnd(text, from) {
 }
 
 function buildEntry(scriptAbs) {
-  return JSON.stringify({
+  // 只生成条目体（不含外层大括号）：由 writeEntry 负责插入到 mcp 块内
+  const inner = JSON.stringify({
     grape: {
       type: 'local',
       command: [process.execPath, scriptAbs],
       enabled: true,
       timeout: 600000,
     },
-  }, null, 6).replace(/\n/g, '\n    ')
+  }, null, 2)
+  return inner.replace(/^\{/, '').replace(/\}\s*$/, '').trim()
+    .split('\n').map((l) => '    ' + l).join('\n')
 }
 
 function installOpencode(scriptAbs) {
@@ -93,6 +96,24 @@ function installOpencode(scriptAbs) {
     const removed = removeGrapeEntry(text)
     if (!removed) { console.error('grape 条目已存在但移除失败，请手动检查'); process.exit(1) }
     return writeEntry(removed, cfgPath, scriptAbs)
+  }
+  if (findMcpBlockStart(text) < 0) {
+    // 无 mcp 块：纯 JSON 文件可安全整体重写；解析失败（含注释的 jsonc）才报错
+    try {
+      const cfg = JSON.parse(text)
+      cfg.mcp = {
+        ...cfg.mcp,
+        grape: { type: 'local', command: [process.execPath, scriptAbs], enabled: true, timeout: 600000 },
+      }
+      const backup = `${cfgPath}.bak-grapemcp-${new Date().toISOString().replace(/[-:T]/g, '').slice(0, 12)}`
+      writeFileSync(backup, text)
+      writeFileSync(cfgPath, JSON.stringify(cfg, null, 2) + '\n')
+      console.log(`已写入 ${cfgPath}（新建 mcp 块，备份: ${backup}）`)
+      return true
+    } catch (e) {
+      console.error(`配置文件无 "mcp" 块且非纯 JSON（${e.message}）；请手动添加，README 有片段`)
+      process.exit(1)
+    }
   }
   return writeEntry(text, cfgPath, scriptAbs)
 }
