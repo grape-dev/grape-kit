@@ -33,11 +33,12 @@ test('trigger 构造 a2a handoff body', () => {
   assert.equal(body.payload.context, '做登录')
 })
 
-test('create_issue body 只含 title/body', () => {
+test('create_issue body 字段为 title/description（服务端契约字段名）', () => {
   const t = findTool('grape_create_issue')
-  const args = t.buildArgs({ owner: 'a', repo: 'b', title: 'T', body: '正文' })
+  const args = t.buildArgs({ owner: 'a', repo: 'b', title: 'T', description: '正文' })
   const body = JSON.parse(args[args.indexOf('--json') + 1])
-  assert.deepEqual(Object.keys(body), ['title', 'body'])
+  assert.deepEqual(Object.keys(body), ['title', 'description'])
+  assert.ok(!('body' in body), '不得使用 body 字段（服务端 400）')
 })
 
 test('wait_task 声明 waitBased', () => {

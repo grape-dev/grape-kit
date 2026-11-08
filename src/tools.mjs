@@ -141,20 +141,20 @@ export const TOOLS = [
     name: 'grape_create_issue',
     description:
       '在托管仓库创建 issue（可选同时触发流水线——由服务端场景配置决定）。' +
-      'body 支持 title 与 markdown 正文（additionalProperties 透传）。',
+      'body 支持 title 与 markdown 正文 description（字段名以服务端契约为准，实测为 description 而非 body）。',
     schema: {
       type: 'object',
       properties: {
         owner: str('owner'),
         repo: str('repo'),
         title: str('issue 标题'),
-        body: str('issue 正文（markdown，可选）'),
+        description: str('issue 正文（markdown，可选）'),
       },
       required: ['owner', 'repo', 'title'],
     },
     buildArgs(a) {
       const body = { title: a.title }
-      if (a.body) body.body = a.body
+      if (a.description) body.description = a.description
       return ['issues', 'create', '--owner', a.owner, '--repo', a.repo, '--json', JSON.stringify(body)]
     },
     render(json) {
