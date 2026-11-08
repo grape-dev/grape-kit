@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>grape-kit 多 Agent 测试矩阵报告</title>
+<style>
+  :root{--bg:#f6f8fb;--card:#fff;--ink:#0f172a;--sub:#475569;--line:#e2e8f0;--blue:#2563eb;
+    --green:#059669;--green-soft:#ecfdf5;--red:#dc2626;--red-soft:#fef2f2;--amber:#d97706;--amber-soft:#fffbeb;
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.78 -apple-system,"PingFang SC","Microsoft YaHei",sans-serif}
+  .wrap{max-width:1080px;margin:0 auto;padding:0 22px 90px}
+  .hero{padding:48px 0 6px}
+  .kicker{font:700 12px/1 var(--mono);color:var(--blue);letter-spacing:.18em}
+  h1{font-size:29px;margin:10px 0 8px}
+  h2{font-size:21px;margin:44px 0 14px}
+  h3{font-size:16px;margin:24px 0 8px}
+  .subtitle{color:var(--sub);max-width:860px}
+  .meta{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
+  .chip{font-size:12px;color:var(--sub);border:1px solid var(--line);background:#fff;border-radius:999px;padding:3px 12px}
+  .chip b{color:var(--ink)}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px 22px;margin:14px 0}
+  pre{background:#0f172a;color:#e2e8f0;border-radius:10px;padding:12px 16px;font:12.5px/1.6 var(--mono);overflow-x:auto}
+  code{font:12.5px/1.6 var(--mono);background:#f1f5f9;border:1px solid var(--line);border-radius:5px;padding:1px 6px}
+  pre code{background:none;border:none;padding:0;color:inherit}
+  .tw{overflow-x:auto}
+  table{width:100%;border-collapse:collapse;font-size:13.5px;min-width:640px}
+  th{background:#f1f5f9;text-align:left;padding:9px 13px;border-bottom:2px solid var(--line);font-weight:600;white-space:nowrap}
+  td{padding:9px 13px;border-bottom:1px solid var(--line);vertical-align:top}
+  tr:nth-child(even) td{background:#fafbfd}
+  .pill{display:inline-block;font-size:11.5px;font-weight:600;border-radius:999px;padding:2px 10px;white-space:nowrap}
+  .pill.g{background:var(--green-soft);color:var(--green)}
+  .pill.r{background:var(--red-soft);color:var(--red)}
+  .pill.a{background:var(--amber-soft);color:var(--amber)}
+  .pill.n{background:#f1f5f9;color:#64748b}
+  .verdict{border-left:4px solid var(--blue);background:var(--blue-soft);border-radius:0 12px 12px 0;padding:13px 18px;margin:16px 0;font-size:14px}
+  .verdict.red{border-left-color:var(--red);background:var(--red-soft)}
+  .verdict.green{border-left-color:var(--green);background:var(--green-soft)}
+  footer{margin-top:60px;border-top:1px solid var(--line);padding-top:16px;color:#64748b;font-size:12.5px;line-height:1.8}
+  .secno{font:700 12px/1 var(--mono);color:var(--blue);letter-spacing:.14em}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<div class="hero">
+  <div class="kicker">MULTI-AGENT TEST MATRIX</div>
+  <h1>grape-kit 多 Agent 测试矩阵报告</h1>
+  <p class="subtitle">对标 huaweicloud-devkit 的多 agent 测试方法（per-agent 安装装配 → MCP roundtrip → 真实 agent + LLM E2E），在测试床 ecs-hd-devkit-eng-0002 上对 grape-kit@0.1.2 完成主流 agent 实测。全部真实数据调用走 grapedev.cn 生产服务端。</p>
+  <div class="meta">
+    <span class="chip">日期 <b>2026-11-08</b></span>
+    <span class="chip">测试床 <b>eng-0002（ARM 4C8G · Node 22.23.4 · grape CLI 0.3.3）</b></span>
+    <span class="chip">被测件 <b>@grape-dev/grape-kit@0.1.2（npm 公网包）</b></span>
+    <span class="chip">结论 <b>3/3 可测 agent 全通过 · 5 项真实兼容性发现</b></span>
+  </div>
+</div>
+
+<section>
+  <div class="secno">01</div>
+  <h2>覆盖矩阵</h2>
+  <div class="tw"><table>
+    <tr><th>Agent</th><th>版本</th><th>接入形态</th><th>装配</th><th>MCP roundtrip</th><th>真实任务 E2E</th><th>结论</th></tr>
+    <tr><td><b>opencode</b></td><td>1.19.5</td><td>MCP stdio + skill 目录</td><td><code>grape-kit.mjs install --target opencode</code></td><td><span class="pill g">通过</span></td><td><span class="pill g">通过</span></td><td>✅ 首选宿主，体验最完整</td></tr>
+    <tr><td><b>hermes</b></td><td>—</td><td>skill 目录 + CLI 通道（无 MCP client）</td><td>复制 <code>skills/grape-remote</code> + 文件通道凭据</td><td><span class="pill n">N/A（skill+CLI）</span></td><td><span class="pill g">通过</span></td><td>✅ 需注意环境清洗（发现 F1）</td></tr>
+    <tr><td><b>codex</b></td><td>0.90.0（降级）</td><td>MCP stdio + config.toml</td><td>手写 config.toml（opengw provider）</td><td><span class="pill g">通过</span></td><td><span class="pill g">通过</span></td><td>✅ 须钉住版本（发现 F2/F3）</td></tr>
+    <tr><td>claude code</td><td>2.1.319</td><td>MCP + Anthropic 协议</td><td>—</td><td><span class="pill n">未测</span></td><td><span class="pill r">环境受限</span></td><td>⛔ 测试床无 Anthropic 协议端点（opengw /v1/messages 301）</td></tr>
+    <tr><td>dsh</td><td>—</td><td>cordis 原生插件</td><td>—</td><td><span class="pill n">—</span></td><td><span class="pill n">—</span></td><td>➡ 走 grape-dsh 独立插件体系（33 工具 + UI 层），不重复建设</td></tr>
+    <tr><td>codearts / hwcloud / workbuddy / officeace / openclaw / atomcode</td><td>—</td><td>devkit integrations 模式可复用</td><td>—</td><td><span class="pill n">—</span></td><td><span class="pill n">—</span></td><td>➡ 二期按 devkit 骨架铺（manifest/hooks/目录三型）</td></tr>
+  </table></div>
+</section>
+
+<section>
+  <div class="secno">02</div>
+  <h2>实测详情与复现命令</h2>
+
+  <h3>2.1 opencode（MCP stdio 全链路）</h3>
+  <div class="card"><pre><code>node grape-kit.mjs install --target opencode   # 写 mcp.grape + skill 副本 + receipt
+export GRAPE_BASE_URL=https://www.grapedev.cn GRAPE_API_TOKEN=grape_xxx
+opencode run "调用 grape_list_my_issues 查询我的 processing issue"</code></pre>
+  <p style="margin:8px 0 0"><b>结果</b>：agent 自主发现并调用 <code>grape_grape_list_my_issues</code>，返回真实数据并正确作答（34 条 processing / 第一条 #1311）。initialize instructions 自举、13 工具发现、Markdown 渲染全链路无人工干预。</p></div>
+
+  <h3>2.2 hermes（skill + CLI 通道）</h3>
+  <div class="card"><pre><code>cp skills/grape-remote/SKILL.md ~/.hermes/skills/grape-remote/
+# 凭据走文件通道（见发现 F1）：
+printf '{"token":"grape_xxx","base_url":"https://www.grapedev.cn"}' > ~/.grape/config.json   # 0600
+hermes -z "执行 grape issues mine --status processing --json-out，统计条数并给出第一条" --yolo</code></pre>
+  <p style="margin:8px 0 0"><b>结果</b>：agent 按 skill 纪律调用 grape CLI，正确解析 <code>--json-out</code> 输出并作答（32 条 processing / 第一条 #3）。hermes 对异常的自适应好——首次失败后自行核查了 env 与 <code>~/.grape/config.json</code> 并给出精确归因。</p></div>
+
+  <h3>2.3 codex（MCP stdio，须钉版本）</h3>
+  <div class="card"><pre><code>npm install -g @openai/codex@0.90.0    # 须降级，见发现 F2
+# ~/.codex/config.toml：
+#   model="glm-5.3"  model_provider="opengw"
+#   [model_providers.opengw] base_url=opengw env_key=OPENGW_API_KEY wire_api="chat"
+#   [mcp_servers.grape] command=node args=[grape-kit-mcp.mjs]
+codex exec --skip-git-repo-check "调用 MCP 工具 grape_list_my_issues（status=processing）..."</code></pre>
+  <p style="margin:8px 0 0"><b>结果</b>：MCP 工具被 codex 发现并调用，真实数据作答（32 条 / 第一条 #3）。</p></div>
+</section>
+
+<section>
+  <div class="secno">03</div>
+  <h2>关键发现（全部实测复现）</h2>
+  <div class="tw"><table>
+    <tr><th>#</th><th>发现</th><th>影响</th><th>对策</th></tr>
+    <tr><td><b>F1</b></td><td><b>hermes 清洗工具 shell 的 GRAPE_* 环境变量</b>——env 注入的 token 到不了 agent 的命令执行层（与 grape-dsh「DSH-ENV-SCRUB」同源问题，grape-cli commit 1679c6f 为此加了 GRAPE_AUTH_FILE）</td><td><span class="pill a">中</span></td><td>端侧凭据走文件通道：<code>~/.grape/config.json</code>（0600）或 GRAPE_AUTH_FILE；grape-kit 文档与 skill 已写明</td></tr>
+    <tr><td><b>F2</b></td><td><b>codex 已移除 wire_api="chat"</b>（discussion #7782；0.104/0.155/0.167 均拒载，0.90.0 仍支持）——glm 类 OpenAI 兼容网关只有 chat 协议</td><td><span class="pill r">高</span></td><td>钉住 <code>@openai/codex@0.90.0</code>；待网关支持 responses API 后升级</td></tr>
+    <tr><td><b>F3</b></td><td><b>codex responses 模式注入 web_search 内建工具</b>（fallback 模型元数据默认开启，<code>tools.web_search=false</code> 与 <code>-c</code> 覆盖均无效），glm 网关校验 tools[].type 白名单（function/mcp/knowledge_search/namespace）直接拒绝</td><td><span class="pill r">高</span></td><td>短期同 F2 钉版本走 chat；建议 opengw/new-api 侧放宽 web_search 类型透传或支持模型目录关闭注入</td></tr>
+    <tr><td><b>F4</b></td><td><b>npm granular token「org 权限 ≠ 包权限」</b>：Organizations 段授权了 org 但 Packages and scopes 为空时，发布报 <b>404</b>（非 403），且 granular token 不可 unpublish（403）</td><td><span class="pill a">中</span></td><td>发包 token 必须同时配置 Packages 段（Read and write）；CI 建议用 Classic Automation token</td></tr>
+    <tr><td><b>F5</b></td><td><b>MCP serverInfo 版本硬编码</b>与包版本漂移（0.1.0 包发出去后 initialize 仍报 0.1.0.x 旧值）</td><td><span class="pill n">低</span></td><td>已修：版本从 package.json 派生（v0.1.2）</td></tr>
+  </table></div>
+  <div class="verdict green">三项可测 agent 的 E2E 全部走通，且每一条失败路径都收敛成了可复现的兼容性结论——这正是 devkit 式多 agent 测试的价值：插件壳代码只占工作量一半，另一半是这些「平台 × 引擎」组合边界的实证。</div>
+</section>
+
+<section>
+  <div class="secno">04</div>
+  <h2>下一步</h2>
+  <div class="card"><ul style="margin:4px 0">
+    <li><b>dsh</b>：不重复建设——grape-dsh（cordis 原生 33 工具 + React UI）继续承担 dsh 宿主，工具语义与 grape-kit 对齐同一契约面</li>
+    <li><b>claude code</b>：需要 Anthropic 协议端点（opengw 目前只代理 OpenAI 协议）——若网关后续支持 /v1/messages 即可点亮</li>
+    <li><b>codearts / hwcloud / workbuddy / atomcode / openclaw</b>：按 devkit v2 integrations 三型（manifest / hooks / 目录）铺装配，边际成本 ≈ 0.5–1 天/个</li>
+    <li><b>回归资产</b>：本报告复现命令 + grape-kit 仓 24 个单测 + smoke/live-smoke 脚本，构成版本发布的固定回归门</li>
+  </ul></div>
+</section>
+
+<footer>
+  测试床：ecs-hd-devkit-eng-0002（北京四 · ARM 4C8G · Node 22.23.4 · grape CLI 0.3.3）。被测件：@grape-dev/grape-kit@0.1.2（npm 公网包，非本地源码）。真实数据调用全部走 grapedev.cn 生产，只读操作。<br>
+  关联产物：grape-plugin-analysis 设计文档（同桶 plans/20261102）· gitcode qq_44826240/grape-kit（私仓，待转 grape-dev）· npm @grape-dev/grape-kit
+</footer>
+
+</div>
+</body>
+</html>
