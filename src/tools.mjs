@@ -304,7 +304,7 @@ export const TOOLS = [
       properties: { owner: str('owner'), repo_name: str('repo 名') },
       required: ['owner', 'repo_name'],
     },
-    buildArgs(a) { return ['repos', 'project-info', '--owner', a.owner, '--repo_name', a.repo_name] },
+    buildArgs(a) { return ['repos', 'project', 'info', '--owner', a.owner, '--repo_name', a.repo_name] },
     render: R.renderGeneric,
   },
   {
@@ -383,8 +383,19 @@ export const TOOLS = [
   {
     name: 'grape_list_knowledge',
     description: '列出知识库条目（标题/摘要），实现前检索上下文用。',
-    schema: { type: 'object', properties: {} },
-    buildArgs() { return ['knowledge', 'list'] },
+    schema: {
+      type: 'object',
+      properties: {
+        repo: str('限定仓库（owner/repo，服务端要求必须指定 repo）'),
+        q: str('关键字过滤（可选）'),
+      },
+      required: ['repo'],
+    },
+    buildArgs(a) {
+      const args = ['knowledge', 'list', '--repo', String(a.repo)]
+      if (a.q) args.push('--q', a.q)
+      return args
+    },
     render(data) {
       return R.mdTable(R.asArray(data) || [], [
         { h: 'ID', v: (r) => r.knowledge_id ?? r.id ?? '' },

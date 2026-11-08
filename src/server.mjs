@@ -49,9 +49,10 @@ export function createServer(deps = {}) {
     }
     try {
       let json
-      if (tool.waitBased) {
-        const r = await tool.run(args, { waitTask: _waitTask })
-        json = { ...r.json, timedOut: !!r.timedOut, polls: r.polls }
+      if (tool.run) {
+        // 多步工具（等待/级联解析/凭据生成）：自持执行逻辑
+        const r = await tool.run(args, { runGrape: _runGrape, waitTask: _waitTask })
+        json = tool.waitBased ? { ...r.json, timedOut: !!r.timedOut, polls: r.polls } : r.json
       } else {
         const r = await _runGrape(tool.buildArgs(args))
         json = r.json
