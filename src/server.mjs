@@ -34,7 +34,7 @@ export function createServer(deps = {}) {
   const _waitTask = deps.waitTask || waitTask
 
   const server = new Server(
-    { name: 'grape-kit', version: PKG.version },
+    { name: "grape-kit", version: PKG.version },
     { capabilities: { tools: { listChanged: false } }, instructions: INSTRUCTIONS },
   )
 
