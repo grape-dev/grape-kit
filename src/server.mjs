@@ -4,6 +4,7 @@
  * 职责只有三件：发现（tools/list）、转发（tools/call → grape CLI）、渲染（Markdown）。
  * 厚能力全在 grape CLI（契约/认证/错误包装）；壳零 token 处理（env 直通）。
  */
+import { readFileSync } from 'node:fs'
 import { Server } from '@modelcontextprotocol/sdk/server/index.js'
 import {
   ListToolsRequestSchema,
@@ -11,6 +12,8 @@ import {
 } from '@modelcontextprotocol/sdk/types.js'
 import { runGrape, waitTask, GrapeCliError } from './cli.mjs'
 import { toolDefs, findTool } from './tools.mjs'
+
+const PKG = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
 
 export const INSTRUCTIONS = `Grape DevOps 流水线遥控（多 agent：vod→issue→coding→qa→sre）。
 
@@ -31,7 +34,7 @@ export function createServer(deps = {}) {
   const _waitTask = deps.waitTask || waitTask
 
   const server = new Server(
-    { name: 'grape-kit', version: '0.1.0' },
+    { name: 'grape-kit', version: PKG.version },
     { capabilities: { tools: { listChanged: false } }, instructions: INSTRUCTIONS },
   )
 
