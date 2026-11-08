@@ -102,3 +102,19 @@ test('doctor 在干净 HOME 下逐项报告', () => {
   assert.match(r.stdout, /GRAPE_BASE_URL/)
   rmSync(h, { recursive: true, force: true })
 })
+
+test('install 升级「grape 为唯一条目」的配置不产生悬挂逗号', () => {
+  const h = home()
+  const dir = join(h, '.config', 'opencode')
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(join(dir, 'opencode.json'), JSON.stringify({
+    model: 'm',
+    mcp: { grape: { type: 'local', command: ['node', '/old/path.mjs'], enabled: true, timeout: 600000 } },
+  }, null, 2))
+  const r = run(['install', '--target', 'opencode'], h)
+  assert.equal(r.status, 0, r.stderr)
+  const text = readFileSync(join(dir, 'opencode.json'), 'utf8')
+  const cfg = JSON.parse(text) // 旧路径升级后必须仍是合法 JSON（悬挂逗号回归）
+  assert.match(cfg.mcp.grape.command[1], /grape-kit-mcp\.mjs$/)
+  rmSync(h, { recursive: true, force: true })
+})

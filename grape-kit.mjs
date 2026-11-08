@@ -127,8 +127,10 @@ function writeEntry(text, cfgPath, scriptAbs) {
   const backup = `${cfgPath}.bak-grapemcp-${new Date().toISOString().replace(/[-:T]/g, '').slice(0, 12)}`
   writeFileSync(backup, text)
   const inner = buildEntry(scriptAbs)
-  // 插在块首：后续已有条目自带逗号结构，前插 "grape": {...}, 恒合法
-  const next = text.slice(0, start) + '\n    ' + inner + ',' + text.slice(start)
+  // 插入点之后块体为空（只剩空白/逗号直到块闭合）时不带尾逗号，避免悬挂逗号产生非法 JSON
+  const emptyBlock = /^\s*,?\s*\}/.test(text.slice(start))
+  const sep = emptyBlock ? '' : ','
+  const next = text.slice(0, start) + '\n    ' + inner + sep + text.slice(start)
   writeFileSync(cfgPath, next)
   console.log(`已写入 ${cfgPath}（备份: ${backup}）`)
   return true
