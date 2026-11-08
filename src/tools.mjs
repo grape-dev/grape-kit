@@ -304,7 +304,7 @@ export const TOOLS = [
       properties: { owner: str('owner'), repo_name: str('repo 名') },
       required: ['owner', 'repo_name'],
     },
-    buildArgs(a) { return ['repos', 'project', 'info', '--owner', a.owner, '--repo_name', a.repo_name] },
+    buildArgs(a) { return ['repos', 'project', 'info', '--owner', a.owner, '--repo', a.repo_name] },
     render: R.renderGeneric,
   },
   {
@@ -514,15 +514,30 @@ export const TOOLS = [
       properties: { device_name: str('设备名（可选，默认 grape-kit-<主机名>）') },
     },
     async run(a, { runGrape }) {
-      const name = a.device_name || `grape-kit-${hostname()}`
-      const cred = await runGrape([
-        'settings', 'runtime', 'credential', 'create',
-        '--json', JSON.stringify({ name, scope: 'user' }),
-      ])
+      const base = (process.env.GRAPE_BASE_URL || '').replace(/\/$/, '')
+      const baseName = a.device_name || `grape-kit-${hostname()}`
+      // 凭据名全局唯一且 token 只展示一次：重名（400 已存在）自动加时间戳后缀重试一次
+      let cred
+      let name = baseName
+      try {
+        cred = await runGrape([
+          'settings', 'runtime', 'credential', 'create',
+          '--json', JSON.stringify({ name, scope: 'user' }),
+        ])
+      } catch (err) {
+        if (/已存在/.test(err.message || '')) {
+          name = `${baseName}-${new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14)}`
+          cred = await runGrape([
+            'settings', 'runtime', 'credential', 'create',
+            '--json', JSON.stringify({ name, scope: 'user' }),
+          ])
+        } else {
+          throw err
+        }
+      }
       const j = cred.json
       const token = j && (j.token || (j.result && j.result.token))
       if (!token) return { onboard: false, error: 'credential create 未返回 token', raw: j }
-      const base = (process.env.GRAPE_BASE_URL || '').replace(/\/$/, '')
       return {
         onboard: 'ready',
         device: name,
