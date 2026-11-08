@@ -459,7 +459,7 @@ export const TOOLS = [
       required: ['owner', 'repo', 'number'],
     },
     buildArgs(a) {
-      return ['runtime', 'takeover-context', '--repo_key', `gitcode:${a.owner}/${a.repo}`, '--issue_number', String(a.number)]
+      return ['runtime', 'takeover', 'context', '--repo_key', `gitcode:${a.owner}/${a.repo}`, '--issue_number', String(a.number)]
     },
     render(json) {
       if (!json || typeof json !== 'object' || !json.task_id) {
