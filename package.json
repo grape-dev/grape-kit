@@ -1,6 +1,6 @@
 {
   "name": "@grape-dev/grape-kit",
-  "version": "0.2.2",
+  "version": "0.2.4",
   "description": "Grape DevOps pipeline tools for headless coding agents — contract-driven MCP thin shell over grape CLI. Turn any Git project into an AI-driven development workflow, right inside your terminal agent.",
   "type": "module",
   "main": "src/server.mjs",

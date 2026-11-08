@@ -50,9 +50,10 @@ export function createServer(deps = {}) {
     try {
       let json
       if (tool.run) {
-        // 多步工具（等待/级联解析/凭据生成）：自持执行逻辑
+        // 多步工具（等待/级联解析/凭据生成）：自持执行逻辑。
+        // 契约：waitBased 工具返回 {json,...}；其余 run() 工具直接返回结果值。
         const r = await tool.run(args, { runGrape: _runGrape, waitTask: _waitTask })
-        json = tool.waitBased ? { ...r.json, timedOut: !!r.timedOut, polls: r.polls } : r.json
+        json = tool.waitBased ? { ...r.json, timedOut: !!r.timedOut, polls: r.polls } : r
       } else {
         const r = await _runGrape(tool.buildArgs(args))
         json = r.json

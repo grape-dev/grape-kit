@@ -62,3 +62,19 @@ test('未知工具与 CLI 错误都走 isError 文本', async () => {
   assert.match(denied.content[0].text, /session_only|403/)
   await client.close()
 })
+
+test('非 waitBased run() 工具直接返回结果值（undefined 回归）', async () => {
+  const client = await pair({
+    runGrape: async (args) => {
+      if (args[0] === 'issues' && args[1] === 'detail') {
+        return { json: { number: 4, issue_id: 11079, title: 't' } }
+      }
+      // issues cancel（服务端返回空体 → run() 兜底 {ok, issue_id, action}）
+      return { json: null }
+    },
+  })
+  const res = await client.callTool({ name: 'grape_cancel_issue', arguments: { owner: 'a', repo: 'b', number: 4 } })
+  assert.equal(res.isError, undefined)
+  assert.match(res.content[0].text, /issue_id=11079/)
+  await client.close()
+})
