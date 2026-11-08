@@ -1,7 +1,7 @@
 {
   "name": "@grape-dev/grape-kit",
-  "version": "0.1.0",
-  "description": "Grape DevOps pipeline tools for headless coding agents (opencode/hermes etc.) — contract-driven thin shell over grape CLI",
+  "version": "0.1.1",
+  "description": "Grape DevOps pipeline tools for headless coding agents — contract-driven MCP thin shell over grape CLI. Turn any Git project into an AI-driven development workflow, right inside your terminal agent.",
   "type": "module",
   "main": "src/server.mjs",
   "bin": {
@@ -13,6 +13,7 @@
     "skills",
     "grape-kit-mcp.mjs",
     "grape-kit.mjs",
+    "LICENSE",
     "README.md"
   ],
   "engines": {
@@ -24,10 +25,18 @@
   },
   "keywords": [
     "grape",
+    "grape-cli",
+    "grapedev",
     "mcp",
     "devops",
     "agent",
-    "opencode"
+    "ai-native",
+    "opencode",
+    "hermes",
+    "dsh",
+    "pipeline",
+    "a2a",
+    "multi-agent"
   ],
   "license": "MIT",
   "publishConfig": {
@@ -40,5 +49,13 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.0"
+  },
+  "author": {
+    "name": "grape-dev",
+    "url": "https://gitcode.com/grape-dev"
+  },
+  "homepage": "https://www.grapedev.cn/",
+  "bugs": {
+    "url": "https://gitcode.com/grape-dev/grape-kit/issues"
   }
 }
