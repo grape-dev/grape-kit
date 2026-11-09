@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>grape-kit 无界面 agent 插件 · 事件规划 v1.0</title>
+<style>
+  body{font:14.5px/1.75 -apple-system,"PingFang SC","Microsoft YaHei",sans-serif;color:#1f2937;max-width:1100px;margin:0 auto;padding:32px 22px 80px;background:#fff}
+  h1{color:#1f4e79;font-size:24px}
+  h2{color:#1f4e79;font-size:18px;border-bottom:2px solid #dce6f1;padding-bottom:4px;margin-top:40px}
+  .meta{color:#6b7280;font-size:13px;margin:6px 0 0}
+  table{width:100%;border-collapse:collapse;font-size:13.5px;margin:12px 0}
+  th{background:#dce6f1;color:#1f4e79;text-align:left;padding:8px 12px;border:1px solid #b8cce4}
+  td{padding:8px 12px;border:1px solid #dce6f1;vertical-align:top}
+  tr:nth-child(even) td{background:#f5f8fd}
+  code{font:12.5px/1.6 ui-monospace,Consolas,monospace;background:#f3f4f6;border-radius:4px;padding:1px 6px}
+  .tag{display:inline-block;font-size:11px;font-weight:700;border-radius:999px;padding:1px 9px;margin-right:4px}
+  .done{background:#ecfdf5;color:#059669}.doing{background:#eff6ff;color:#2563eb}
+  .wait{background:#fffbeb;color:#d97706}.block{background:#fef2f2;color:#dc2626}
+  a{color:#2563eb}
+</style>
+</head>
+<body>
+<h1>grape-kit 无界面 agent 插件 · 事件规划 v1.0</h1>
+<p class="meta">生成：2026-11-09 · 覆盖：2026-11-02 ~ 11-09（设计与实现期）+ 后续待办 · 关联：@grape-dev/grape-kit@0.2.4（npm）· gitcode qq_44826240/grape-kit（私仓）· 设计文档（OBS plans/20261102）</p>
+
+<h2>A. 已完成事件（时间线）</h2>
+<table>
+<tr><th style="width:44px">#</th><th style="width:70px">日期</th><th>事件</th><th style="width:38%">产物 / 证据</th></tr>
+<tr><td>A1</td><td>11-02</td><td>设计调研：grape 契约链路 / grape-dsh / devkit v2 / ORCA 实测</td><td>设计文档 v1（OBS plans/20261102-grape-plugin-analysis.html）</td></tr>
+<tr><td>A2</td><td>11-02</td><td>两人分工（张/孙志远双轨）+ 八周路线 M1-M4</td><td>设计文档 §09</td></tr>
+<tr><td>A3</td><td>11-05</td><td>grape-dsh 最新端云协同机制调研（takeover / worker-onboard / 决策三连）</td><td>设计文档 §10</td></tr>
+<tr><td>A4</td><td>11-05</td><td>无 UI agent 插件架构定稿（CLI 薄壳 + 通道决策树）</td><td>设计文档 §11</td></tr>
+<tr><td>A5</td><td>11-06</td><td>grape-kit MVP：13 工具 MCP 壳 + installer + skill</td><td>22 单测 + smoke 全绿（commit 02bebf1）</td></tr>
+<tr><td>A6</td><td>11-06</td><td>ECS eng-0002 部署 + live 验证</td><td>真实 issue 数据回显（live-smoke 通过）</td></tr>
+<tr><td>A7</td><td>11-06</td><td>改名 grape-kit + npm 发布配置</td><td>publishConfig/bins（commit a1cf624）</td></tr>
+<tr><td>A8</td><td>11-08</td><td>npm org 权限诊断（granular token 404 语义取证）→ 正式发布</td><td><b>0.1.0</b> npm view 确认</td></tr>
+<tr><td>A9</td><td>11-08</td><td>多 agent 测试矩阵：opencode / hermes / codex 真实 E2E 全过；claude 环境受限</td><td>矩阵报告（OBS plans/20261108）</td></tr>
+<tr><td>A10</td><td>11-08</td><td>npm 页面 devkit 化（badges/keywords/homepage/LICENSE）</td><td>0.1.1</td></tr>
+<tr><td>A11</td><td>11-08</td><td><b>写链路 E2E</b>：create_issue 建载体 #4 → 流水线自动触发 → 回读 → 本机独立核验</td><td>issue_id 11079</td></tr>
+<tr><td>A12</td><td>11-08</td><td><b>能力补齐 v0.2.x：13 → 31 工具</b>对齐 grape-dsh（takeover/worker_onboard/cancel 等 18 件）</td><td>0.2.0</td></tr>
+<tr><td>A13</td><td>11-08</td><td>gitcode 私仓 qq_44826240/grape-kit 建立并推送 main</td><td>SSH push 记录</td></tr>
+<tr><td>A14</td><td>11-08~09</td><td>live sweep 扫描器 + 6 个真 bug 修复（派发双契约/动词链/knowledge 参数/重名凭据/悬挂逗号/版本派生）</td><td>0.2.1~0.2.4，sweep 15 PASS / 0 FAIL</td></tr>
+<tr><td>A15</td><td>11-09</td><td><b>F7 安全发现</b>：runtime-credentials 跨租户可见（个人组织分支）；根因定位至组织隔离 P1-P5 兼容分支；披露对象确认（廖堉哲/Xiahouyi）</td><td>取证脚本 + 三分支对照</td></tr>
+<tr><td>A16</td><td>11-09</td><td>新机器部署使用指南（含 hermes/codex 避坑）</td><td>使用指南 md</td></tr>
+</table>
+
+<h2>B. 待办事件</h2>
+<h3>B1. 端云协同闭环（两条「最后一公里」）</h3>
+<table>
+<tr><th>事件</th><th>阻塞点</th><th>需要什么</th><th style="width:110px">预计</th></tr>
+<tr><td>takeover 全流程实测（打断运行中任务→本机续跑）</td><td>引擎池排队，观察窗内无 running 任务</td><td>低峰时段窗口 / 清队列 / 测试 worker 绑 tag（任一）</td><td>载体 #5 就绪，命中窗口后 1h</td></tr>
+<tr><td>worker 接入端到端（认领→执行→上报）</td><td>eng-0002 已是现网 worker，不能重复接</td><td>一台干净机器 SSH</td><td>1h</td></tr>
+</table>
+
+<h3>B2. agent 适配扩展</h3>
+<table>
+<tr><th>事件</th><th>阻塞点</th><th>需要什么</th><th style="width:110px">预计</th></tr>
+<tr><td>codearts（码道）适配+实测</td><td>无测试环境；CLI 形态需按原生 MCP 格式写配置</td><td>码道 web 工作区 / CLI 环境</td><td>0.5-1 天</td></tr>
+<tr><td>officeace 适配</td><td>无接入规范、无测试实例</td><td>官方插件/MCP 文档 + 测试账号</td><td>0.5-1 天</td></tr>
+<tr><td>claude code 点亮</td><td>opengw 无 Anthropic 协议端点（/v1/messages 301）</td><td>支持 /v1/messages 的网关</td><td>端点就绪后 0.5 天</td></tr>
+</table>
+
+<h3>B3. 写链路补测</h3>
+<table>
+<tr><th>事件</th><th>说明</th><th style="width:110px">预计</th></tr>
+<tr><td>start_issue / confirm_done 实测</td><td>在评测载体上执行（避免干扰现网）</td><td>0.5h</td></tr>
+<tr><td>create_project 实测</td><td>建一个 eval 项目验证模板链路，用完删</td><td>0.5h</td></tr>
+</table>
+
+<h3>B4. 工程增强</h3>
+<table>
+<tr><th>事件</th><th>说明</th><th style="width:110px">预计</th></tr>
+<tr><td>高频工具原生化 HTTP</td><td>trigger/wait/status 去 CLI 冷启动（~200ms/次）</td><td>1 周</td></tr>
+<tr><td>sweep 升级契约驱动自动发现</td><td>防契约 2.2.0→2.3.0 演进下人肉清单漏测</td><td>3 天</td></tr>
+<tr><td>grape 插件市场上架 grape-kit</td><td>复用市场上传/L0 校验/凭据链路</td><td>0.5 天</td></tr>
+<tr><td>dsh 侧工具语义同步约定</td><td>grape-dsh 33 工具与 kit 31 工具语义对齐维护</td><td>0.5 天</td></tr>
+</table>
+
+<h3>B5. 阻塞项（等外部 / 等用户）</h3>
+<table>
+<tr><th>事件</th><th>等什么</th></tr>
+<tr><td><span class="tag wait">F7 披露</span> 安全披露文档转发</td><td>用户确认后转廖堉哲/Xiahouyi；修复上线后复验（1 条命令）</td></tr>
+<tr><td><span class="tag wait">org 归位</span> gitcode 仓 Transfer 到 grape-dev</td><td>org owner 建仓/授权</td></tr>
+<tr><td><span class="tag wait">凭据轮换</span> npm / GitCode / grape_ 旧 token</td><td>用户 Revoke 旧 token，新 token 回填本机+ECS</td></tr>
+<tr><td><span class="tag doing">流水线监控</span> 待合入通知 #1211 等 16+ 条</td><td>grape 插件开发流水线（独立监控，增量汇报）</td></tr>
+</table>
+
+<h2>C. 节奏规划</h2>
+<table>
+<tr><th style="width:110px">时间窗</th><th>事件</th></tr>
+<tr><td>本周</td><td>B3 写链路补测（0.5 天）→ F7 披露跟进 → 抓引擎空窗补 B1 takeover</td></tr>
+<tr><td>下周</td><td>B1 worker 接入（等机器）→ B2 codearts 适配（等环境）→ B4 原生化启动</td></tr>
+<tr><td>月内</td><td>B4 全部完成 + officeace / claude 视资源点亮 + 市场上架 + 向 grape-dev org 归位</td></tr>
+</table>
+
+<h2>D. 关键链接</h2>
+<table>
+<tr><th style="width:180px">项</th><th>地址</th></tr>
+<tr><td>npm 包</td><td><a href="https://www.npmjs.com/package/@grape-dev/grape-kit">npmjs.com/package/@grape-dev/grape-kit</a></td></tr>
+<tr><td>源码仓（私，待转 org）</td><td><a href="https://gitcode.com/qq_44826240/grape-kit">gitcode.com/qq_44826240/grape-kit</a></td></tr>
+<tr><td>设计文档</td><td><a href="https://devkit-docs-pub-20261030.obs.cn-north-4.myhuaweicloud.com/plans/20261102-grape-plugin-analysis.html">OBS plans/20261102-grape-plugin-analysis.html</a></td></tr>
+<tr><td>多 agent 测试矩阵报告</td><td><a href="https://devkit-docs-pub-20261030.obs.cn-north-4.myhuaweicloud.com/plans/20261108-grape-kit-agent-matrix.html">OBS plans/20261108-grape-kit-agent-matrix.html</a></td></tr>
+<tr><td>新机器使用指南</td><td>/home/zhangranran/tmp/grape-kit-使用指南-2026-11-09.md</td></tr>
+<tr><td>grape 官网 / 姊妹仓</td><td><a href="https://www.grapedev.cn/">grapedev.cn</a> · <a href="https://gitcode.com/grape-dev/grape-dsh">grape-dsh</a> · <a href="https://gitcode.com/grape-dev/grape-cli">grape-cli</a></td></tr>
+</table>
+</body>
+</html>
