@@ -26,6 +26,8 @@
 | A17 | 11-09 | 双机部署：ai-work-0007 + eng-0001（Miniconda 3.11 + CLI + 插件 + doctor 全绿） | 4 个新安装坑记录 |
 | A18 | 11-09 | **B1 takeover 全流程真实闭环**：#7 coding 运行中→取上下文→确认后取消→本机实现（16/16 测试过）→PAT 推分支→PR #1 建立→resume 复活流水线 | PR merge_requests/1 |
 | A19 | 11-09 | S1-S9 自然语言场景套件执行：歧义确认/needs-discussion 澄清闭环/redispatch 解锁/确认纪律全过 | 会话 ses_e3f3c12d |
+| A20 | 11-10 | S9 worker 接入完成：安装（发现 F10）→ 注册/心跳/引擎探活 → 角色标签 all + repo scope + 场景绑定全配好；手动 claim 鉴权通过 | runtime-agent active，引擎 17230 |
+| A21 | 11-10 | F11 发现：智能推荐路由覆盖场景引擎绑定——新引擎绑场景后任务仍被 auto 推荐路由到老 worker 池（#10 实证：3 个任务全给 wo-0001/wo-0002/vector-open-web-1） | issue #10 events |
 
 ## B. 待办事件
 
@@ -34,7 +36,7 @@
 | 事件 | 阻塞点 | 需要什么 | 预计 |
 |------|--------|---------|------|
 | ~~takeover 全流程实测~~ **✅ 11-09 完成**（A18）：制造 running 任务（澄清+redispatch）→取上下文→确认取消→本机实现→回推 PR | — | — | 已闭环 |
-| worker 接入端到端（认领→执行→上报） | eng-0002 已是现网 worker，不能重复接 | 一台干净机器 SSH | 1h |
+| ~~worker 接入~~ **✅ 接入完成（A20）**；认领被 F11 挡住：智能推荐不纳入新引擎，需平台侧 engine-selection 配置或给引擎养历史健康分 | 平台路由策略 | 控制台 engine-selection 配置（或提 issue） | — |
 
 ### B2. agent 适配扩展
 

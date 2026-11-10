@@ -49,7 +49,7 @@
 <table>
 <tr><th>事件</th><th>阻塞点</th><th>需要什么</th><th style="width:110px">预计</th></tr>
 <tr><td>takeover 全流程实测（打断运行中任务→本机续跑）</td><td>引擎池排队，观察窗内无 running 任务</td><td>低峰时段窗口 / 清队列 / 测试 worker 绑 tag（任一）</td><td>载体 #5 就绪，命中窗口后 1h</td></tr>
-<tr><td>worker 接入端到端（认领→执行→上报）</td><td>eng-0002 已是现网 worker，不能重复接</td><td>一台干净机器 SSH</td><td>1h</td></tr>
+<tr><td>~~worker 接入~~ <b>✅ 接入完成（A20）</b>；认领被 F11 挡：智能推荐不纳入新引擎</td><td>平台路由策略</td><td>控制台 engine-selection 配置或提 issue</td><td>—</td></tr>
 </table>
 
 <h3>B2. agent 适配扩展</h3>
