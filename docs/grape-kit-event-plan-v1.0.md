@@ -64,8 +64,8 @@
 
 | 事件 | 等什么 |
 |------|--------|
-| F7 披露文档转发 | 用户确认后转廖堉哲/Xiahouyi；修复上线后复验（1 条命令） |
-| gitcode 仓 Transfer 到 grape-dev org | org owner 建仓/授权 |
+| F7 披露 | **✅ 已提交 issue #1772**（公开渠道，敏感明细不入 issue）；修复上线后复验（1 条命令） |
+| gitcode 仓 Transfer 到 grape-dev org | **已提交建仓请求 issue #1773**，等 owner 处理 |
 | 凭据轮换 | 用户 Revoke npm/GitCode/grape_ 旧 token，新 token 回填本机+ECS |
 | 待合入通知需求 #1211 等 16+ 条 | grape 插件开发流水线（独立监控） |
 
