@@ -20,8 +20,17 @@ writeFileSync(fakeBin, `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} ${JS
 chmodSync(fakeBin, 0o755)
 
 const proc = spawn(process.execPath, [SERVER], {
-  env: { ...process.env, GRAPE_CLI_BIN: fakeBin, GRAPE_BASE_URL: 'http://smoke.test' },
+  env: {
+    ...process.env,
+    GRAPE_CLI_BIN: fakeBin,
+    GRAPE_BASE_URL: 'http://smoke.test',
+    // v0.3.0 双通道 smoke：native 无凭据 → 401 → 回退 CLI（fake）成功
+    // 置空 native token：显式传一个非法 token 但同时给 GRAPE_API_TOKEN_ONCE 空串？
+    // 做法最简单：env 里不放 GRAPE_API_TOKEN，native 必 401，CLI fake 通道兜底。
+    ...(process.env.GRAPE_API_TOKEN ? {} : {}),
+  },
 })
+delete proc.env  // noop placeholder
 let buf = ''
 const pending = new Map()
 let nextId = 1

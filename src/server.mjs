@@ -11,6 +11,7 @@ import {
   CallToolRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js'
 import { runGrape, waitTask, GrapeCliError } from './cli.mjs'
+import { waitTaskNative, GrapeApiError, api } from './api.mjs'
 import { toolDefs, findTool } from './tools.mjs'
 
 const PKG = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
@@ -30,8 +31,9 @@ export const INSTRUCTIONS = `Grape DevOps 流水线遥控（多 agent：vod→is
  * @param {{runGrape?: Function, waitTask?: Function}} [deps]
  */
 export function createServer(deps = {}) {
+  const apiModule = deps.apiModule || api
   const _runGrape = deps.runGrape || runGrape
-  const _waitTask = deps.waitTask || waitTask
+  const _waitTask = deps.waitTask || waitTaskNative   // v0.3.0：原生轮询（无 CLI 冷启动）；测试可注入旧版
 
   const server = new Server(
     { name: "grape-kit", version: PKG.version },
@@ -52,9 +54,23 @@ export function createServer(deps = {}) {
       if (tool.run) {
         // 多步工具（等待/级联解析/凭据生成）：自持执行逻辑。
         // 契约：waitBased 工具返回 {json,...}；其余 run() 工具直接返回结果值。
-        const r = await tool.run(args, { runGrape: _runGrape, waitTask: _waitTask })
+        const r = await tool.run(args, { runGrape: _runGrape, waitTask: _waitTask, apiModule })
         json = tool.waitBased ? { ...r.json, timedOut: !!r.timedOut, polls: r.polls } : r
+      } else if (tool.native) {
+        // v0.3.0 传输层原生化：优先原生 HTTP（无 Python/CLI 依赖）。
+        // 派发层只把「凭据缺失(401)」回退 CLI（CLI 可能有自己的缓存通道），其余 API 错误如实上抛。
+        try {
+          json = await tool.native(args)
+        } catch (e) {
+          if (e instanceof GrapeApiError && e.status === 401) {
+            const r = await _runGrape(tool.buildArgs(args))
+            json = r.json
+          } else {
+            throw e
+          }
+        }
       } else {
+        // CLI 通道（grape git 等少数场景）
         const r = await _runGrape(tool.buildArgs(args))
         json = r.json
       }
@@ -67,6 +83,10 @@ export function createServer(deps = {}) {
       if (!text) text = '```json\n' + JSON.stringify(json, null, 2).slice(0, 8000) + '\n```'
       return { content: [{ type: 'text', text }] }
     } catch (err) {
+      if (err instanceof GrapeApiError) {
+        const hint = err.hint ? `\n\n${err.hint}` : ''
+        return { content: [{ type: 'text', text: `grape API 失败（${err.status}）：${err.message}${hint}` }], isError: true }
+      }
       const code = err instanceof GrapeCliError ? err.code : 1
       const hint =
         code === 401

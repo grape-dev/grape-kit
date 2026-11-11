@@ -13,6 +13,7 @@
  */
 import * as R from './render.mjs'
 import { hostname } from 'node:os'
+import { api } from './api.mjs'
 
 const str = (desc) => ({ type: 'string', description: desc })
 const num = (desc) => ({ type: 'number', description: desc })
@@ -49,6 +50,10 @@ export const TOOLS = [
       if (a.context) payload.context = a.context
       return ['a2a', 'handoff', '--json', JSON.stringify({ agent: a.agent || 'vod', payload })]
     },
+    async native(a) {
+      const r = await api.triggerPipeline(a.owner, a.repo, a.issue_number, a.context || '')
+      return { seq: r.seq ?? r.event_seq, agent: r.agent ?? 'vod', status: r.status ?? 'running' }
+    },
     render: R.renderTrigger,
   },
   {
@@ -56,6 +61,7 @@ export const TOOLS = [
     description: '按事件序列号（trigger 返回的 seq）查询流水线任务当前状态。',
     schema: { type: 'object', properties: { seq: num('事件序列号') }, required: ['seq'] },
     buildArgs(a) { return ['events', 'detail', '--seq', String(a.seq)] },
+    async native(a) { return api.taskStatus(a.seq) },
     render: R.renderTaskStatus,
   },
   {
@@ -99,6 +105,7 @@ export const TOOLS = [
       if (a.status) args.push('--status', String(a.status))
       return args
     },
+    async native(a) { return api.listIssues(a.owner, a.repo, a.status) },
     render: R.renderIssues,
   },
   {
@@ -115,6 +122,7 @@ export const TOOLS = [
       if (a.status) args.push('--status', String(a.status))
       return args
     },
+    async native(a) { return api.myIssues(a.status) },
     render: R.renderIssues,
   },
   {
@@ -122,6 +130,7 @@ export const TOOLS = [
     description: '查看 issue 详情（含验收要求正文），开始实现前必读。',
     schema: { type: 'object', properties: OWNER_REPO_NUM, required: ['owner', 'repo', 'number'] },
     buildArgs(a) { return ['issues', 'detail', '--owner', a.owner, '--repo', a.repo, '--number', String(a.number)] },
+    async native(a) { return api.issueDetail(a.owner, a.repo, a.number) },
     render: R.renderIssueDetail,
   },
   {
@@ -129,6 +138,7 @@ export const TOOLS = [
     description: '查看 issue 的流水线节点状态（vod→issue→coding→qa→sre 各节点进度）。',
     schema: { type: 'object', properties: OWNER_REPO_NUM, required: ['owner', 'repo', 'number'] },
     buildArgs(a) { return ['issues', 'pipeline', '--owner', a.owner, '--repo', a.repo, '--number', String(a.number)] },
+    async native(a) { return api.issuePipeline(a.owner, a.repo, a.number) },
     render: R.renderPipeline,
   },
   {
@@ -136,6 +146,7 @@ export const TOOLS = [
     description: '查看 issue 的事件历史（QA 打回 / 评论 / 节点交接），端云协同的事件回环入口。',
     schema: { type: 'object', properties: OWNER_REPO_NUM, required: ['owner', 'repo', 'number'] },
     buildArgs(a) { return ['issues', 'events', '--owner', a.owner, '--repo', a.repo, '--number', String(a.number)] },
+    async native(a) { return api.issueEvents(a.owner, a.repo, a.number) },
     render: R.renderEventTimeline,
   },
   {
@@ -158,6 +169,7 @@ export const TOOLS = [
       if (a.description) body.description = a.description
       return ['issues', 'create', '--owner', a.owner, '--repo', a.repo, '--json', JSON.stringify(body)]
     },
+    async native(a) { return api.createIssue(a.owner, a.repo, a.title, a.description) },
     render(json) {
       if (json && typeof json === 'object' && (json.number || json.issue_number)) {
         return `Issue 已创建：**#${json.number ?? json.issue_number}** ${json.title ?? ''}`.trim()
@@ -177,6 +189,7 @@ export const TOOLS = [
       if (a.q) args.push('--q', String(a.q))
       return args
     },
+    async native(a) { return api.scenesMarket(a.q) },
     render: R.renderScenes,
   },
   {
@@ -195,6 +208,7 @@ export const TOOLS = [
     buildArgs(a) {
       return ['scenes', 'apply', '--owner', a.owner, '--repo', a.repo, '--json', JSON.stringify({ scene_id: a.scene_id })]
     },
+    async native(a) { return api.applyScene(a.owner, a.repo, a.scene_id) },
     render(json) {
       if (json && typeof json === 'object' && (json.ok ?? json.scene_id)) {
         return `场景已应用：${json.scene_id ?? ''} ${json.message ?? ''}`.trim()
@@ -215,6 +229,7 @@ export const TOOLS = [
       if (a.type) args.push('--type', String(a.type))
       return args
     },
+    async native(a) { return api.globalSearch(a.q, a.type) },
     render: R.renderSearch,
   },
   {
@@ -227,6 +242,7 @@ export const TOOLS = [
       required: ['owner', 'repo'],
     },
     buildArgs(a) { return ['dashboard', 'repo', '--owner', a.owner, '--repo', a.repo] },
+    async native(a) { return api.repoDashboard(a.owner, a.repo) },
     render: R.renderGeneric,
   },
 
@@ -241,6 +257,7 @@ export const TOOLS = [
       required: ['owner', 'repo'],
     },
     buildArgs(a) { return ['pipeline', 'get', '--owner', a.owner, '--repo', a.repo] },
+    async native(a) { return api.repoRoadmap(a.owner, a.repo) },
     render: R.renderPipeline,
   },
 
@@ -257,12 +274,14 @@ export const TOOLS = [
       properties: OWNER_REPO_NUM,
       required: ['owner', 'repo', 'number'],
     },
-    async run(a, { runGrape }) {
-      const det = await runGrape(['issues', 'detail', '--owner', a.owner, '--repo', a.repo, '--number', String(a.number)])
-      const id = det.json && (det.json.issue_id ?? det.json.id)
+    async run(a, { runGrape, apiModule }) {
+      const A = apiModule || (await import('./api.mjs')).api
+      const det = await A.issueDetail(a.owner, a.repo, a.number)
+      const id = det && (det.issue_id ?? det.id)
       if (!id) throw new Error('无法解析 issue 内部 id（detail 响应缺 issue_id）')
-      const r = await runGrape(['issues', action, '--issue_id', String(id)])
-      return r.json ?? { ok: true, issue_id: id, action }
+      const act = { cancel: A.cancelIssue, resume: A.resumeIssue, start: A.startIssue }[action]
+      const r = await act(id)
+      return r ?? { ok: true, issue_id: id, action }
     },
     render(json) {
       return json && typeof json === 'object'
@@ -276,6 +295,7 @@ export const TOOLS = [
     description: '列出 Grape 已纳管的仓库（repo_key/场景/工作分支），是端侧找活干的第一步。',
     schema: { type: 'object', properties: {} },
     buildArgs() { return ['repos', 'managed'] },
+    async native() { return api.managedRepos() },
     render(data) {
       return R.mdTable(R.asArray(data) || [], [
         { h: '仓库', v: (r) => r.repo_key ?? r.full_name ?? r.name ?? '' },
@@ -289,6 +309,7 @@ export const TOOLS = [
     description: '列出当前用户有操作权限的仓库成员视图。',
     schema: { type: 'object', properties: {} },
     buildArgs() { return ['repos', 'member'] },
+    async native() { return api.memberRepos() },
     render(data) {
       return R.mdTable(R.asArray(data) || [], [
         { h: '仓库', v: (r) => r.repo_key ?? r.full_name ?? r.name ?? '' },
@@ -305,6 +326,7 @@ export const TOOLS = [
       required: ['owner', 'repo_name'],
     },
     buildArgs(a) { return ['repos', 'project', 'info', '--owner', a.owner, '--repo', a.repo_name] },
+    async native(a) { return api.projectInfo(a.owner, a.repo_name) },
     render: R.renderGeneric,
   },
   {
@@ -321,6 +343,7 @@ export const TOOLS = [
       if (a.provider) args.push('--provider', a.provider)
       return args
     },
+    async native(a) { return api.hostRepo(a.full_name, a.provider) },
     render(json) {
       return json && typeof json === 'object' && !json.error
         ? `纳管成功：${json.full_name ?? json.repo_key ?? ''} ${json.message ?? ''}`.trim()
@@ -332,6 +355,7 @@ export const TOOLS = [
     description: '从 VCS 同步仓库列表到 Grape（纳管清单与远端对齐）。',
     schema: { type: 'object', properties: {} },
     buildArgs() { return ['repos', 'sync'] },
+    async native() { return api.syncRepos() },
     render(json) { return `同步完成 ${R.fallbackJson(json)}` },
   },
 
@@ -345,6 +369,7 @@ export const TOOLS = [
     buildArgs(a) {
       return a.q ? ['skills', 'search', '--q', a.q] : ['skills', 'list']
     },
+    async native(a) { return a.q ? api.skillsSearch(a.q) : api.skillsList() },
     render(data) {
       return R.mdTable(R.asArray(data) || [], [
         { h: 'ID', v: (r) => r.skill_id ?? r.id ?? '' },
@@ -358,6 +383,7 @@ export const TOOLS = [
     description: '按关键字搜索 Grape 技能库（name/描述全文匹配）。',
     schema: { type: 'object', properties: { q: str('关键字') }, required: ['q'] },
     buildArgs(a) { return ['skills', 'search', '--q', String(a.q)] },
+    async native(a) { return api.skillsSearch(a.q) },
     render(data) {
       return R.mdTable(R.asArray(data) || [], [
         { h: 'ID', v: (r) => r.skill_id ?? r.id ?? '' },
@@ -371,6 +397,7 @@ export const TOOLS = [
     description: '查看 skill 详情（含 SKILL.md 内容）。',
     schema: { type: 'object', properties: { skill_id: str('skill id') }, required: ['skill_id'] },
     buildArgs(a) { return ['skills', 'detail', '--skill_id', String(a.skill_id)] },
+    async native(a) { return api.skillDetail(a.skill_id) },
     render(json) {
       if (json && typeof json === 'object') {
         const body = String(json.content ?? json.skill_md ?? json.description ?? '')
@@ -396,6 +423,7 @@ export const TOOLS = [
       if (a.q) args.push('--q', a.q)
       return args
     },
+    async native(a) { return api.knowledgeList(a.repo, a.q) },
     render(data) {
       return R.mdTable(R.asArray(data) || [], [
         { h: 'ID', v: (r) => r.knowledge_id ?? r.id ?? '' },
@@ -409,6 +437,7 @@ export const TOOLS = [
     description: '查看知识条目详情（正文 markdown），供实现前吸收仓库沉淀的经验。',
     schema: { type: 'object', properties: { knowledge_id: str('知识条目 id') }, required: ['knowledge_id'] },
     buildArgs(a) { return ['knowledge', 'detail', '--knowledge_id', String(a.knowledge_id)] },
+    async native(a) { return api.knowledgeDetail(a.knowledge_id) },
     render(json) {
       if (json && typeof json === 'object') {
         return `### ${json.title ?? json.knowledge_id ?? ''}\n\n${String(json.content ?? json.body ?? '').slice(0, 3000)}`
@@ -422,6 +451,7 @@ export const TOOLS = [
     description: '列出 Grape 项目模板——开源项目即模板，选一个即可一键建仓进入 AI 工作流。',
     schema: { type: 'object', properties: {} },
     buildArgs() { return ['project', 'templates', 'list'] },
+    async native() { return api.templatesList() },
     render(data) {
       return R.mdTable(R.asArray(data) || [], [
         { h: 'ID', v: (r) => r.template_id ?? r.id ?? '' },
@@ -448,6 +478,7 @@ export const TOOLS = [
       if (a.provider) body.provider = a.provider
       return ['project', 'template', 'create', '--json', JSON.stringify(body)]
     },
+    async native(a) { return api.createProject(a.template_id, a.repo_name, a.provider) },
     render(json) {
       return json && typeof json === 'object' && !json.error
         ? `项目创建中：${json.repo_name ?? json.full_name ?? ''} ${json.message ?? ''}`.trim()
@@ -472,6 +503,7 @@ export const TOOLS = [
     buildArgs(a) {
       return ['runtime', 'takeover', 'context', '--repo_key', `gitcode:${a.owner}/${a.repo}`, '--issue_number', String(a.number)]
     },
+    async native(a) { return api.takeoverContext(a.owner, a.repo, a.number) },
     render(json) {
       if (!json || typeof json !== 'object' || !json.task_id) {
         return json && json.error ? `无正在运行的任务：${json.error}` : R.fallbackJson(json)
@@ -513,24 +545,22 @@ export const TOOLS = [
       type: 'object',
       properties: { device_name: str('设备名（可选，默认 grape-kit-<主机名>）') },
     },
-    async run(a, { runGrape }) {
-      const base = (process.env.GRAPE_BASE_URL || '').replace(/\/$/, '')
+    async run(a, { runGrape, apiModule }) {
+      const base = (process.env.GRAPE_BASE_URL || 'https://www.grapedev.cn').replace(/\/$/, '')
       const baseName = a.device_name || `grape-kit-${hostname()}`
+      const A = apiModule || (await import('./api.mjs')).api
       // 凭据名全局唯一且 token 只展示一次：重名（400 已存在）自动加时间戳后缀重试一次
       let cred
       let name = baseName
+      const create = async (n) => (runGrape && !apiModule)
+        ? runGrape(['settings', 'runtime', 'credential', 'create', '--json', JSON.stringify({ name: n, scope: 'user' })])
+        : { json: await A.workerCredentialCreate(n, 'user') }
       try {
-        cred = await runGrape([
-          'settings', 'runtime', 'credential', 'create',
-          '--json', JSON.stringify({ name, scope: 'user' }),
-        ])
+        cred = await create(name)
       } catch (err) {
         if (/已存在/.test(err.message || '')) {
           name = `${baseName}-${new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14)}`
-          cred = await runGrape([
-            'settings', 'runtime', 'credential', 'create',
-            '--json', JSON.stringify({ name, scope: 'user' }),
-          ])
+          cred = await create(name)
         } else {
           throw err
         }
@@ -541,7 +571,7 @@ export const TOOLS = [
       return {
         onboard: 'ready',
         device: name,
-        install_command: `curl -sSL ${base}/api/runtime/install | bash -s -- --token ${token} --device ${name}`,
+        install_command: `curl -sSL ${base}/api/runtime/install | bash -s -- --token ${token} --server ${base} --device ${name}`,
         note: '在终端可见地执行上方命令完成接入；凭据可在 grape settings runtime credentials 中管理/吊销',
       }
     },

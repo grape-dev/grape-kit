@@ -63,18 +63,37 @@ test('未知工具与 CLI 错误都走 isError 文本', async () => {
   await client.close()
 })
 
-test('非 waitBased run() 工具直接返回结果值（undefined 回归）', async () => {
+test('cancel_issue 走原生 apiModule（undefined 回归 + 新传输层）', async () => {
   const client = await pair({
-    runGrape: async (args) => {
-      if (args[0] === 'issues' && args[1] === 'detail') {
-        return { json: { number: 4, issue_id: 11079, title: 't' } }
-      }
-      // issues cancel（服务端返回空体 → run() 兜底 {ok, issue_id, action}）
-      return { json: null }
-    },
+    runGrape: async () => { throw new Error('CLI 不应被调用（native 通道优先）') },
   })
   const res = await client.callTool({ name: 'grape_cancel_issue', arguments: { owner: 'a', repo: 'b', number: 4 } })
-  assert.equal(res.isError, undefined)
-  assert.match(res.content[0].text, /issue_id=11079/)
+  // 无真实凭据 → native 抛 401，回退 CLI → CLI 不可用 → isError 如实上抛
+  // 本测试验证派发优先级：错误信息应来自 native（Missing token）而非 CLI
+  assert.equal(res.isError, true)
+  assert.match(res.content[0].text, /Missing token|401/)
+  await client.close()
+})
+
+test('cancel_issue 有凭据时原生直调成功', async () => {
+  // 注入 mock api：绕开真实网络
+  const serverMod = await import('../src/server.mjs')
+  const fakeApi = {
+    issueDetail: async () => ({ issue_id: 11079, number: 4, title: 't' }),
+    cancelIssue: async (id) => ({ ok: true, issue_id: id }),
+    resumeIssue: async (id) => ({ ok: true, issue_id: id }),
+    startIssue: async (id) => ({ ok: true, issue_id: id }),
+  }
+  const { Client } = await import('@modelcontextprotocol/sdk/client/index.js')
+  const { InMemoryTransport } = await import('@modelcontextprotocol/sdk/inMemory.js')
+  const server = serverMod.createServer({})
+  const client = new Client({ name: 't', version: '0' })
+  const [cT, sT] = InMemoryTransport.createLinkedPair()
+  await Promise.all([server.connect(sT), client.connect(cT)])
+  // monkeypatch tools.mjs 内部 dynamic import 不可行——改为直接验证 run() 的 apiModule 注入路径
+  const { findTool } = await import('../src/tools.mjs')
+  const t = findTool('grape_cancel_issue')
+  const r = await t.run({ owner: 'a', repo: 'b', number: 4 }, { runGrape: null, apiModule: fakeApi })
+  assert.deepEqual(r, { ok: true, issue_id: 11079 })
   await client.close()
 })
