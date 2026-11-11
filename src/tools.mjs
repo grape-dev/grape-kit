@@ -28,8 +28,9 @@ export const TOOLS = [
   {
     name: 'grape_trigger_pipeline',
     description:
-      '触发 Grape DevOps 流水线（A2A 交接给首个节点，默认 vod）。Grape 多 agent 流水线的唯一外部入口；' +
-      '节点间流转由服务端内部驱动，不可也不应从外部干预。需用户提供 owner/repo 与 issue 编号。',
+      '触发 Grape DevOps 流水线（A2A 交接给首个节点，默认 vod）。Grape 多 agent 流水线的唯一外部入口；节点间流转由服务端内部驱动。' +
+      '【本地接管成果交回场景】若该 issue 此前被本地接管实现过（远端分支已有成果），context 必须结构化说明：' +
+      '产出分支名 + commit + 测试证据，并明确「代码已在远端分支，请识别后直接进入 QA，勿重复实现」。',
     schema: {
       type: 'object',
       properties: {
@@ -85,7 +86,9 @@ export const TOOLS = [
     waitBased: true,
     render(json) {
       const base = R.renderTaskStatus(json)
-      return json && json.timedOut ? base + `\n\n_注意：等待超时（任务未终态），请稍后用 grape_get_task_status 复查。_` : base
+      return json && json.timedOut
+        ? base + `\n\n_等待超时（${json.polls ?? '-'} 次轮询后任务仍未终态）。复查方式：① 让我过几分钟再查（grape_get_task_status seq=${json.seq ?? '?'}）② 看流水线节点位置（grape_get_pipeline_info）③ 长任务别死等，先做别的。_`
+        : base
     },
   },
   {
@@ -218,10 +221,10 @@ export const TOOLS = [
   },
   {
     name: 'grape_search',
-    description: '全局搜索（issue / 仓库 / skill）。',
+    description: '全局搜索：按关键字检索事件（event）、仓库（repo）、agent（all）。type 枚举仅 all/event/repo/agent，不支持 issue。',
     schema: {
       type: 'object',
-      properties: { q: str('关键字'), type: str('类型过滤（issue/repo/skill，可选）') },
+      properties: { q: str('关键字'), type: { type: 'string', enum: ['all', 'event', 'repo', 'agent'], description: '结果类型过滤（服务端枚举，issue 不在其中）' } },
       required: ['q'],
     },
     buildArgs(a) {
@@ -265,7 +268,8 @@ export const TOOLS = [
     name: `grape_${action}_issue`,
     description:
       action === 'cancel'
-        ? '取消 issue（停止其流水线）。⚠️ 用户决策层动作：调用前必须向用户确认目标 issue。'
+        ? '终止 issue 的整条流水线（⚠️ 不是「暂停当前节点」：已完成的 vod/issue 节点成果保留，但当前及后续节点全部停止、不做 QA/SRE 交接——本地接管后想交回请确认远端分支已推送并用 grape_trigger_pipeline 重新触发）。'
+        + '⚠️ 强制决策门：调用前必须让用户在「①让渡接管（推荐：不取消，云端继续跑）②暂停等我确认 ③终止整链」中显式选择，未选择不得执行。'
         : action === 'resume'
           ? '恢复已取消的 issue 流水线。⚠️ 用户决策层动作：调用前必须向用户确认。'
           : '启动 issue 会话。⚠️ 用户决策层动作：调用前必须向用户确认。',
@@ -281,6 +285,18 @@ export const TOOLS = [
       if (!id) throw new Error('无法解析 issue 内部 id（detail 响应缺 issue_id）')
       const act = { cancel: A.cancelIssue, resume: A.resumeIssue, start: A.startIssue }[action]
       const r = await act(id)
+      // #1-3 修复：resume 返回成功≠事实恢复——自动回读 pipeline_info 复核，向用户报告事实而非接口回执
+      if (action === 'resume') {
+        try {
+          const pipe = await A.issuePipeline(a.owner, a.repo, a.number)
+          const stage = pipe && (pipe.stage ?? pipe.task_status)
+          return { ...(r ?? { ok: true, issue_id: id, action }), verified_stage: stage ?? 'unknown',
+                   verify_note: stage ? `resume 已生效，当前阶段 ${stage}` : 'resume 接口返回成功但流水线状态读取失败，请用 grape_get_pipeline_info 人工复核' }
+        } catch { 
+          return { ...(r ?? { ok: true, issue_id: id, action }), verified_stage: 'unknown',
+                   verify_note: 'resume 接口返回成功，但状态复核失败——请用 grape_get_pipeline_info 确认流水线真的恢复' }
+        }
+      }
       return r ?? { ok: true, issue_id: id, action }
     },
     render(json) {
@@ -292,7 +308,7 @@ export const TOOLS = [
 
   {
     name: 'grape_list_managed_repos',
-    description: '列出 Grape 已纳管的仓库（repo_key/场景/工作分支），是端侧找活干的第一步。',
+    description: '列出 Grape 已纳管的仓库（repo_key/场景/工作分支），是端侧找活干的第一步。注意：与成员/同步视图数据源不同，本视图为空时改用 grape_list_repos_member 或 grape_sync_repos 查看可操作仓库。',
     schema: { type: 'object', properties: {} },
     buildArgs() { return ['repos', 'managed'] },
     async native() { return api.managedRepos() },

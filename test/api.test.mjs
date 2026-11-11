@@ -89,3 +89,42 @@ test('waitTaskNative 轮询到终态', async () => {
     assert.equal(r.polls, 2)
   } finally { api.taskStatus = orig }
 })
+
+test('#2-2 回归：search 响应 {events:[...]} 正确渲染 + type 枚举', async () => {
+  const { findTool } = await import('../src/tools.mjs')
+  const t = findTool('grape_search')
+  assert.deepEqual(t.schema.properties.type.enum, ['all', 'event', 'repo', 'agent'])
+  const out = t.render({ events: [{ seq: 1, title: '相册', repo_key: 'gitcode:a/b', event_type: 'a2a_event' }] })
+  assert.match(out, /相册/)
+  assert.match(out, /gitcode:a\/b/)
+  const empty = t.render({ events: [] })
+  assert.match(empty, /（空）|json/)  // 空结果不崩
+})
+
+test('#1-3 回归：resume 后自动复核，返回 verified_stage', async () => {
+  const { findTool } = await import('../src/tools.mjs')
+  const t = findTool('grape_resume_issue')
+  const r = await t.run({ owner: 'a', repo: 'b', number: 5 }, { runGrape: null, apiModule: {
+    issueDetail: async () => ({ issue_id: 99 }),
+    resumeIssue: async () => ({ ok: true }),
+    issuePipeline: async () => ({ stage: 'issue', task_status: 'processing' }),
+  } })
+  assert.equal(r.verified_stage, 'issue')
+  assert.match(r.verify_note, /resume 已生效/)
+})
+
+test('#1-1 回归：cancel 描述含三选决策门', async () => {
+  const { findTool } = await import('../src/tools.mjs')
+  const d = findTool('grape_cancel_issue').description
+  assert.match(d, /终止.*整条流水线/)
+  assert.match(d, /让渡接管/)
+  assert.match(d, /未选择不得执行/)
+})
+
+test('#2-5 回归：wait 超时返回复查引导', async () => {
+  const { findTool } = await import('../src/tools.mjs')
+  const t = findTool('grape_wait_task')
+  const out = t.render({ seq: 85, status: 'running', polls: 100, timedOut: true })
+  assert.match(out, /grape_get_task_status/)
+  assert.match(out, /别死等/)
+})

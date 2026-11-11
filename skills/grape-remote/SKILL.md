@@ -21,11 +21,13 @@ description: |
 - **等待**：`grape_wait_task(seq)`（默认 300s 上限）。超时**不要**无限重等——改用 `grape_get_task_status(seq)` 让用户稍后复查。
 - **看进度**：`grape_get_pipeline_info` 看节点链（vod→issue→coding→qa→sre）；`grape_get_issue_events` 看事件明细。
 
-## 端云协同
+## 端云协同（⚠️ 语义边界必读）
 
+- **接管不是无损操作**：平台只有「终止整链」的 cancel，没有「暂停当前节点」原语。用户说"停掉云端、本地接管"时，必须先讲清后果（当前及后续节点停止、不做 QA/SRE 交接），并让用户在「①让渡接管（云端继续跑，推荐）②暂停等确认 ③终止整链」三选中显式选择，未选择不得执行 cancel。
+- **本地成果交回**：cancel 后云端不认识你的本地分支。交回时用 `grape_trigger_pipeline` 重新触发，context 必须结构化写明：产出分支名 + commit + 测试证据 + 「代码已在远端分支，请识别后直接进 QA，勿重复实现」。
+- **resume 的坑**：接口返回成功 ≠ 流水线真的恢复（0.3.1 起工具会自动回读复核，verified_stage 字段是事实，接口回执不是）。
 - **QA 打回**：PR 评论会出现在 `grape_get_issue_events`；发现打回后向用户展示缺陷清单，本地修复后重推，云端 QA 会自动复审。
-- **接管**：云端任务卡住或用户要介入时，走服务端 takeover 流程（本插件 MVP 暂未封装工具，用 `grape` CLI / WebUI 操作）。
-- **提交产物**：本地开发用 `grape git`（凭据注入）或自有 git 工作流；PR 建立后云端 QA/SRE 自动接手。
+- **提交产物**：本地开发用 PAT/`grape git`（凭据注入）或自有 git 工作流；PR 建立后云端 QA/SRE 自动接手。
 
 ## 输出约定
 

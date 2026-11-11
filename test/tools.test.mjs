@@ -66,7 +66,7 @@ test('决策层工具描述强制「需用户确认」', () => {
   for (const name of ['grape_cancel_issue', 'grape_resume_issue', 'grape_start_issue', 'grape_host_repo', 'grape_apply_scene', 'grape_create_project']) {
     const t = findTool(name)
     assert.ok(t, `${name} 存在`)
-    assert.match(t.description, /用户决策层.*确认|必须向用户确认/, `${name} 描述缺确认纪律`)
+    assert.match(t.description, /用户决策层.*确认|必须向用户确认|未选择不得执行/, `${name} 描述缺确认纪律`)
   }
 })
 

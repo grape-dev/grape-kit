@@ -9,6 +9,9 @@ export function asArray(data) {
   if (data && Array.isArray(data.issues)) return data.issues
   if (data && Array.isArray(data.scenes)) return data.scenes
   if (data && Array.isArray(data.results)) return data.results
+  if (data && Array.isArray(data.events)) return data.events
+  if (data && Array.isArray(data.repos)) return data.repos
+  if (data && Array.isArray(data.agents)) return data.agents
   if (data && Array.isArray(data.list)) return data.list
   return null
 }
