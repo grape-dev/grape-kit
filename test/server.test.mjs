@@ -5,10 +5,21 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import { createServer, INSTRUCTIONS } from '../src/server.mjs'
 
 async function pair(deps) {
+  // 环境隔离：屏蔽宿主真实凭据（真实机器会让 native 通道直连成功、绕开注入 mock）
+  const savedAuth = process.env.GRAPE_AUTH_FILE
+  const savedTok = process.env.GRAPE_API_TOKEN
+  process.env.GRAPE_AUTH_FILE = '/nonexistent/grape-kit-test-auth.json'
+  delete process.env.GRAPE_API_TOKEN
   const server = createServer(deps)
   const client = new Client({ name: 'test-client', version: '0.0.1' })
   const [cT, sT] = InMemoryTransport.createLinkedPair()
   await Promise.all([server.connect(sT), client.connect(cT)])
+  const origClose = client.close.bind(client)
+  client.close = async () => {
+    if (savedAuth) process.env.GRAPE_AUTH_FILE = savedAuth; else delete process.env.GRAPE_AUTH_FILE
+    if (savedTok) process.env.GRAPE_API_TOKEN = savedTok
+    return origClose()
+  }
   return client
 }
 

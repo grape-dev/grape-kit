@@ -9,35 +9,45 @@ test('凭据解析优先级：env > auth file', () => {
   const dir = mkdtempSync(join(tmpdir(), 'gk-api-'))
   try {
     const cfg = join(dir, 'config.json')
+    const ISO = { GRAPE_AUTH_FILE: '/nonexistent/gk-test-auth.json' }  // 屏蔽宿主机真实 ~/.grape/config.json
     writeFileSync(cfg, '{"token":"grape_from_file","base_url":"https://from-file.example"}')
     // ① 无 env → 文件
-    const byFile = resolveCredentials({ GRAPE_AUTH_FILE: cfg })
+    const byFile = resolveCredentials({ ...ISO, GRAPE_AUTH_FILE: cfg })
     assert.equal(byFile.token, 'grape_from_file')
     assert.equal(byFile.baseUrl, 'https://from-file.example')
     // ② env 优先于文件
-    const byEnv = resolveCredentials({ GRAPE_AUTH_FILE: cfg, GRAPE_API_TOKEN: 'grape_from_env', GRAPE_BASE_URL: 'https://from-env' })
+    const byEnv = resolveCredentials({ ...ISO, GRAPE_AUTH_FILE: cfg, GRAPE_API_TOKEN: 'grape_from_env', GRAPE_BASE_URL: 'https://from-env' })
     assert.equal(byEnv.token, 'grape_from_env')
     assert.equal(byEnv.baseUrl, 'https://from-env')
     // ③ 都没有 → 空 token
-    const none = resolveCredentials({})
+    const none = resolveCredentials({ ...ISO })
     assert.equal(none.token, '')
   } finally { rmSync(dir, { recursive: true, force: true }) }
 })
 
 test('凭据缺失时 apiRequest 抛 401 带指引', async () => {
   await assert.rejects(
-    apiRequest('GET', '/api/issues/mine', { env: {} }),
+    apiRequest('GET', '/api/issues/mine', { env: { GRAPE_AUTH_FILE: '/nonexistent/gk-test-auth.json' } }),
     (e) => e instanceof GrapeApiError && e.status === 401 && /GRAPE_API_TOKEN|config\.json/.test(e.message),
   )
 })
 
 test('无凭据时 cancel_issue 的 run 走 native 401（不静默编造结果）', async () => {
-  const { findTool } = await import('../src/tools.mjs')
-  const t = findTool('grape_cancel_issue')
-  await assert.rejects(
-    t.run({ owner: 'a', repo: 'b', number: 1 }, { runGrape: null, apiModule: api }),
-    (e) => e.status === 401,
-  )
+  const savedAuthFile = process.env.GRAPE_AUTH_FILE
+  const savedToken = process.env.GRAPE_API_TOKEN
+  process.env.GRAPE_AUTH_FILE = '/nonexistent/gk-test-auth.json'   // 隔离宿主凭据
+  delete process.env.GRAPE_API_TOKEN
+  try {
+    const { findTool } = await import('../src/tools.mjs')
+    const t = findTool('grape_cancel_issue')
+    await assert.rejects(
+      t.run({ owner: 'a', repo: 'b', number: 1 }, { runGrape: null, apiModule: api }),
+      (e) => e.status === 401,
+    )
+  } finally {
+    if (savedAuthFile) process.env.GRAPE_AUTH_FILE = savedAuthFile; else delete process.env.GRAPE_AUTH_FILE
+    if (savedToken) process.env.GRAPE_API_TOKEN = savedToken
+  }
 })
 
 test('worker_onboard 无 runGrape 时走 native 通道（v0.3.0 CLI 可选）', async () => {
