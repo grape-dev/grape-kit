@@ -17,6 +17,7 @@ import { api } from './api.mjs'
 
 const str = (desc) => ({ type: 'string', description: desc })
 const num = (desc) => ({ type: 'number', description: desc })
+const bool = (desc) => ({ type: 'boolean', description: desc })
 
 const OWNER_REPO_NUM = {
   owner: str('仓库归属（owner）'),
@@ -547,6 +548,195 @@ export const TOOLS = [
       }
       if (json.prompt) lines.push('', '**原始任务 Prompt（尾部）**', '', String(json.prompt).slice(-4000))
       lines.push('', '_接管动作：先 grape_cancel_issue（需用户确认）→ 本机以以上上下文交互式继续。env_extra 已随上下文返回，接管会话需还原 REPO_FULL_NAME / ISSUE_NUMBER 等环境。_')
+      return lines.join('\n')
+    },
+  },
+
+  {
+    name: 'grape_takeover_start',
+    description:
+      '发起接管会话（weekly-11+ 平台一等接管原语，替代「cancel 整链 + context 口述」的旧路径）。' +
+      '原子动作：云端任务让渡给本地、签发 tko_ 接管凭据（12h 可续 24h）、返回完整接管上下文与按 host_os 渲染的脚本。' +
+      '之后本地继续该节点工作，用 grape_takeover_progress 回报进度，完成用 grape_takeover_finish 携结构化产物交回，' +
+      '或用 grape_takeover_abort 让渡回流水线（当前节点重新派发，链不断）。' +
+      '⚠️ 需要平台支持 takeover API（404/无该工具能力时回退 grape_takeover_context + cancel 老路径）。',
+    schema: {
+      type: 'object',
+      properties: {
+        owner: str('owner'),
+        repo: str('repo'),
+        number: num('issue 编号'),
+        agent_type: str('要接管的节点（可选，默认当前运行节点，如 coding）'),
+      },
+      required: ['owner', 'repo', 'number'],
+    },
+    async native(a) { return api.takeoverStart(a.owner, a.repo, a.number, a.agent_type) },
+    render(json) {
+      if (!json || typeof json !== 'object') return R.fallbackJson(json)
+      if (json.detail) return `接管发起失败：${typeof json.detail === 'string' ? json.detail : JSON.stringify(json.detail)}`
+      const sid = json.takeover_id ?? json.session_id ?? json.id ?? ''
+      const b = json.bundle || {}
+      const env = b.env || {}
+      const lines = ['### 接管会话已建立', '']
+      lines.push(`- 会话: \`${sid}\`${json.reused ? '（复用已有会话）' : ''}`)
+      if (env.GRAPE_SESSION_TOKEN) lines.push(`- 接管凭据: \`${String(env.GRAPE_SESSION_TOKEN).slice(0, 8)}…\`（完整值在 env.GRAPE_SESSION_TOKEN，12h TTL）`)
+      if (b.task && b.task.id) lines.push(`- 让渡的云端任务: ${b.task.id}（已停止）`)
+      if (json.token_expires_at) lines.push(`- 凭据到期 epoch: ${json.token_expires_at}`)
+      const ws = b.workspace || {}
+      if (ws.cwd_hint) lines.push(`- 本地工作目录: ${ws.cwd_hint}`)
+      const instr = b.instructions || {}
+      if (instr.prompt) lines.push('', '**接管任务 Prompt（尾部）**', '', String(instr.prompt).slice(-3000))
+      if (Array.isArray(json.warnings) && json.warnings.length) {
+        lines.push('', `**警告（${json.warnings.length}）**:`)
+        for (const w of json.warnings.slice(0, 5)) lines.push(`- ${String(w).slice(0, 150)}`)
+      }
+      lines.push('', '_下一步：本地继续该节点工作 → grape_takeover_progress 回报 → grape_takeover_finish 交回（勿再调用 grape_cancel_issue）。_')
+      return lines.join('\n')
+    },
+  },
+  {
+    name: 'grape_takeover_status',
+    description:
+      '查看接管会话状态/列表（不改变任何状态）。可查单条（含 renew 续期凭据）或列仓库/issue 的活跃会话。' +
+      '接管中途断连后用本工具找回 session_id 与最新进度。',
+    schema: {
+      type: 'object',
+      properties: {
+        session_id: str('会话 id（有则查单条）'),
+        owner: str('owner（无 session_id 时列表用）'),
+        repo: str('repo'),
+        number: num('issue 编号（可选过滤）'),
+        renew: bool('查单条时是否顺带续期接管凭据（默认 false）'),
+      },
+    },
+    async native(a) {
+      if (a.session_id) return api.takeoverGet(a.session_id, a.renew)
+      if (!a.owner || !a.repo) throw new Error('需要 session_id，或 owner+repo 用于列表')
+      return api.takeoverList(a.owner, a.repo, a.number)
+    },
+    render(json) {
+      if (!json || typeof json !== 'object') return R.fallbackJson(json)
+      const sess = json.session || json
+      if (Array.isArray(json.sessions) || Array.isArray(json)) {
+        const rows = (json.sessions || json).map((r) => r.session || r)
+        return R.mdTable(R.asArray(rows) || [], [
+          { h: '会话', v: (r) => r.id ?? r.session_id ?? '' },
+          { h: 'issue', v: (r) => r.issue_id ?? r.issue_number ?? '' },
+          { h: '节点', v: (r) => r.agent_type ?? '' },
+          { h: '状态', v: (r) => r.status ?? '' },
+          { h: '到期(epoch)', v: (r) => String(r.token_expires_at ?? '').slice(0, 16) },
+        ])
+      }
+      const lines = [`### 接管会话 \`${sess.id ?? '-'}\``, '']
+      lines.push(`- 状态: ${sess.status ?? '-'} · 节点: ${sess.agent_type ?? '-'} · 任务: ${sess.task_id ?? '-'}`)
+      if (sess.token_expires_at) lines.push(`- 凭据到期 epoch: ${sess.token_expires_at}`)
+      if (sess.summary) lines.push(`- 摘要: ${String(sess.summary).slice(0, 200)}`)
+      if (sess.result_json) lines.push('', '**交回结果**', '', String(sess.result_json).slice(0, 2000))
+      return lines.join('\n')
+    },
+  },
+  {
+    name: 'grape_takeover_progress',
+    description:
+      '向平台回报接管节点的执行进度（写入 task_messages，云端/面板可见）。接管期间本地每完成一个关键动作调用一次。' +
+      '可选 attach：把本地会话 id 绑回接管会话，面板可跳回本地会话。',
+    schema: {
+      type: 'object',
+      properties: {
+        session_id: str('接管会话 id'),
+        summary: str('一句话进度摘要'),
+        messages: { type: 'array', items: { type: 'string' }, description: '进度消息列表（可选）' },
+        client_session: str('本地会话 id（可选，attach 用）'),
+      },
+      required: ['session_id'],
+    },
+    async native(a) {
+      if (a.client_session) await api.takeoverAttach(a.session_id, a.client_session).catch(() => {})
+      return api.takeoverProgress(a.session_id, a.messages || (a.summary ? [a.summary] : []), a.summary || '')
+    },
+    render(json) {
+      return json && typeof json === 'object' && !json.detail
+        ? `进度已回报${json.written != null ? `（written=${json.written}）` : ''}`
+        : R.fallbackJson(json)
+    },
+  },
+  {
+    name: 'grape_takeover_finish',
+    description:
+      '结束接管：本地携结构化产物交回（conclusion/actions/artifacts/next_step/issue_summary），' +
+      '平台写入 events.structured_output（与 worker 同格式）、按场景链把下一节点派发（如 coding→qa），链不断。' +
+      '⚠️ 用户决策层动作：确认本地成果可交回后再调用。' +
+      '两阶段确认流：先 request-finish（仅报告完成，等用户确认），用户确认后再本工具 finish。',
+    schema: {
+      type: 'object',
+      properties: {
+        session_id: str('接管会话 id'),
+        request_only: bool('true=只报告完成等用户确认（request-finish），false=正式交回（finish，需用户已确认）'),
+        summary: str('结论（做了什么、结果如何）'),
+        evidence: str('验证证据（命令+输出/测试结果）'),
+        files_written: { type: 'array', items: { type: 'string' }, description: '改动文件列表' },
+        actions: { type: 'array', items: { type: 'string' }, description: '关键动作列表' },
+        artifacts: { type: 'array', items: { type: 'string' }, description: '产物（分支/PR/报告链接等）' },
+        next_step: str('给下一节点（如 qa）的提示'),
+        issue_summary: str('整单摘要（可选）'),
+      },
+      required: ['session_id', 'summary'],
+    },
+    async native(a) {
+      const payload = {
+        summary: a.summary,
+        evidence: a.evidence || '',
+        files_written: a.files_written || [],
+        actions: a.actions || [],
+        artifacts: a.artifacts || [],
+        next_step: a.next_step || '',
+        issue_summary: a.issue_summary || '',
+      }
+      if (a.request_only) return api.takeoverRequestFinish(a.session_id, payload)
+      return api.takeoverFinish(a.session_id, { ...payload, outcome: 'completed', handoff: 'a2a' })
+    },
+    render(json) {
+      if (!json || typeof json !== 'object') return R.fallbackJson(json)
+      if (json.detail) return `交回失败：${typeof json.detail === 'string' ? json.detail : JSON.stringify(json.detail)}`
+      const lines = []
+      const isRequestOnly = json.changed === undefined && !json.event_status && !json.next_agent
+        && (json.awaiting_confirmation || json.requested || json.session?.finish_requested_at)
+      if (isRequestOnly) lines.push('### 已报告完成，等待用户确认', '', '用户确认后再次调用本工具（request_only=false）正式交回。')
+      else {
+        lines.push('### 接管交回完成', '')
+        if (json.next_agent) lines.push(`- 下一节点: ${json.next_agent}（handoff=${json.handoff ?? 'a2a'}）`)
+        if (json.issue_stage) lines.push(`- issue 阶段: ${json.issue_stage}`)
+        if (json.event_status) lines.push(`- 事件终态: ${json.event_status}`)
+        if (json.session?.handoff_seq) lines.push(`- 结构化结论已写入事件流 seq=${json.session.handoff_seq}`)
+        lines.push('', '_流水线从断点继续，无需 context 口述、无需 trigger 重触发。_')
+      }
+      return lines.join('\n')
+    },
+  },
+  {
+    name: 'grape_takeover_abort',
+    description:
+      '放弃接管、让渡回流水线：接管会话终止、凭据吊销，当前节点重新派发给云端引擎（redispatch=true，默认）。' +
+      'redispatch=false 仅停止接管不重派（节点回到队列等待人工/调度）。' +
+      '与旧路径 cancel 的区别：链完全不断，已完成节点保留、后续节点不动。',
+    schema: {
+      type: 'object',
+      properties: {
+        session_id: str('接管会话 id'),
+        redispatch: bool('是否重新派发当前节点（默认 true）'),
+        reason: str('放弃原因（写入审计事件）'),
+      },
+      required: ['session_id'],
+    },
+    async native(a) { return api.takeoverAbort(a.session_id, a.redispatch !== false, a.reason || '') },
+    render(json) {
+      if (!json || typeof json !== 'object') return R.fallbackJson(json)
+      if (json.detail) return `让渡失败：${typeof json.detail === 'string' ? json.detail : JSON.stringify(json.detail)}`
+      const lines = ['### 接管已让渡回流水线', '']
+      if (json.redispatched || json.redispatch) lines.push('- 当前节点已重新派发，云端引擎将接手继续')
+      else lines.push('- 节点已回到队列（未重派）')
+      if (json.token_revoked || json.revoked) lines.push('- 接管凭据已吊销')
+      if (json.reason) lines.push(`- 原因: ${json.reason}`)
       return lines.join('\n')
     },
   },

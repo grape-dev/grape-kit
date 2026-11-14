@@ -146,6 +146,24 @@ export const api = {
     apiRequest('GET', '/api/runtime/issues/takeover-context', { query: { repo_key: `gitcode:${owner}/${repo}`, issue_number: Number(number) } }),
   workerCredentialCreate: (name, scope = 'user', repoKey = '') =>
     apiRequest('POST', '/api/settings/runtime-credentials', { body: { name, scope, ...(repoKey ? { repo_key: repoKey } : {}) } }),
+
+  // 端云协同 · takeover 会话（weekly-11+，PR #1268 一等接管资源）
+  takeoverStart: (owner, repo, issueNumber, agentType) =>
+    apiRequest('POST', '/api/takeover/sessions', { body: { owner, repo, issue_number: String(issueNumber), ...(agentType ? { agent_type: agentType } : {}), platform: 'grape-kit' } }),
+  takeoverList: (owner, repo, issueNumber, activeOnly = true) =>
+    apiRequest('GET', '/api/takeover/sessions', { query: { repo_key: `gitcode:${owner}/${repo}`, ...(issueNumber ? { issue_number: String(issueNumber) } : {}), ...(activeOnly ? {} : { all: 1 }) } }),
+  takeoverGet: (sessionId, renew = false) =>
+    apiRequest('GET', `/api/takeover/sessions/${sessionId}`, { query: renew ? { renew: 1 } : {} }),
+  takeoverAttach: (sessionId, clientSession) =>
+    apiRequest('POST', `/api/takeover/sessions/${sessionId}/attach`, { body: { client_session: clientSession || '' } }),
+  takeoverProgress: (sessionId, messages, summary = '') =>
+    apiRequest('POST', `/api/takeover/sessions/${sessionId}/progress`, { body: { messages: messages || [], ...(summary ? { summary } : {}) } }),
+  takeoverRequestFinish: (sessionId, payload) =>
+    apiRequest('POST', `/api/takeover/sessions/${sessionId}/request-finish`, { body: payload || {} }),
+  takeoverFinish: (sessionId, payload) =>
+    apiRequest('POST', `/api/takeover/sessions/${sessionId}/finish`, { body: payload || {} }),
+  takeoverAbort: (sessionId, redispatch = true, reason = '') =>
+    apiRequest('POST', `/api/takeover/sessions/${sessionId}/abort`, { body: { redispatch, ...(reason ? { reason } : {}) } }),
 }
 
 /** 终态集合（与 cli.mjs 一致） */

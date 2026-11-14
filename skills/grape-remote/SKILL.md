@@ -23,7 +23,19 @@ description: |
 
 ## 端云协同（⚠️ 语义边界必读）
 
-- **接管不是无损操作**：平台只有「终止整链」的 cancel，没有「暂停当前节点」原语。用户说"停掉云端、本地接管"时，必须先讲清后果（当前及后续节点停止、不做 QA/SRE 交接），并让用户在「①让渡接管（云端继续跑，推荐）②暂停等确认 ③终止整链」三选中显式选择，未选择不得执行 cancel。
+### 路径一：takeover 会话原语（weekly-11+ 平台，首选）
+
+平台具备 takeover API（`POST /api/takeover/sessions` 返回 200 即支持）时，接管走会话原语，**链不断**：
+
+1. `grape_takeover_start(owner, repo, number[, agent_type])` —— 原子让渡：云端任务停、本地接手、签发 tko_ 凭据（12h）、返回完整上下文与服务端渲染脚本。**不要**再调用 `grape_cancel_issue`。
+2. 本地继续该节点工作；关键动作后 `grape_takeover_progress(session_id, summary)` 回报（云端面板可见）。
+3. 完成后两阶段交回：先 `grape_takeover_finish(request_only=true, …)` 报告完成 → **用户确认** → 再 `grape_takeover_finish(…)` 正式交回（结构化产物，coding→qa 自动接力）。
+4. 中途放弃：`grape_takeover_abort(session_id, redispatch=true)` —— 当前节点重新派发回云端引擎，已完成的节点保留。
+5. 断连恢复：`grape_takeover_status(owner, repo, number)` 找回 session_id；单条查询带 `renew=true` 续期凭据。
+
+### 路径二：cancel+context 旧路径（平台无 takeover API 时的回退）
+
+- **接管不是无损操作**：cancel 是「终止整链」语义。用户说"停掉云端、本地接管"时，必须先讲清后果（当前及后续节点停止、不做 QA/SRE 交接），并让用户在「①takeover 会话接管（若平台支持，推荐）②让渡并行（云端继续跑）③终止整链+本地接管」中显式选择，未选择不得执行 cancel。
 - **本地成果交回**：cancel 后云端不认识你的本地分支。交回时用 `grape_trigger_pipeline` 重新触发，context 必须结构化写明：产出分支名 + commit + 测试证据 + 「代码已在远端分支，请识别后直接进 QA，勿重复实现」。
 - **resume 的坑**：接口返回成功 ≠ 流水线真的恢复（0.3.1 起工具会自动回读复核，verified_stage 字段是事实，接口回执不是）。
 - **QA 打回**：PR 评论会出现在 `grape_get_issue_events`；发现打回后向用户展示缺陷清单，本地修复后重推，云端 QA 会自动复审。

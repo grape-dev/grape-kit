@@ -3,14 +3,14 @@ import assert from 'node:assert/strict'
 import { TOOLS, toolDefs, findTool } from '../src/tools.mjs'
 import * as R from '../src/render.mjs'
 
-test('工具面共 31 个且命名规范', () => {
-  assert.equal(TOOLS.length, 31)
+test('工具面共 36 个且命名规范', () => {
+  assert.equal(TOOLS.length, 36)
   for (const t of TOOLS) {
     assert.match(t.name, /^grape_[a-z_]+$/)
     assert.ok(t.description.length >= 12, `${t.name} 描述过短`)
     assert.equal(t.schema.type, 'object')
   }
-  assert.equal(toolDefs().length, 31)
+  assert.equal(toolDefs().length, 36)
   assert.ok(findTool('grape_trigger_pipeline'))
   assert.equal(findTool('nope'), null)
 })
