@@ -195,7 +195,8 @@ function doctor(probe) {
   checks.push(['node >= 20', Number(process.versions.node.split('.')[0]) >= 20 ? 'ok' : 'FAIL'])
   const bin = process.env.GRAPE_CLI_BIN || 'grape'
   const which = spawnSync(bin, ['--version'], { encoding: 'utf8', timeout: 10_000 })
-  checks.push([`grape CLI（${bin}）`, which.status === 0 ? `ok（${String(which.stdout).trim()}）` : 'FAIL（pip install git+https://gitcode.com/grape-dev/grape-cli.git）'])
+  // v0.3.0 起原生 HTTP 直连，CLI 仅 401 回退通道——缺失降级为提示而非 FAIL
+  checks.push([`grape CLI（${bin}，可选回退通道）`, which.status === 0 ? `ok（${String(which.stdout).trim()}）` : '未安装（可选：pip install git+https://gitcode.com/grape-dev/grape-cli.git）'])
   const baseUrl = process.env.GRAPE_BASE_URL
   checks.push(['GRAPE_BASE_URL', baseUrl ? `ok（${baseUrl}）` : '未设置（FAIL）：export GRAPE_BASE_URL=https://www.grapedev.cn'])
   checks.push(['GRAPE_API_TOKEN', process.env.GRAPE_API_TOKEN ? 'ok（已设置，不回显）' : '未设置（FAIL）：在 Grape WebUI 生成用户级 API Key'])
@@ -203,8 +204,17 @@ function doctor(probe) {
   checks.push(['opencode mcp.grape 条目', /"grape"\s*:\s*\{/.test(cfgText) ? 'ok' : '未安装（node setup.mjs install --target opencode）'])
   checks.push(['opencode skill 副本', existsSync(join(p.skillsDir, 'grape-remote', 'SKILL.md')) ? 'ok' : '未安装'])
   if (probe && baseUrl) {
-    const ok = spawnSync(process.execPath, ['-e', `fetch(process.argv[1]+'/static/openapi.json').then(r=>console.log('contract',r.status)).catch(()=>console.log('contract unreachable'))`, baseUrl], { encoding: 'utf8', timeout: 20_000 })
-    checks.push(['契约连通性', String(ok.stdout).trim() || '探测失败'])
+    const ok = spawnSync(process.execPath, ['-e', `
+const base = process.argv[1]
+const tok = process.env.GRAPE_API_TOKEN || ''
+Promise.all([
+  fetch(base + '/static/openapi.json').then(r => 'contract ' + r.status).catch(() => 'contract unreachable'),
+  fetch(base + '/api/takeover/sessions', { headers: tok ? { Authorization: 'Bearer ' + tok } : {} })
+    .then(r => r.status === 404 ? 'takeover 不可用（平台 < weekly-11，接管工具走回退路径）' : 'takeover ' + r.status + (r.status === 401 || r.status === 422 ? '（可用，需鉴权/参数）' : ''))
+    .catch(() => 'takeover unreachable'),
+]).then(l => console.log(l.join(' | ')))
+`, baseUrl], { encoding: 'utf8', timeout: 20_000 })
+    checks.push(['服务端能力探测', String(ok.stdout).trim() || '探测失败'])
   }
   for (const [k, v] of checks) console.log(`  ${String(v).startsWith('ok') ? '[ok]' : '[!!]'} ${k}: ${v}`)
 }
