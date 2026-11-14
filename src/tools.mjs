@@ -733,9 +733,17 @@ export const TOOLS = [
       if (!json || typeof json !== 'object') return R.fallbackJson(json)
       if (json.detail) return `让渡失败：${typeof json.detail === 'string' ? json.detail : JSON.stringify(json.detail)}`
       const lines = ['### 接管已让渡回流水线', '']
-      if (json.redispatched || json.redispatch) lines.push('- 当前节点已重新派发，云端引擎将接手继续')
-      else lines.push('- 节点已回到队列（未重派）')
-      if (json.token_revoked || json.revoked) lines.push('- 接管凭据已吊销')
+      if (json.redispatched === false) {
+        // 平台 #2517 修复后顶层披露：重派失败必须可见，否则链静默断裂
+        lines.push('- 接管会话已终止、凭据已吊销')
+        lines.push('', '**⚠️ 重派失败——链未自动恢复！**', '')
+        lines.push(`原因: ${json.redispatch_error || (json.redispatch && json.redispatch.error) || '未知'}`)
+        lines.push('', '请稍后手动重派该节点事件（`POST /api/events/{seq}/redispatch`），或联系平台方。')
+      } else if (json.redispatched === true || json.redispatch) {
+        lines.push('- 当前节点已重新派发，云端引擎将接手继续')
+      } else {
+        lines.push('- 节点已回到队列（未重派）')
+      }
       if (json.reason) lines.push(`- 原因: ${json.reason}`)
       return lines.join('\n')
     },

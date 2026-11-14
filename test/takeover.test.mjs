@@ -84,10 +84,9 @@ test('takeover_finish render：request 与完成两态', () => {
 
 test('takeover_abort render：让渡回流水线', () => {
   const t = findTool('grape_takeover_abort')
-  const out = t.render({ redispatched: true, token_revoked: true })
+  const out = t.render({ redispatched: true, reason: 'r' })
   assert.match(out, /让渡回流水线/)
   assert.match(out, /重新派发/)
-  assert.match(out, /吊销/)
 })
 
 test('takeover_finish 两阶段 native 分派', async () => {
@@ -117,4 +116,28 @@ test('takeover_finish 两阶段 native 分派', async () => {
     apiMod.api.takeoverRequestFinish = orig
     apiMod.api.takeoverFinish = origF
   }
+})
+
+test('takeover_abort render：重派失败顶层披露（#2517）', () => {
+  const t = findTool('grape_takeover_abort')
+  // 修复后平台顶层字段：redispatched=false + redispatch_error
+  const fail = t.render({ ok: true, status: 'aborted', redispatched: false, redispatch_error: '409: 已重新派发过' })
+  assert.match(fail, /重派失败/)
+  assert.match(fail, /链未自动恢复/)
+  assert.match(fail, /redispatch/)
+  assert.ok(fail.includes('手动重派'), '应给出手动重派指引')
+  const okOut = t.render({ ok: true, status: 'aborted', redispatched: true, reason: 'r' })
+  assert.match(okOut, /重新派发/)
+  assert.ok(!okOut.includes('重派失败'))
+  const noRe = t.render({ ok: true, status: 'aborted', reason: 'r' })
+  assert.match(noRe, /未重派/)
+})
+
+test('takeover_start render：node_already_advanced 警告可见（#2517 补充发现）', () => {
+  const t = findTool('grape_takeover_start')
+  const out = t.render({
+    takeover_id: 'tkos_x', warnings: ['remote_may_still_run', 'node_already_advanced: 链已交棒至下一节点（更新事件 seq=99 qa），本次接管与其并行'],
+  })
+  assert.match(out, /node_already_advanced/)
+  assert.match(out, /与其并行/)
 })
