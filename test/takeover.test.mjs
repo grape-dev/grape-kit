@@ -141,3 +141,16 @@ test('takeover_start render：node_already_advanced 警告可见（#2517 补充�
   assert.match(out, /node_already_advanced/)
   assert.match(out, /与其并行/)
 })
+
+test('CLI：grape-kit --version 输出版本号（P2-14）', async () => {
+  const { execFileSync } = await import('node:child_process')
+  const { readFileSync } = await import('node:fs')
+  const { join, dirname } = await import('node:path')
+  const { fileURLToPath } = await import('node:url')
+  const pkg = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'package.json'), 'utf8'))
+  const bin = join(dirname(fileURLToPath(import.meta.url)), '..', 'grape-kit.mjs')
+  for (const arg of ['--version', 'version', '-v']) {
+    const out = execFileSync(process.execPath, [bin, arg], { encoding: 'utf8' }).trim()
+    assert.equal(out, pkg.version, `${arg} 应输出版本号`)
+  }
+})

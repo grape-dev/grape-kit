@@ -221,6 +221,11 @@ Promise.all([
 
 /* ---------- main ---------- */
 
+if (cmd === '--version' || cmd === 'version' || cmd === '-v') {
+  console.log(JSON.parse(readFileSync(join(HERE, 'package.json'), 'utf8')).version)
+  process.exit(0)
+}
+
 if (cmd === 'install') {
   if (target !== 'opencode') {
     console.error(`MVP 仅支持 --target opencode（${target} 未支持；hermes 走 skill 手动复制，见 README）`)
