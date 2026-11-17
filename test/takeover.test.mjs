@@ -154,3 +154,60 @@ test('CLI：grape-kit --version 输出版本号（P2-14）', async () => {
     assert.equal(out, pkg.version, `${arg} 应输出版本号`)
   }
 })
+
+
+test('CLI：install --target workbuddy 支持（P0-1/P0-2，WorkBuddy 报告）', async () => {
+  const { execFileSync, spawnSync } = await import('node:child_process')
+  const { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync, mkdirSync } = await import('node:fs')
+  const { join } = await import('node:path')
+  const { tmpdir, homedir } = await import('node:os')
+  const dir = mkdtempSync(join(tmpdir(), 'wk-test-'))
+  const fakeHome = join(dir, 'home')
+  mkdirSync(fakeHome, { recursive: true })
+  const { fileURLToPath } = await import('node:url')
+  const bin = join(join(fileURLToPath(import.meta.url)), '..', '..', 'grape-kit.mjs')
+  // HOME 重定向（workbuddyPaths 用 homedir()）
+  const env = { ...process.env, HOME: fakeHome, USERPROFILE: fakeHome }
+  const r = spawnSync(process.execPath, [bin, 'install', '--target', 'workbuddy'], { encoding: 'utf8', env, timeout: 20000 })
+  assert.equal(r.status, 0, `install 应成功，实际输出: ${r.stderr || r.stdout}`)
+  const mcpPath = join(fakeHome, '.workbuddy', 'mcp.json')
+  assert.ok(existsSync(mcpPath), 'mcp.json 应被写入')
+  const cfg = JSON.parse(readFileSync(mcpPath, 'utf8'))
+  assert.ok(cfg.mcpServers && cfg.mcpServers['grape-kit'], 'mcpServers.grape-kit 应存在')
+  assert.equal(cfg.mcpServers['grape-kit'].command, 'npx', '默认走 npx')
+  assert.deepEqual(cfg.mcpServers['grape-kit'].args, ['-y', '-p', '@grape-dev/grape-kit', 'grape-kit-mcp'])
+  const skillPath = join(fakeHome, '.workbuddy', 'skills', 'grape-remote', 'SKILL.md')
+  assert.ok(existsSync(skillPath), 'skill 应落地 ~/.workbuddy/skills/grape-remote/')
+  // 幂等：重复 install 不炸
+  const r2 = spawnSync(process.execPath, [bin, 'install', '--target', 'workbuddy'], { encoding: 'utf8', env, timeout: 20000 })
+  assert.equal(r2.status, 0, '重复 install 应幂等')
+  // 卸载
+  const r3 = spawnSync(process.execPath, [bin, 'uninstall', '--target', 'workbuddy'], { encoding: 'utf8', env, timeout: 20000 })
+  assert.equal(r3.status, 0, 'uninstall 应成功')
+  const cfg2 = JSON.parse(readFileSync(mcpPath, 'utf8'))
+  assert.ok(!cfg2.mcpServers || !cfg2.mcpServers['grape-kit'], '卸载后条目应移除')
+  rmSync(dir, { recursive: true, force: true })
+})
+
+test('工具：4 个写操作有确认标注（P1-1，WorkBuddy 报告）', () => {
+  for (const name of ['grape_trigger_pipeline', 'grape_create_issue', 'grape_sync_repos', 'grape_worker_onboard']) {
+    const t = findTool(name)
+    assert.ok(/确认|决策|用户/.test(t.description), `${name} 描述应含确认语义`)
+  }
+})
+
+test('工具：worker_onboard 不输出明文 token（P1-2）', async () => {
+  const t = findTool('grape_worker_onboard')
+  // run() 会真调 API 创建凭据——mock api 模块的 workerCredentialCreate，只验证输出形状
+  const apiMod = await import('../src/api.mjs')
+  const orig = apiMod.api.workerCredentialCreate
+  apiMod.api.workerCredentialCreate = async () => ({ token: 'rta_FAKE_for_test_000000000', name: 'test-dev' })
+  try {
+    const j = await t.run({ device_name: 'test-dev' }, {})
+    assert.ok(j.install_command, '应有 install_command')
+    assert.ok(!j.install_command.includes('rta_FAKE_for_test_000000000'), 'install_command 不应含真实 token')
+    assert.ok(j.install_command.includes('<TOKEN>') || j.install_command.includes('RUNTIME_TOKEN='), '应以占位符/env 方式引导')
+  } finally {
+    apiMod.api.workerCredentialCreate = orig
+  }
+})

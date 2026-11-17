@@ -77,6 +77,7 @@ npx -y @grape-dev/grape-kit doctor --probe   # node / 服务端连通性 / 工�
 
 **hermes**（无 MCP client）：复制 `skills/grape-remote/` 到其 skill 目录，agent 以 bash 调 `grape` CLI 即可。
 **codex**：`~/.codex/config.toml` 加 `[mcp_servers.grape]`（command/args/env），示例见使用指南。
+**WorkBuddy**：`npx -y @grape-dev/grape-kit install --target workbuddy` —— 写入 `~/.workbuddy/mcp.json`（`mcpServers.grape-kit`，走 npx 免全局安装）+ skill 落 `~/.workbuddy/skills/grape-remote/`；自检 `doctor --target workbuddy --probe`。装完需在 WorkBuddy 中手动「信任」连接器（一次性）；凭据走环境变量，**不要**写进 mcp.json。
 
 ## 版本历史
 

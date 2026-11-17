@@ -38,6 +38,70 @@ function opencodePaths() {
   }
 }
 
+/* ---------- workbuddy（P0-1/P0-2，WorkBuddy 上架评估报告） ---------- */
+
+function workbuddyPaths() {
+  const home = homedir()
+  return {
+    mcpJson: join(home, '.workbuddy', 'mcp.json'),
+    skillsDir: join(home, '.workbuddy', 'skills'),
+  }
+}
+
+function installWorkbuddy() {
+  const p = workbuddyPaths()
+  mkdirSync(join(homedir(), '.workbuddy'), { recursive: true })
+  let cfg = { mcpServers: {} }
+  if (existsSync(p.mcpJson)) {
+    try { cfg = JSON.parse(readFileSync(p.mcpJson, 'utf8')) } catch { cfg = { mcpServers: {} } }
+    if (!cfg.mcpServers || typeof cfg.mcpServers !== 'object') cfg.mcpServers = {}
+  }
+  const backup = `${p.mcpJson}.bak-grapemcp-${new Date().toISOString().replace(/[-:T]/g, '').slice(0, 12)}`
+  if (existsSync(p.mcpJson)) writeFileSync(backup, readFileSync(p.mcpJson, 'utf8'))
+  cfg.mcpServers['grape-kit'] = {
+    command: 'npx',
+    args: ['-y', '-p', '@grape-dev/grape-kit', 'grape-kit-mcp'],
+  }
+  writeFileSync(p.mcpJson, JSON.stringify(cfg, null, 2) + String.fromCharCode(10))
+  console.log(`已写入 ${p.mcpJson}（mcpServers.grape-kit，${existsSync(backup) ? `备份: ${backup}` : '新建'}）`)
+  console.log('⚠️ 新注册的连接器需在 WorkBuddy 中手动「信任」一次，否则工具不可调用')
+  return true
+}
+
+function uninstallWorkbuddy() {
+  const p = workbuddyPaths()
+  if (!existsSync(p.mcpJson)) { console.log('未找到 ~/.workbuddy/mcp.json，无需卸载'); return }
+  let cfg
+  try { cfg = JSON.parse(readFileSync(p.mcpJson, 'utf8')) } catch { console.log('mcp.json 解析失败，跳过'); return }
+  if (cfg.mcpServers && cfg.mcpServers['grape-kit']) {
+    delete cfg.mcpServers['grape-kit']
+    writeFileSync(p.mcpJson, JSON.stringify(cfg, null, 2) + String.fromCharCode(10))
+    console.log('已移除 mcpServers.grape-kit')
+  } else console.log('未安装条目')
+}
+
+function doctorWorkbuddy(probe) {
+  const p = workbuddyPaths()
+  const checks = []
+  checks.push(['node >= 20', Number(process.versions.node.split('.')[0]) >= 20 ? 'ok' : 'FAIL'])
+  const baseUrl = process.env.GRAPE_BASE_URL
+  checks.push(['GRAPE_BASE_URL', baseUrl ? `ok（${baseUrl}）` : '未设置（FAIL）：export GRAPE_BASE_URL=https://www.grapedev.cn'])
+  checks.push(['GRAPE_API_TOKEN', process.env.GRAPE_API_TOKEN ? 'ok（已设置，不回显）' : '未设置（FAIL）：在 Grape WebUI 生成用户级 API Key（不要写进 mcp.json，用环境变量传递）'])
+  let mcpOk = false
+  if (existsSync(p.mcpJson)) {
+    try { mcpOk = !!JSON.parse(readFileSync(p.mcpJson, 'utf8')).mcpServers?.['grape-kit'] } catch {}
+  }
+  checks.push(['workbuddy mcpServers.grape-kit', mcpOk ? 'ok' : '未安装（npx -y @grape-dev/grape-kit install --target workbuddy）'])
+  checks.push(['workbuddy skill 副本', existsSync(join(p.skillsDir, 'grape-remote', 'SKILL.md')) ? 'ok' : '未安装'])
+  if (probe && baseUrl) {
+    const ok = spawnSync(process.execPath, ['-e',
+      `fetch(process.argv[1] + '/static/openapi.json').then(r => console.log('contract ' + r.status)).catch(() => console.log('contract unreachable'))`,
+      baseUrl], { encoding: 'utf8', timeout: 20_000 })
+    checks.push(['契约连通性', String(ok.stdout).trim() || '探测失败'])
+  }
+  for (const [k, v] of checks) console.log(`  ${String(v).startsWith('ok') ? '[ok]' : '[!!]'} ${k}: ${v}`)
+}
+
 /* ---------- mcp.jsonc 文本外科手术 ---------- */
 
 function findMcpBlockStart(text) {
@@ -175,6 +239,21 @@ function copySkill() {
   console.log(`skill 已安装: ${dst}`)
 }
 
+function copySkillWorkbuddy() {
+  const p = workbuddyPaths()
+  const src = join(HERE, 'skills', 'grape-remote')
+  if (!existsSync(src)) { console.warn('skill 源缺失，跳过'); return }
+  mkdirSync(p.skillsDir, { recursive: true })
+  const dst = join(p.skillsDir, 'grape-remote')
+  rmSync(dst, { recursive: true, force: true })
+  mkdirSync(dst, { recursive: true })
+  for (const f of readdirSync(src)) {
+    if (statSync(join(src, f)).isFile()) writeFileSync(join(dst, f), readFileSync(join(src, f)))
+  }
+  writeFileSync(join(p.skillsDir, RECEIPT), JSON.stringify({ installedBy: 'grape-kit', skills: ['grape-remote'], placedAt: new Date().toISOString() }, null, 2))
+  console.log(`skill 已安装: ${dst}`)
+}
+
 function uninstallSkill() {
   const p = opencodePaths()
   const receiptPath = join(p.skillsDir, RECEIPT)
@@ -227,18 +306,27 @@ if (cmd === '--version' || cmd === 'version' || cmd === '-v') {
 }
 
 if (cmd === 'install') {
-  if (target !== 'opencode') {
-    console.error(`MVP 仅支持 --target opencode（${target} 未支持；hermes 走 skill 手动复制，见 README）`)
+  if (target === 'workbuddy') {
+    installWorkbuddy()
+    copySkillWorkbuddy()
+  } else if (target !== 'opencode') {
+    console.error(`MVP 仅支持 --target opencode / workbuddy（${target} 未支持；hermes 走 skill 手动复制，见 README）`)
     process.exit(1)
+  } else {
+    const scriptAbs = resolve(String(arg('script', DEFAULT_SCRIPT)))
+    installOpencode(scriptAbs)
+    copySkill()
+    console.log('\n完成。环境变量（用户侧一次性）：')
+    console.log('  export GRAPE_BASE_URL=https://www.grapedev.cn')
+    console.log('  export GRAPE_API_TOKEN=grape_xxx   # WebUI 生成')
+    console.log('重启 opencode 会话后生效；用 node setup.mjs doctor 验证。')
   }
-  const scriptAbs = resolve(String(arg('script', DEFAULT_SCRIPT)))
-  installOpencode(scriptAbs)
-  copySkill()
-  console.log('\n完成。环境变量（用户侧一次性）：')
-  console.log('  export GRAPE_BASE_URL=https://www.grapedev.cn')
-  console.log('  export GRAPE_API_TOKEN=grape_xxx   # WebUI 生成')
-  console.log('重启 opencode 会话后生效；用 node setup.mjs doctor 验证。')
 } else if (cmd === 'uninstall') {
+  if (target === 'workbuddy') {
+    uninstallWorkbuddy()
+    rmSync(join(workbuddyPaths().skillsDir, 'grape-remote'), { recursive: true, force: true })
+    rmSync(join(workbuddyPaths().skillsDir, RECEIPT), { force: true })
+  } else {
   const p = opencodePaths()
   const cfgPath = existsSync(p.config) ? p.config : p.configAlt
   if (existsSync(cfgPath)) {
@@ -254,8 +342,10 @@ if (cmd === 'install') {
     }
   }
   uninstallSkill()
+  }
 } else if (cmd === 'doctor') {
-  doctor(!!arg('probe'))
+  if (target === 'workbuddy') doctorWorkbuddy(!!arg('probe'))
+  else doctor(!!arg('probe'))
 } else {
   console.log('用法: node setup.mjs install|uninstall|doctor [--target opencode] [--probe]')
 }

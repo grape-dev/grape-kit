@@ -29,7 +29,8 @@ export const TOOLS = [
   {
     name: 'grape_trigger_pipeline',
     description:
-      '触发 Grape DevOps 流水线（A2A 交接给首个节点，默认 vod）。Grape 多 agent 流水线的唯一外部入口；节点间流转由服务端内部驱动。' +
+      '触发 Grape DevOps 流水线（A2A 交接给首个节点，默认 vod）。⚠️ 用户决策层动作：触发前必须向用户确认目标 issue 与意图。' +
+      'Grape 多 agent 流水线的唯一外部入口；节点间流转由服务端内部驱动。' +
       '【本地接管成果交回场景】若该 issue 此前被本地接管实现过（远端分支已有成果），context 必须结构化说明：' +
       '产出分支名 + commit + 测试证据，并明确「代码已在远端分支，请识别后直接进入 QA，勿重复实现」。',
     schema: {
@@ -155,7 +156,7 @@ export const TOOLS = [
   },
   {
     name: 'grape_create_issue',
-    description:
+    description: '⚠️ 用户决策层动作：建单前必须向用户确认标题与描述。' +
       '在托管仓库创建 issue（可选同时触发流水线——由服务端场景配置决定）。' +
       'body 支持 title 与 markdown 正文 description（字段名以服务端契约为准，实测为 description 而非 body）。',
     schema: {
@@ -369,7 +370,8 @@ export const TOOLS = [
   },
   {
     name: 'grape_sync_repos',
-    description: '从 VCS 同步仓库列表到 Grape（纳管清单与远端对齐）。',
+    description: '⚠️ 用户决策层动作：同步会刷新仓库纳管清单，执行前需用户确认。' +
+      '从 VCS 同步仓库列表到 Grape（纳管清单与远端对齐）。',
     schema: { type: 'object', properties: {} },
     buildArgs() { return ['repos', 'sync'] },
     async native() { return api.syncRepos() },
@@ -753,6 +755,7 @@ export const TOOLS = [
     name: 'grape_worker_onboard',
     description:
       '把本机接入为 Grape Worker（生成 runtime 凭据并给出安装命令）。' +
+      '⚠️ 用户决策层动作：接入前必须向用户确认设备名与目标服务器；凭据只展示一次，请提示用户立即保存。' +
       '本工具只生成【可见的安装命令】，由 agent 在终端中执行（用户可亲眼看到并打断）——不静默安装。' +
       '执行后本机即与远端 worker 同级参与任务认领。',
     schema: {
@@ -785,8 +788,14 @@ export const TOOLS = [
       return {
         onboard: 'ready',
         device: name,
-        install_command: `curl -sSL ${base}/api/runtime/install | bash -s -- --token ${token} --server ${base} --device ${name}`,
-        note: '在终端可见地执行上方命令完成接入；凭据可在 grape settings runtime credentials 中管理/吊销',
+        credential_name: name,
+        install_command: `# 凭据 ${name} 已创建，token 仅展示一次（不写入命令历史）。
+# 方式一（推荐，token 不进 argv）：先 export 再执行
+RUNTIME_TOKEN=<在 WebUI 凭据页查看 ${name} 的 token> \
+  curl -sSL ${base}/api/runtime/install | bash -s -- --server ${base} --device ${name}
+# 方式二（一键安装，适用于一次性受控终端）：在 WebUI 复制 token 后替换 <TOKEN>
+curl -sSL ${base}/api/runtime/install | bash -s -- --token <TOKEN> --server ${base} --device ${name}`,
+        note: '凭据可在 grape settings runtime credentials 中管理/吊销；安装命令不内联真实 token（避免 shell 历史泄露）',
       }
     },
     render(json) {
