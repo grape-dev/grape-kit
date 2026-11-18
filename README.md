@@ -94,11 +94,26 @@ npx -y @grape-dev/grape-kit doctor --probe   # node / 服务端连通性 / 工�
 - **scope 是第一道门禁**：契约 219 命令中 session_only 的 28 个（git-repo 等）对外部 token 必 403，直接排除；`tko_` 接管凭据仅 repo_session 能力、结束即吊销
 - **无 UI 补偿**：工具返回即 Markdown 表格 / 节点链 / 事件时间线；`wait_task` 轮询带阶段摘要与超时提示
 
+## 版本更新提示
+
+`doctor` 自检与 MCP server 启动都会比对 npm registry 上的最新版本，本地落后时给出**一次性**升级提示：
+
+```bash
+npx -y @grape-dev/grape-kit doctor
+#   [!!] 版本更新: 有新版本 0.3.2 → 0.3.3（npm i -g @grape-dev/grape-kit 更新；GRAPE_KIT_SKIP_UPDATE_CHECK=1 关闭提醒）
+```
+
+- 只提示不自动升级，提示不阻塞 doctor 自检与 stdio 工具调用
+- 5s 有界超时 + 任何失败静默降级：registry 不可达时 `doctor` 与工具均正常
+- 24h 缓存（`~/.grape/grape-kit-update-check.json`）：同一新版本 24h 内只提示一次，不重复打扰
+- 关闭开关：`export GRAPE_KIT_SKIP_UPDATE_CHECK=1`（等价别名 `GRAPE_KIT_NO_UPDATE_CHECK=1`）
+- 版本比较按 semver：仅本地 < latest 才提示，本地更高或预发布版本不会被误报
+
 ## 开发与测试
 
 ```bash
 npm install
-npm test        # 52 个单测（fake-grape 替身，不依赖真实服务端）
+npm test        # 75 个单测（fake-grape 替身，不依赖真实服务端）
 npm run smoke   # 真实 stdio JSON-RPC 往返：initialize → tools/list → tools/call
 ```
 
@@ -111,7 +126,7 @@ node scripts/live-smoke.mjs
 
 ## Roadmap
 
-- [ ] 版本更新检测与升级提示（对齐 huaweicloud-devkit `check_update` 体验）
+- [x] 版本更新检测与升级提示（对齐 huaweicloud-devkit `check_update` 体验；doctor + MCP 双路径，24h 缓存）
 - [ ] install 目标扩展：codearts / workbuddy / officeace（integrations 三型）
 - [ ] 组织仓归位（grape-dev/grape-kit，待 #1773 授权）+ CI
 - [ ] dsh 宿主由 [grape-dsh](https://gitcode.com/grape-dev/grape-dsh) 独立插件承载，不重复建设
