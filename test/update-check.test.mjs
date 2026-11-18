@@ -68,3 +68,45 @@ test('checkUpdate：非 2xx registry 响应 → null', async () => {
   })
   assert.equal(r, null)
 })
+
+test('checkUpdate：GRAPE_KIT_NO_UPDATE_CHECK=1（别名开关）→ 直接 null 不打网络', async () => {
+  const { checkUpdate } = await loadMod()
+  let called = 0
+  const r = await checkUpdate('0.3.2', {
+    now: 1,
+    fetchImpl: async () => { called++; return { ok: true, json: async () => ({ version: '9.9.9' }) } },
+    env: { GRAPE_KIT_NO_UPDATE_CHECK: '1' },
+  })
+  assert.equal(r, null)
+  assert.equal(called, 0)
+})
+
+test('checkUpdate：本地版本高于 latest → null（semver 比较，非字符串不等）', async () => {
+  const { checkUpdate } = await loadMod()
+  const r = await checkUpdate('0.3.10', {
+    now: 1,
+    fetchImpl: async () => ({ ok: true, json: async () => ({ version: '0.3.9' }) }),
+    env: {},
+  })
+  assert.equal(r, null)
+})
+
+test('checkUpdate：本地预发布低于同号正式版 → 提示', async () => {
+  const { checkUpdate } = await loadMod()
+  const r = await checkUpdate('0.3.3-rc.1', {
+    now: 1,
+    fetchImpl: async () => ({ ok: true, json: async () => ({ version: '0.3.3' }) }),
+    env: {},
+  })
+  assert.deepEqual(r, { latest: '0.3.3', cached: false })
+})
+
+test('checkUpdate：本地正式版高于 latest 预发布 → null', async () => {
+  const { checkUpdate } = await loadMod()
+  const r = await checkUpdate('0.3.3', {
+    now: 1,
+    fetchImpl: async () => ({ ok: true, json: async () => ({ version: '0.3.3-rc.1' }) }),
+    env: {},
+  })
+  assert.equal(r, null)
+})
