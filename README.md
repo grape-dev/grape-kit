@@ -78,7 +78,7 @@ npx -y @grape-dev/grape-kit doctor --probe   # node / 服务端连通性 / 各�
 **hermes**（无 MCP client）：复制 `skills/grape-remote/` 到其 skill 目录，agent 以 bash 调 `grape` CLI 即可。
 **codex**：`~/.codex/config.toml` 加 `[mcp_servers.grape]`（command/args/env），示例见使用指南。
 **WorkBuddy**：`npx -y @grape-dev/grape-kit install --target workbuddy` —— 写入 `~/.workbuddy/mcp.json`（`mcpServers.grape-kit`，走 npx 免全局安装）+ skill 落 `~/.workbuddy/skills/grape-remote/`；自检 `doctor --target workbuddy --probe`。装完需在 WorkBuddy 中手动「信任」连接器（一次性）；凭据走环境变量，**不要**写进 mcp.json。
-**CodeArts（华为云码道 CodeArts Agent）**：`npx -y @grape-dev/grape-kit install --target codearts` —— 写入码道 MCP 配置 `~/.codeartsdoer/codearts_cli.jsonc` 的 `mcp.grape-kit`（官方《MCP命令》文档的全局位置；项目级为 `<项目>/.codeartsdoer/codearts_cli.jsonc`，IDE 侧同源文件为 `mcp_settings.json`），可用 `GRAPE_CODEARTS_CONFIG` 指定实际路径；写前备份、重复安装先移除再插入；自检 `doctor --target codearts --probe`。装配后在码道「设置 → MCP工具 → 已安装」对 `grape-kit` 点一次「重启」生效。
+**CodeArts（华为云码道 CodeArts Agent）**：`npx -y @grape-dev/grape-kit install --target codearts` —— 写入码道 MCP 配置 `~/.codeartsdoer/codearts_cli.jsonc` 的 `mcp.grape-kit`（官方《MCP命令》文档的全局位置；IDE 侧同源文件为 `mcp_settings.json`）；默认只写**全局**配置，项目级需显式 `GRAPE_CODEARTS_CONFIG=<项目>/.codeartsdoer/codearts_cli.jsonc`。写前备份、重复安装先移除再插入；自检 `doctor --target codearts --probe`。装配后在码道「设置 → MCP工具 → 已安装」对 `grape-kit` 点一次「重启」生效。
 **OfficeAce（果办OfficeAce）**：`npx -y @grape-dev/grape-kit install --target officeace` —— 果办OfficeAce 的连接器**仅支持 GUI 注册**，安装器写一份可直接粘贴的清单 `~/.officeace/mcp.json`（`mcpServers.grape-kit`，可用 `GRAPE_OFFICEACE_MANIFEST` 覆盖）并打印手动步骤：扩展 → 连接器 → 我的连接器 → 自定义添加 → JSON配置 → 粘贴 → 确认并连接；自检 `doctor --target officeace`（清单存在 ≠ 已在客户端导入）。
 
 ### 受支持宿主（`--target`）

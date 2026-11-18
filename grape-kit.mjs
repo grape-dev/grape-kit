@@ -277,7 +277,8 @@ function installOfficeace() {
   }
   mkdirSync(dirname(manifest), { recursive: true })
   const backup = backupOf(manifest)
-  // 先移除再插入：幂等，且不覆盖文件内其他连接器
+  // 覆盖同名连接器（幂等），不触碰文件内其他连接器。注意：清单是「导入用 JSON」，
+  // 整文件 JSON 往返会丢掉注释——OfficeAce 的粘贴导入本身也不接受注释。
   cfg.mcpServers['grape-kit'] = officeaceEntry()
   writeFileSync(manifest, JSON.stringify(cfg, null, 2) + '\n')
   console.log(`已写入 ${manifest}（mcpServers.grape-kit${backup ? `，备份: ${backup}` : '，新建'}）`)
@@ -514,10 +515,7 @@ function installOpencode(scriptAbs) {
     // 无 mcp 块：纯 JSON 文件可安全整体重写；解析失败（含注释的 jsonc）才报错
     try {
       const cfg = JSON.parse(text)
-      cfg.mcp = {
-        ...cfg.mcp,
-        grape: { type: 'local', command: [process.execPath, scriptAbs], enabled: true, timeout: 600000 },
-      }
+      cfg.mcp = { ...cfg.mcp, grape: opencodeEntry(scriptAbs) }
       const backup = backupOf(cfgPath, text)
       writeFileSync(cfgPath, JSON.stringify(cfg, null, 2) + '\n')
       console.log(`已写入 ${cfgPath}（新建 mcp 块，备份: ${backup}）`)
@@ -690,15 +688,13 @@ function detectOpencode() {
 
 function doctorOpencode(probe) {
   const p = opencodePaths()
-  const checks = []
-  checks.push(['node >= 20', Number(process.versions.node.split('.')[0]) >= 20 ? 'ok' : 'FAIL'])
   const bin = process.env.GRAPE_CLI_BIN || 'grape'
   const which = spawnSync(bin, ['--version'], { encoding: 'utf8', timeout: 10_000 })
+  // 与其它宿主共用 baseChecks / printChecks，避免文案与判定各写一份后漂移
+  const checks = baseChecks()
   // v0.3.0 起原生 HTTP 直连，CLI 仅 401 回退通道——缺失降级为提示而非 FAIL
-  checks.push([`grape CLI（${bin}，可选回退通道）`, which.status === 0 ? `ok（${String(which.stdout).trim()}）` : '未安装（可选：pip install git+https://gitcode.com/grape-dev/grape-cli.git）'])
+  checks.splice(1, 0, [`grape CLI（${bin}，可选回退通道）`, which.status === 0 ? `ok（${String(which.stdout).trim()}）` : '未安装（可选：pip install git+https://gitcode.com/grape-dev/grape-cli.git）'])
   const baseUrl = process.env.GRAPE_BASE_URL
-  checks.push(['GRAPE_BASE_URL', baseUrl ? `ok（${baseUrl}）` : '未设置（FAIL）：export GRAPE_BASE_URL=https://www.grapedev.cn'])
-  checks.push(['GRAPE_API_TOKEN', process.env.GRAPE_API_TOKEN ? 'ok（已设置，不回显）' : '未设置（FAIL）：在 Grape WebUI 生成用户级 API Key'])
   const found = detectOpencode()
   checks.push(['opencode mcp.grape 条目', found.ok ? 'ok' : '未安装（node setup.mjs install --target opencode）'])
   checks.push(['opencode skill 副本', existsSync(join(p.skillsDir, 'grape-remote', 'SKILL.md')) ? 'ok' : '未安装'])
@@ -715,7 +711,7 @@ Promise.all([
 `, baseUrl], { encoding: 'utf8', timeout: 20_000 })
     checks.push(['服务端能力探测', String(ok.stdout).trim() || '探测失败'])
   }
-  for (const [k, v] of checks) console.log(`  ${String(v).startsWith('ok') ? '[ok]' : '[!!]'} ${k}: ${v}`)
+  printChecks(checks)
 }
 
 /* ---------- 宿主注册表（install / uninstall / doctor 共用同一份路径定义，防「装了检不出」） ---------- */
