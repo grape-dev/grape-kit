@@ -29,6 +29,21 @@ const arg = (name, def = undefined) => {
 const cmd = process.argv[2] || 'help'
 const target = arg('target', 'opencode')
 
+/** 受支持宿主；hermes 无 MCP client（走 skill 手动复制）、dsh 由 grape-dsh 独立插件承载 */
+const SUPPORTED_TARGETS = ['opencode', 'workbuddy', 'codearts', 'officeace']
+
+/** 未知 target 明确报错，不静默回落到 opencode（否则会写错宿主的配置） */
+function resolveTarget() {
+  const t = String(target)
+  if (!SUPPORTED_TARGETS.includes(t)) {
+    console.error(`不支持的 --target: ${t}`)
+    console.error(`受支持宿主: ${SUPPORTED_TARGETS.join(' / ')}`)
+    console.error('（hermes 无 MCP client，复制 skills/grape-remote 手动装配；dsh 由 grape-dsh 独立插件承载）')
+    process.exit(1)
+  }
+  return t
+}
+
 function opencodePaths() {
   const home = homedir()
   return {
@@ -306,12 +321,10 @@ if (cmd === '--version' || cmd === 'version' || cmd === '-v') {
 }
 
 if (cmd === 'install') {
-  if (target === 'workbuddy') {
+  const t = resolveTarget()
+  if (t === 'workbuddy') {
     installWorkbuddy()
     copySkillWorkbuddy()
-  } else if (target !== 'opencode') {
-    console.error(`MVP 仅支持 --target opencode / workbuddy（${target} 未支持；hermes 走 skill 手动复制，见 README）`)
-    process.exit(1)
   } else {
     const scriptAbs = resolve(String(arg('script', DEFAULT_SCRIPT)))
     installOpencode(scriptAbs)
@@ -322,7 +335,8 @@ if (cmd === 'install') {
     console.log('重启 opencode 会话后生效；用 node setup.mjs doctor 验证。')
   }
 } else if (cmd === 'uninstall') {
-  if (target === 'workbuddy') {
+  const t = resolveTarget()
+  if (t === 'workbuddy') {
     uninstallWorkbuddy()
     rmSync(join(workbuddyPaths().skillsDir, 'grape-remote'), { recursive: true, force: true })
     rmSync(join(workbuddyPaths().skillsDir, RECEIPT), { force: true })
@@ -344,8 +358,9 @@ if (cmd === 'install') {
   uninstallSkill()
   }
 } else if (cmd === 'doctor') {
-  if (target === 'workbuddy') doctorWorkbuddy(!!arg('probe'))
+  const t = resolveTarget()
+  if (t === 'workbuddy') doctorWorkbuddy(!!arg('probe'))
   else doctor(!!arg('probe'))
 } else {
-  console.log('用法: node setup.mjs install|uninstall|doctor [--target opencode] [--probe]')
+  console.log(`用法: node setup.mjs install|uninstall|doctor [--target ${SUPPORTED_TARGETS.join('|')}] [--probe]`)
 }
