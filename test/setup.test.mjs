@@ -96,7 +96,7 @@ test('install 在无 mcp 块的纯 JSON 配置上自动新建块', () => {
 
 test('doctor 在干净 HOME 下逐项报告', () => {
   const h = home()
-  const r = run(['doctor'], h)
+  const r = run(['doctor'], h, { GRAPE_KIT_SKIP_UPDATE_CHECK: '1' })
   assert.equal(r.status, 0, r.stderr)
   assert.match(r.stdout, /node >= 20/)
   assert.match(r.stdout, /GRAPE_BASE_URL/)

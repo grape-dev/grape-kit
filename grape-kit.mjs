@@ -17,6 +17,7 @@ import { homedir, tmpdir } from 'node:os'
 import { join, dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
+import { checkUpdate, isUpdateCheckDisabled } from './src/update-check.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const DEFAULT_SCRIPT = resolve(HERE, 'grape-kit-mcp.mjs')
@@ -268,7 +269,7 @@ function uninstallSkill() {
 
 /* ---------- doctor ---------- */
 
-function doctor(probe) {
+async function doctor(probe) {
   const p = opencodePaths()
   const checks = []
   checks.push(['node >= 20', Number(process.versions.node.split('.')[0]) >= 20 ? 'ok' : 'FAIL'])
@@ -295,6 +296,16 @@ Promise.all([
 `, baseUrl], { encoding: 'utf8', timeout: 20_000 })
     checks.push(['服务端能力探测', String(ok.stdout).trim() || '探测失败'])
   }
+  // check_update：复用 src/update-check.mjs（24h 缓存 + 5s 有界超时，失败静默，不阻塞其它检查）
+  const pkgVersion = JSON.parse(readFileSync(join(HERE, 'package.json'), 'utf8')).version
+  let upd = null
+  try { upd = await checkUpdate(pkgVersion) } catch { /* 版本检查绝不影响 doctor */ }
+  const disabled = isUpdateCheckDisabled(process.env)
+  checks.push(['版本更新', upd && upd.latest
+    ? `有新版本 ${pkgVersion} → ${upd.latest}（npm i -g @grape-dev/grape-kit 更新；GRAPE_KIT_SKIP_UPDATE_CHECK=1 关闭提醒）`
+    : disabled
+      ? 'ok（提示已关闭）'
+      : `ok（已是最新 ${pkgVersion}）`])
   for (const [k, v] of checks) console.log(`  ${String(v).startsWith('ok') ? '[ok]' : '[!!]'} ${k}: ${v}`)
 }
 
@@ -345,7 +356,7 @@ if (cmd === 'install') {
   }
 } else if (cmd === 'doctor') {
   if (target === 'workbuddy') doctorWorkbuddy(!!arg('probe'))
-  else doctor(!!arg('probe'))
+  else await doctor(!!arg('probe'))
 } else {
   console.log('用法: node setup.mjs install|uninstall|doctor [--target opencode] [--probe]')
 }
