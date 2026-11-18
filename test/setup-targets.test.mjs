@@ -172,3 +172,41 @@ test('workbuddy 安装/自检/卸载不回归', () => {
   assert.ok(!existsSync(join(h, '.workbuddy', 'skills', 'grape-remote')))
   rmSync(h, { recursive: true, force: true })
 })
+
+/* ---------- 边缘状态：未安装 / 无 mcp 块的 jsonc / 纯 JSON ---------- */
+
+test('doctor 对未安装的新宿主给出「未安装」而非 ok', () => {
+  const h = home()
+  for (const t of ['codearts', 'officeace']) {
+    const d = run(['doctor', '--target', t], h)
+    assert.equal(d.status, 0, d.stderr)
+    assert.match(d.stdout, /\[!!\][^\n]*(codearts|officeace)[^\n]*未安装/i, `${t} 未安装应报 [!!] 未安装`)
+  }
+  rmSync(h, { recursive: true, force: true })
+})
+
+test('codearts 纯 JSON 配置无 mcp 块时自动新建块并备份既有内容', () => {
+  const h = home()
+  const dir = join(h, '.codeartsdoer')
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(join(dir, 'codearts_cli.jsonc'), JSON.stringify({ telemetry: false }, null, 2))
+  const r = run(['install', '--target', 'codearts'], h)
+  assert.equal(r.status, 0, r.stderr)
+  const cfg = JSON.parse(readFileSync(join(dir, 'codearts_cli.jsonc'), 'utf8'))
+  assert.equal(cfg.telemetry, false, '既有字段必须保留')
+  assert.ok(cfg.mcp['grape-kit'])
+  assert.ok(backupsIn(dir).length >= 1)
+  rmSync(h, { recursive: true, force: true })
+})
+
+test('codearts 含注释且无 mcp 块时明确报错，不静默失败', () => {
+  const h = home()
+  const dir = join(h, '.codeartsdoer')
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(join(dir, 'codearts_cli.jsonc'), '{\n  // 注释\n  "telemetry": false\n}\n')
+  const r = run(['install', '--target', 'codearts'], h)
+  assert.notEqual(r.status, 0, '无法安全改写时应失败')
+  assert.match(`${r.stderr}${r.stdout}`, /mcp|README/)
+  assert.match(readFileSync(join(dir, 'codearts_cli.jsonc'), 'utf8'), /注释/, '失败时不得改写用户文件')
+  rmSync(h, { recursive: true, force: true })
+})
