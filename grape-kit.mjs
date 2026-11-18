@@ -305,7 +305,7 @@ Promise.all([
     ? `有新版本 ${pkgVersion} → ${upd.latest}（npm i -g @grape-dev/grape-kit 更新；GRAPE_KIT_SKIP_UPDATE_CHECK=1 关闭提醒）`
     : disabled
       ? 'ok（提示已关闭）'
-      : `ok（已是最新 ${pkgVersion}）`])
+      : `ok（已是最新 ${pkgVersion} / 24h 内已提示过或检测不可用）`])
   for (const [k, v] of checks) console.log(`  ${String(v).startsWith('ok') ? '[ok]' : '[!!]'} ${k}: ${v}`)
 }
 
