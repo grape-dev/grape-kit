@@ -95,5 +95,9 @@ export function checkUpdate(localVersion, { now = Date.now(), fetchImpl = fetch,
       if (newer) return { latest, cached: false }
       return null
     })
-    .catch(() => null)
+    .catch(() => {
+      // 失败也落盘（latest 为空），遵循「24h 内无论结果都不再打 registry」
+      writeCache({ checkedAt: now, latest: '', notified: '' })
+      return null
+    })
 }
