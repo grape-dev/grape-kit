@@ -87,12 +87,12 @@ npx -y @grape-dev/grape-kit doctor --probe   # node / 服务端连通性 / 各�
 |--------|----------|----------|------|
 | `opencode` | `~/.config/opencode/opencode.jsonc`（或 `opencode.json`） | `mcp.grape`（文本外科手术，保留注释） | `doctor --target opencode` |
 | `workbuddy` | `~/.workbuddy/mcp.json` | `mcpServers.grape-kit`（纯 JSON） | `doctor --target workbuddy` |
-| `codearts` | `~/.codeartsdoer/codearts_cli.jsonc` | `mcp.grape-kit`（`command`/`args`/`env`，文本外科手术） | `doctor --target codearts` |
+| `codearts` | `~/.codeartsdoer/codearts_cli.jsonc` | `mcp.grape-kit`（`type`/`command`/`args`/`env`，文本外科手术；`type` 取值 `local` 待 sre 实机确认） | `doctor --target codearts` |
 | `officeace` | `~/.officeace/mcp.json`（可导入清单） | `mcpServers.grape-kit`（纯 JSON） | `doctor --target officeace` |
 
 `doctor` **不带 `--target` 时汇总检出全部宿主**（逐条列出 `[ok]`/`未安装`），装过哪个宿主都能一眼看到；`doctor --target <宿主>` 查看单宿主详情（skill 副本、OfficeAce 导入状态等）。
 
-写入引擎按宿主格式分两类：`opencode` / `codearts` 走**文本外科手术**（结构扫描、保留注释、先移除再插入的幂等升级）；`workbuddy` / `officeace` 的宿主格式为纯 JSON，走**结构化 JSON 读写**（同名字段整体覆盖即幂等，JSON 往返不保留注释——OfficeAce 的粘贴导入本身也不接受注释）。四类宿主写入前均生成 `*.bak-grapemcp-<ts>` 备份（时间戳精确到秒，同秒重复写入自动加 `-2` 后缀不覆盖），写入前后各做一次结构校验，校验失败即非零退出并保留/回滚改动前的原文件；只增删 grape 条目不动他人配置。`install` 与 `doctor` 共用同一份宿主路径与条目判定；`doctor` 对损坏的配置显式报「配置损坏」而非「未安装」。未知 `--target` 直接报错并列出受支持宿主（`--target x` 与 `--target=x` 等价）。凭据一律走环境变量（`GRAPE_BASE_URL` / `GRAPE_API_TOKEN`），不写入任何宿主配置。
+写入引擎按宿主格式分两类：`opencode` / `codearts` 走**文本外科手术**（结构扫描、保留注释、先移除再插入的幂等升级）；`workbuddy` / `officeace` 的宿主格式为纯 JSON，走**结构化 JSON 读写**（同名字段整体覆盖即幂等，JSON 往返不保留注释——OfficeAce 的粘贴导入本身也不接受注释）。四类宿主的所有写入路径（含 `opencode` / `codearts` 的「无 `mcp` 块整体重写」与新建文件）统一经 `writeValidated`：写入前均生成 `*.bak-grapemcp-<ts>` 备份（时间戳精确到秒，同秒重复写入自动加 `-2` 后缀不覆盖），写入前后各做一次结构校验，校验失败即非零退出并保留/回滚改动前的原文件；只增删 grape 条目不动他人配置——宿主配置无法解析时直接非零退出并提示先修复或移走该文件，绝不重置覆盖（他人条目只会在 `.bak` 里是一种数据丢失）。`install` 与 `doctor` 共用同一份宿主路径与条目判定；`doctor` 对损坏的配置显式报「配置损坏」而非「未安装」，并指向实际解析失败的那个文件（`opencode.jsonc` 与 `opencode.json` 同时存在时不会误报正常的那个）。未知 `--target` 直接报错并列出受支持宿主（`--target x` 与 `--target=x` 等价）。凭据一律走环境变量（`GRAPE_BASE_URL` / `GRAPE_API_TOKEN`），不写入任何宿主配置。
 
 ## 版本历史
 
@@ -113,7 +113,7 @@ npx -y @grape-dev/grape-kit doctor --probe   # node / 服务端连通性 / 各�
 
 ```bash
 npm install
-npm test        # 85 个单测（fake-grape 替身 + 临时 HOME 隔离，不依赖真实服务端与宿主）
+npm test        # 88 个单测（fake-grape 替身 + 临时 HOME 隔离，不依赖真实服务端与宿主）
 npm run smoke   # 真实 stdio JSON-RPC 往返：initialize → tools/list → tools/call
 ```
 

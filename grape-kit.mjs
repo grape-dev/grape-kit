@@ -145,7 +145,12 @@ function installWorkbuddy() {
   const originalText = existsSync(p.mcpJson) ? readFileSync(p.mcpJson, 'utf8') : null
   let cfg = { mcpServers: {} }
   if (originalText !== null) {
-    try { cfg = JSON.parse(originalText) } catch { cfg = { mcpServers: {} } }
+    // 解析失败必须非零退出：静默重置会丢掉用户的其它连接器（只剩在 .bak 里），
+    // 与「只增删 grape 条目不动他人配置」冲突；与 officeace 走同一策略。
+    try { cfg = JSON.parse(originalText) } catch (e) {
+      console.error(`${p.mcpJson} 解析失败（${e.message}），请先修复或移走该文件后重试`)
+      process.exit(1)
+    }
     if (!cfg.mcpServers || typeof cfg.mcpServers !== 'object') cfg.mcpServers = {}
   }
   cfg.mcpServers['grape-kit'] = { command: 'npx', args: [...NPX_ARGS] }
@@ -189,7 +194,8 @@ function doctorWorkbuddy(probe) {
  * 码道 MCP 配置位置（官方《MCP命令》文档）：
  * - 全局：~/.codeartsdoer/codearts_cli.jsonc
  * - 项目级：<项目>/.codeartsdoer/codearts_cli.jsonc
- * 条目结构 {"mcp": {"<名称>": {"command","args","env"}}}。
+ * 条目结构 {"mcp": {"<名称>": {"type","command","args","env"}}}；本安装器写入的字段为
+ * type:"local" + command/args/env（`type` 取值官方文档无示例，待 sre 实机确认）。
  * 本安装器只写码道 CLI/全局配置；IDE 的 mcp_settings.json 顶层是 mcpServers（与 CLI 的 mcp 结构不同），不在写入范围。
  * GRAPE_CODEARTS_CONFIG 用于宿主实机路径差异（装配期指定，不改代码）。
  */
@@ -217,20 +223,20 @@ function installCodearts() {
   const inner = buildEntry('grape-kit', body)
   if (!existsSync(cfgPath)) {
     mkdirSync(dirname(cfgPath), { recursive: true })
-    writeFileSync(cfgPath, JSON.stringify({ mcp: { 'grape-kit': body } }, null, 2) + '\n')
+    writeValidated(cfgPath, JSON.stringify({ mcp: { 'grape-kit': body } }, null, 2) + '\n', null)
     console.log(`已写入 ${cfgPath}（新建文件与 mcp 块）`)
   } else {
     const text = readFileSync(cfgPath, 'utf8')
     if (!findMcpBlock(text)) {
-      // 无 mcp 块：纯 JSON 可整体重写；含注释的 jsonc 无法安全改写则报错
+      // 无 mcp 块：纯 JSON 可整体重写（同样走 writeValidated：写前/写后结构校验 + 备份）；
+      // 含注释的 jsonc 无法安全改写则报错，不改写用户文件
       let cfg
       try { cfg = JSON.parse(text) } catch (e) {
         console.error(`配置文件 ${cfgPath} 无 "mcp" 块且非纯 JSON（${e.message}）；请手动添加，README 有片段`)
         process.exit(1)
       }
       cfg.mcp = { ...cfg.mcp, 'grape-kit': body }
-      const backup = backupOf(cfgPath, text)
-      writeFileSync(cfgPath, JSON.stringify(cfg, null, 2) + '\n')
+      const backup = writeValidated(cfgPath, JSON.stringify(cfg, null, 2) + '\n', text)
       console.log(`已写入 ${cfgPath}（新建 mcp 块，备份: ${backup}）`)
     } else if (hasEntry(text, 'grape-kit')) {
       // 已安装：先移除再插入（幂等升级，避免字段漂移）；备份用改动前原文
@@ -537,18 +543,17 @@ function installOpencode(scriptAbs) {
     return writeEntry(removed, cfgPath, inner, text)
   }
   if (!findMcpBlock(text)) {
-    // 无 mcp 块：纯 JSON 文件可安全整体重写；解析失败（含注释的 jsonc）才报错
-    try {
-      const cfg = JSON.parse(text)
-      cfg.mcp = { ...cfg.mcp, grape: opencodeEntry(scriptAbs) }
-      const backup = backupOf(cfgPath, text)
-      writeFileSync(cfgPath, JSON.stringify(cfg, null, 2) + '\n')
-      console.log(`已写入 ${cfgPath}（新建 mcp 块，备份: ${backup}）`)
-      return true
-    } catch (e) {
-      console.error(`配置文件无 "mcp" 块且非纯 JSON（${e.message}）；请手动添加，README 有片段`)
+    // 无 mcp 块：纯 JSON 文件可安全整体重写；解析失败（含注释的 jsonc）才报错、不改写用户文件
+    let cfg
+    try { cfg = JSON.parse(text) } catch (e) {
+      console.error(`配置文件 ${cfgPath} 无 "mcp" 块且非纯 JSON（${e.message}）；请手动添加，README 有片段`)
       process.exit(1)
     }
+    cfg.mcp = { ...cfg.mcp, grape: opencodeEntry(scriptAbs) }
+    // 整体重写同样走 writeValidated：写前/写后结构校验 + 备份，与其它写入路径口径一致
+    const backup = writeValidated(cfgPath, JSON.stringify(cfg, null, 2) + '\n', text)
+    console.log(`已写入 ${cfgPath}（新建 mcp 块，备份: ${backup}）`)
+    return true
   }
   return writeEntry(text, cfgPath, inner)
 }
@@ -590,7 +595,9 @@ function writeValidated(cfgPath, nextText, originalText) {
   try {
     parseLoose(readFileSync(cfgPath, 'utf8'))
   } catch (e) {
-    writeFileSync(cfgPath, originalText)
+    // 新建文件（originalText 为 null）无原文可回滚，直接删掉刚写的文件
+    if (typeof originalText === 'string') writeFileSync(cfgPath, originalText)
+    else rmSync(cfgPath, { force: true })
     console.error(`写入后结构校验失败（${e.message}）；已回滚 ${cfgPath}（备份: ${backup}）`)
     process.exit(1)
   }
@@ -717,12 +724,15 @@ function detectOpencode() {
   const p = opencodePaths()
   const cfgPath = existsSync(p.config) ? p.config : p.configAlt
   let error
+  // 候选文件可能同时存在（opencode.jsonc + opencode.json）：错误必须归因到**实际解析失败的文件**，
+  // 否则会把损坏记到优先选取的 .jsonc 上，让用户去修一个正常文件。
+  let errorPath
   for (const f of [cfgPath, ...(cfgPath === p.config ? [p.configAlt] : [])].filter(existsSync)) {
     const text = readFileSync(f, 'utf8')
-    try { if (hasEntry(text, 'grape')) return { ok: true, path: f } } catch (e) { error = e.message }
-    try { parseLoose(text) } catch (e) { error = e.message }
+    try { if (hasEntry(text, 'grape')) return { ok: true, path: f } } catch (e) { error = e.message; errorPath = f }
+    try { parseLoose(text) } catch (e) { error = e.message; errorPath = f }
   }
-  return { ok: false, path: cfgPath, ...(error ? { error } : {}) }
+  return { ok: false, path: errorPath || cfgPath, ...(error ? { error } : {}) }
 }
 
 function doctorOpencode(probe) {
