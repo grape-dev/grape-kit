@@ -58,7 +58,6 @@ const arg = (name, def = undefined) => {
 const cmd = process.argv[2] || 'help'
 const target = arg('target', 'opencode')
 
-
 /** 未知 target 明确报错，不静默回落到 opencode（否则会写错宿主的配置） */
 function resolveTarget() {
   const t = String(target)
@@ -514,7 +513,6 @@ function uninstallOpencode() {
 const HOSTS = {
   opencode: {
     label: 'opencode',
-    paths: opencodePaths,
     install: () => {
       installOpencode(resolve(String(arg('script', DEFAULT_SCRIPT))))
       copySkill()
@@ -528,7 +526,6 @@ const HOSTS = {
   },
   workbuddy: {
     label: 'workbuddy（WorkBuddy）',
-    paths: workbuddyPaths,
     install: () => { installWorkbuddy(); copySkillWorkbuddy() },
     uninstall: () => {
       uninstallWorkbuddy()
@@ -539,14 +536,12 @@ const HOSTS = {
   },
   codearts: {
     label: 'codearts（华为云码道 CodeArts Agent）',
-    paths: codeartsPaths,
     install: installCodearts,
     uninstall: uninstallCodearts,
     doctor: doctorCodearts,
   },
   officeace: {
     label: 'officeace（果办OfficeAce）',
-    paths: officeacePaths,
     install: installOfficeace,
     uninstall: uninstallOfficeace,
     doctor: doctorOfficeace,
@@ -570,4 +565,5 @@ if (cmd === 'install' || cmd === 'uninstall' || cmd === 'doctor') {
   else host.doctor(!!arg('probe'))
 } else {
   console.log(`用法: node setup.mjs install|uninstall|doctor [--target ${SUPPORTED_TARGETS.join('|')}] [--probe]`)
+  for (const [name, host] of Object.entries(HOSTS)) console.log(`  --target ${name.padEnd(10)} ${host.label}`)
 }
