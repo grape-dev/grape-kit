@@ -367,3 +367,114 @@ test('codearts 含注释且无 mcp 块时明确报错，不静默失败', () => 
   assert.match(`${r.stderr}${r.stdout}`, /mcp|README/)
   assert.equal(readFileSync(join(dir, 'codearts_cli.jsonc'), 'utf8'), seed, '失败时不得改写用户文件')
 })
+
+/* ---------- `--target=<host>` 等号写法（与分离写法等价，不得静默回落 opencode） ---------- */
+
+test('--target=<host> 等号写法：install/uninstall/doctor 均作用于指定宿主', () => {
+  const h = home()
+  // 预置 opencode 配置：等号写法若被误解析为默认 opencode，会改写/卸载它
+  const ocDir = join(h, '.config', 'opencode')
+  mkdirSync(ocDir, { recursive: true })
+  const ocPath = join(ocDir, 'opencode.jsonc')
+  const ocSeed = '{\n  "mcp": {\n    "grape": { "type": "local", "command": ["node", "x"] }\n  }\n}\n'
+  writeFileSync(ocPath, ocSeed)
+
+  const r = run(['install', '--target=codearts'], h)
+  assert.equal(r.status, 0, r.stderr)
+  assert.ok(existsSync(join(h, '.codeartsdoer', 'codearts_cli.jsonc')), '等号写法应写 codearts 配置')
+  assert.equal(readFileSync(ocPath, 'utf8'), ocSeed, '等号写法的 install 不得改动 opencode 配置')
+
+  const d = run(['doctor', '--target=codearts'], h)
+  assert.equal(d.status, 0, d.stderr)
+  assert.match(d.stdout, /\[ok\][^\n]*codearts/i)
+  assert.doesNotMatch(d.stdout, /workbuddy/, '等号写法的 doctor 应为单宿主详情，不得退化为汇总')
+
+  const u = run(['uninstall', '--target=codearts'], h)
+  assert.equal(u.status, 0, u.stderr)
+  const codearts = parseJsonc(readFileSync(join(h, '.codeartsdoer', 'codearts_cli.jsonc'), 'utf8'))
+  assert.equal(codearts.mcp['grape-kit'], undefined, '等号写法的 uninstall 应删除 codearts 条目')
+  assert.equal(readFileSync(ocPath, 'utf8'), ocSeed, '等号写法的 uninstall 不得删除 opencode 条目')
+})
+
+test('--target=<host> 等号写法遇到未知宿主同样非零退出', () => {
+  const h = home()
+  for (const sub of ['install', 'uninstall', 'doctor']) {
+    const r = run([`${sub}`, '--target=nope'], h)
+    assert.notEqual(r.status, 0, `${sub} --target=nope 应失败`)
+    assert.match(`${r.stderr}${r.stdout}`, /codearts/)
+  }
+})
+
+/* ---------- workbuddy 与其它宿主共用写入保障：写前备份、写后结构校验 ---------- */
+
+test('workbuddy 安装/卸载均留备份，卸载备份 = 卸载前原文', () => {
+  const h = home()
+  const dir = join(h, '.workbuddy')
+  mkdirSync(dir, { recursive: true })
+  const mcpJson = join(dir, 'mcp.json')
+  const seed = JSON.stringify({ mcpServers: { other: { command: 'npx', args: ['other'] } } }, null, 2) + '\n'
+  writeFileSync(mcpJson, seed)
+
+  assert.equal(run(['install', '--target', 'workbuddy'], h).status, 0)
+  assert.deepEqual(backupContents(dir), [seed], '安装前的备份必须是改动前原文')
+
+  const beforeUninstall = readFileSync(mcpJson, 'utf8')
+  assert.equal(run(['uninstall', '--target', 'workbuddy'], h).status, 0)
+  const contents = backupContents(dir)
+  assert.equal(contents.length, 2, `卸载也应留备份，实际: ${backupsIn(dir).join(', ')}`)
+  assert.ok(contents.includes(beforeUninstall), '卸载前的备份必须是卸载前原文')
+})
+
+/* ---------- 中段条目重装/卸载必须保留下一条目行前的说明注释 ---------- */
+
+test('中段条目重装/卸载保留下一条目前的用户注释', () => {
+  const h = home()
+  const dir = join(h, '.codeartsdoer')
+  mkdirSync(dir, { recursive: true })
+  const cfgPath = join(dir, 'codearts_cli.jsonc')
+  writeFileSync(cfgPath, `{
+  "mcp": {
+    "grape-kit": {
+      "type": "local",
+      "command": "npx",
+      "args": ["legacy"]
+    },
+    // 用户为 tax 写的说明注释
+    "tax": {
+      "command": "npx",
+      "args": ["tax"]
+    }
+  }
+}
+`)
+
+  assert.equal(run(['install', '--target', 'codearts'], h).status, 0)
+  assert.match(readFileSync(cfgPath, 'utf8'), /用户为 tax 写的说明注释/, '重装不得删掉下一条目前的注释')
+
+  assert.equal(run(['uninstall', '--target', 'codearts'], h).status, 0)
+  const text = readFileSync(cfgPath, 'utf8')
+  assert.match(text, /用户为 tax 写的说明注释/, '卸载不得删掉下一条目前的注释')
+  assert.ok(parseJsonc(text).mcp.tax, '下一条目必须保留')
+})
+
+/* ---------- doctor 区分「未安装」与「配置损坏」 ---------- */
+
+test('doctor 对损坏的宿主配置报「配置损坏」而非「未安装」', () => {
+  const h = home()
+  const codeartsDir = join(h, '.codeartsdoer')
+  mkdirSync(codeartsDir, { recursive: true })
+  writeFileSync(join(codeartsDir, 'codearts_cli.jsonc'), '{ "mcp": { broken')
+  const workbuddyDir = join(h, '.workbuddy')
+  mkdirSync(workbuddyDir, { recursive: true })
+  writeFileSync(join(workbuddyDir, 'mcp.json'), '{ not json')
+
+  const dc = run(['doctor', '--target', 'codearts'], h)
+  assert.equal(dc.status, 0, dc.stderr)
+  assert.match(dc.stdout, /\[!!\][^\n]*codearts[^\n]*(损坏|解析失败)/i, 'codearts 损坏不应报「未安装」')
+  assert.doesNotMatch(dc.stdout, /codearts mcp\.grape-kit[^\n]*未安装/i)
+
+  const dw = run(['doctor', '--target', 'workbuddy'], h)
+  assert.equal(dw.status, 0, dw.stderr)
+  assert.match(dw.stdout, /\[!!\][^\n]*workbuddy[^\n]*(损坏|解析失败)/i, 'workbuddy 损坏不应报「未安装」')
+  assert.doesNotMatch(dw.stdout, /workbuddy mcpServers\.grape-kit[^\n]*未安装/i)
+})
