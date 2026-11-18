@@ -77,3 +77,12 @@ test('每个版本节含发布日期与至少一条 Added/Changed/Fixed 条目',
     assert.ok(items.length >= 1, `${s.version} 应至少有一条变更条目`)
   }
 })
+
+test('README 版本历史节链接 CHANGELOG.md 且 0.3.2 日期为 npm 发布日 2026-11-17', () => {
+  const readme = readFileSync(join(ROOT, 'README.md'), 'utf8')
+  assert.match(readme, /^## 版本历史$/m, 'README 应保留版本历史节')
+  assert.match(readme, /\[[^\]]*CHANGELOG[^\]]*\]\(\.?\/?CHANGELOG\.md\)/, '版本历史节应含指向 CHANGELOG.md 的相对链接')
+  const row = readme.split('\n').find((l) => /^\| 0\.3\.2 \|/.test(l))
+  assert.ok(row, '版本历史表应保留 0.3.2 行')
+  assert.match(row, /\| 2026-11-17 \|/, '0.3.2 日期应为 npm 发布日 2026-11-17（README 旧值 2026-11-14 是 commit 日）')
+})
