@@ -74,35 +74,54 @@ export function isNewerVersion(latest, local) {
   return compareVersions(latest, local) === 1
 }
 
-export function checkUpdate(localVersion, { now = Date.now(), fetchImpl = fetch, env = process.env } = {}) {
-  if (isUpdateCheckDisabled(env)) return Promise.resolve(null)
+/**
+ * 版本检查结果状态：
+ * - newer：发现更高版本且尚未提示过（cached 表示来自 24h 缓存）
+ * - notified：更高版本但同一版本已提示过（24h 内不重复打扰）
+ * - latest：本地已是最新（或本地版本更高）
+ * - unavailable：registry 不可达、非 2xx 或响应不可解析
+ * - disabled：开关关闭
+ */
+export async function checkUpdateStatus(localVersion, { now = Date.now(), fetchImpl = fetch, env = process.env } = {}) {
+  if (isUpdateCheckDisabled(env)) return { state: 'disabled' }
   // 缓存：24h 内已查过（无论结果）不再打 registry；
   // notified 记录已提示过的 latest —— 同一新版本只打扰一次
   try {
     if (existsSync(cachePath())) {
       const c = JSON.parse(readFileSync(cachePath(), 'utf-8'))
       if (c && typeof c.checkedAt === 'number' && now - c.checkedAt < CACHE_TTL_MS) {
-        if (c.latest && c.notified !== c.latest && isNewerVersion(c.latest, localVersion)) {
-          writeCache({ ...c, notified: c.latest })
-          return Promise.resolve({ latest: c.latest, cached: true })
+        const latest = typeof c.latest === 'string' ? c.latest : ''
+        if (!latest) return { state: 'unavailable', cached: true }
+        if (isNewerVersion(latest, localVersion)) {
+          if (c.notified !== latest) {
+            writeCache({ ...c, notified: latest })
+            return { state: 'newer', latest, cached: true }
+          }
+          return { state: 'notified', latest, cached: true }
         }
-        return Promise.resolve(null)
+        return { state: 'latest', latest, cached: true }
       }
     }
   } catch { /* 缓存损坏 → 视为无缓存 */ }
 
-  return fetchImpl(`${REGISTRY}/@grape-dev/grape-kit/latest`, { signal: AbortSignal.timeout(5000) })
-    .then(r => (r.ok ? r.json() : null))
-    .then(d => {
-      const latest = d && typeof d.version === 'string' ? d.version : ''
-      const newer = !!latest && isNewerVersion(latest, localVersion)
-      writeCache({ checkedAt: now, latest, notified: newer ? latest : '' })
-      if (newer) return { latest, cached: false }
-      return null
-    })
-    .catch(() => {
-      // 失败也落盘（latest 为空），遵循「24h 内无论结果都不再打 registry」
-      writeCache({ checkedAt: now, latest: '', notified: '' })
-      return null
-    })
+  try {
+    const r = await fetchImpl(`${REGISTRY}/@grape-dev/grape-kit/latest`, { signal: AbortSignal.timeout(5000) })
+    const d = r.ok ? await r.json() : null
+    const latest = d && typeof d.version === 'string' ? d.version : ''
+    const newer = !!latest && isNewerVersion(latest, localVersion)
+    writeCache({ checkedAt: now, latest, notified: newer ? latest : '' })
+    if (newer) return { state: 'newer', latest, cached: false }
+    if (latest) return { state: 'latest', latest, cached: false }
+    return { state: 'unavailable', cached: false }
+  } catch {
+    // 失败也落盘（latest 为空），遵循「24h 内无论结果都不再打 registry」
+    writeCache({ checkedAt: now, latest: '', notified: '' })
+    return { state: 'unavailable', cached: false }
+  }
+}
+
+/** 兼容接口：仅在发现未提示过的新版本时返回 { latest, cached }，其余一律 null */
+export async function checkUpdate(localVersion, opts) {
+  const status = await checkUpdateStatus(localVersion, opts)
+  return status.state === 'newer' ? { latest: status.latest, cached: status.cached } : null
 }

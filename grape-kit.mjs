@@ -17,7 +17,7 @@ import { homedir, tmpdir } from 'node:os'
 import { join, dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
-import { checkUpdate, formatUpdateNotice, isUpdateCheckDisabled } from './src/update-check.mjs'
+import { checkUpdateStatus, formatUpdateNotice } from './src/update-check.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const DEFAULT_SCRIPT = resolve(HERE, 'grape-kit-mcp.mjs')
@@ -269,6 +269,17 @@ function uninstallSkill() {
 
 /* ---------- doctor ---------- */
 
+/** doctor「版本更新」行：拆开有新版本/已提示过/已最新/检测不可用/已关闭，避免误报「已是最新」 */
+function updateCheckLine(pkgVersion, status) {
+  switch (status && status.state) {
+    case 'newer': return formatUpdateNotice(pkgVersion, status.latest)
+    case 'disabled': return 'ok（提示已关闭）'
+    case 'notified': return `ok（已提示过 ${status.latest}，24h 内不重复提醒；npm i -g @grape-dev/grape-kit 可更新）`
+    case 'unavailable': return 'ok（检测不可用：registry 不可达或响应异常）'
+    default: return `ok（已是最新 ${pkgVersion}）`
+  }
+}
+
 async function doctor(probe) {
   const p = opencodePaths()
   const checks = []
@@ -298,14 +309,9 @@ Promise.all([
   }
   // check_update：复用 src/update-check.mjs（24h 缓存 + 5s 有界超时，失败静默，不阻塞其它检查）
   const pkgVersion = JSON.parse(readFileSync(join(HERE, 'package.json'), 'utf8')).version
-  let upd = null
-  try { upd = await checkUpdate(pkgVersion) } catch { /* 版本检查绝不影响 doctor */ }
-  const disabled = isUpdateCheckDisabled(process.env)
-  checks.push(['版本更新', upd && upd.latest
-    ? formatUpdateNotice(pkgVersion, upd.latest)
-    : disabled
-      ? 'ok（提示已关闭）'
-      : `ok（已是最新 ${pkgVersion} / 24h 内已提示过或检测不可用）`])
+  let updateStatus = { state: 'unavailable' }
+  try { updateStatus = await checkUpdateStatus(pkgVersion) } catch { /* 版本检查绝不影响 doctor */ }
+  checks.push(['版本更新', updateCheckLine(pkgVersion, updateStatus)])
   for (const [k, v] of checks) console.log(`  ${String(v).startsWith('ok') ? '[ok]' : '[!!]'} ${k}: ${v}`)
 }
 
