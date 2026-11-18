@@ -11,10 +11,10 @@ function home() {
   return mkdtempSync(join(tmpdir(), 'grape-kit-home-'))
 }
 
-function run(args, h) {
+function run(args, h, extraEnv = {}) {
   return spawnSync(process.execPath, [SETUP, ...args], {
     encoding: 'utf8',
-    env: { ...process.env, HOME: h },
+    env: { ...process.env, HOME: h, ...extraEnv },
     timeout: 30_000,
   })
 }
@@ -116,5 +116,64 @@ test('install 升级「grape 为唯一条目」的配置不产生悬挂逗号', 
   const text = readFileSync(join(dir, 'opencode.json'), 'utf8')
   const cfg = JSON.parse(text) // 旧路径升级后必须仍是合法 JSON（悬挂逗号回归）
   assert.match(cfg.mcp.grape.command[1], /grape-kit-mcp\.mjs$/)
+  rmSync(h, { recursive: true, force: true })
+})
+
+/* ---------- Issue #4：doctor 版本更新检查 ---------- */
+
+const PKG_VERSION = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version
+const UPDATE_CACHE = (h) => join(h, '.grape', 'grape-kit-update-check.json')
+
+function seedUpdateCache(h, latest) {
+  mkdirSync(join(h, '.grape'), { recursive: true })
+  writeFileSync(UPDATE_CACHE(h), JSON.stringify({ checkedAt: Date.now(), latest }))
+}
+
+test('doctor 在本地版本落后时输出升级提示与更新命令', () => {
+  const h = home()
+  seedUpdateCache(h, '9.9.9')
+  const r = run(['doctor'], h)
+  assert.equal(r.status, 0, r.stderr)
+  assert.match(r.stdout, /\[!!\] 版本更新: 有新版本 \d+\.\d+\.\d+ → 9\.9\.9/)
+  assert.match(r.stdout, /npm i -g @grape-dev\/grape-kit/)
+  rmSync(h, { recursive: true, force: true })
+})
+
+test('doctor 已是最新版本时不提示升级', () => {
+  const h = home()
+  seedUpdateCache(h, PKG_VERSION)
+  const r = run(['doctor'], h)
+  assert.equal(r.status, 0, r.stderr)
+  assert.doesNotMatch(r.stdout, /有新版本/)
+  assert.match(r.stdout, /\[ok\] 版本更新: ok（已是最新/)
+  rmSync(h, { recursive: true, force: true })
+})
+
+test('doctor 在 GRAPE_KIT_NO_UPDATE_CHECK=1 别名开关下静默', () => {
+  const h = home()
+  seedUpdateCache(h, '9.9.9')
+  const r = run(['doctor'], h, { GRAPE_KIT_NO_UPDATE_CHECK: '1' })
+  assert.equal(r.status, 0, r.stderr)
+  assert.doesNotMatch(r.stdout, /有新版本/)
+  assert.match(r.stdout, /\[ok\] 版本更新: ok（提示已关闭/)
+  rmSync(h, { recursive: true, force: true })
+})
+
+test('doctor 在 GRAPE_KIT_SKIP_UPDATE_CHECK=1 下静默', () => {
+  const h = home()
+  seedUpdateCache(h, '9.9.9')
+  const r = run(['doctor'], h, { GRAPE_KIT_SKIP_UPDATE_CHECK: '1' })
+  assert.equal(r.status, 0, r.stderr)
+  assert.doesNotMatch(r.stdout, /有新版本/)
+  rmSync(h, { recursive: true, force: true })
+})
+
+test('doctor 24h 缓存内同一新版本不重复打扰', () => {
+  const h = home()
+  seedUpdateCache(h, '9.9.9')
+  const first = run(['doctor'], h)
+  assert.match(first.stdout, /有新版本/)
+  const second = run(['doctor'], h)
+  assert.doesNotMatch(second.stdout, /有新版本/)
   rmSync(h, { recursive: true, force: true })
 })
