@@ -78,6 +78,19 @@ npx -y @grape-dev/grape-kit doctor --probe   # node / 服务端连通性 / 工�
 **hermes**（无 MCP client）：复制 `skills/grape-remote/` 到其 skill 目录，agent 以 bash 调 `grape` CLI 即可。
 **codex**：`~/.codex/config.toml` 加 `[mcp_servers.grape]`（command/args/env），示例见使用指南。
 **WorkBuddy**：`npx -y @grape-dev/grape-kit install --target workbuddy` —— 写入 `~/.workbuddy/mcp.json`（`mcpServers.grape-kit`，走 npx 免全局安装）+ skill 落 `~/.workbuddy/skills/grape-remote/`；自检 `doctor --target workbuddy --probe`。装完需在 WorkBuddy 中手动「信任」连接器（一次性）；凭据走环境变量，**不要**写进 mcp.json。
+**CodeArts（华为云码道 CodeArts Agent）**：`npx -y @grape-dev/grape-kit install --target codearts` —— 写入码道 MCP 配置 `~/.codeartsdoer/codearts_cli.jsonc` 的 `mcp.grape-kit`（官方《MCP命令》文档的全局位置；项目级为 `<项目>/.codeartsdoer/codearts_cli.jsonc`，IDE 侧同源文件为 `mcp_settings.json`），可用 `GRAPE_CODEARTS_CONFIG` 指定实际路径；写前备份、重复安装先移除再插入；自检 `doctor --target codearts --probe`。装配后在码道「设置 → MCP工具 → 已安装」对 `grape-kit` 点一次「重启」生效。
+**OfficeAce（果办OfficeAce）**：`npx -y @grape-dev/grape-kit install --target officeace` —— 果办OfficeAce 的连接器**仅支持 GUI 注册**，安装器写一份可直接粘贴的清单 `~/.officeace/mcp.json`（`mcpServers.grape-kit`，可用 `GRAPE_OFFICEACE_MANIFEST` 覆盖）并打印手动步骤：扩展 → 连接器 → 我的连接器 → 自定义添加 → JSON配置 → 粘贴 → 确认并连接；自检 `doctor --target officeace`（清单存在 ≠ 已在客户端导入）。
+
+### 受支持宿主（`--target`）
+
+| target | 写入位置 | 条目格式 | 自检 |
+|--------|----------|----------|------|
+| `opencode` | `~/.config/opencode/opencode.jsonc`（或 `opencode.json`） | `mcp.grape`（文本外科手术，保留注释） | `doctor` |
+| `workbuddy` | `~/.workbuddy/mcp.json` | `mcpServers.grape-kit` | `doctor --target workbuddy` |
+| `codearts` | `~/.codeartsdoer/codearts_cli.jsonc` | `mcp.grape-kit`（`command`/`args`/`env`） | `doctor --target codearts` |
+| `officeace` | `~/.officeace/mcp.json`（可导入清单） | `mcpServers.grape-kit` | `doctor --target officeace` |
+
+四类宿主共用同一套写入引擎：写前 `*.bak-grapemcp-<ts>` 备份、先移除再插入的幂等策略、只增删 grape 条目不动他人配置；`install` 与 `doctor` 共用同一份宿主路径定义，未知 `--target` 直接报错并列出受支持宿主。凭据一律走环境变量（`GRAPE_BASE_URL` / `GRAPE_API_TOKEN`），不写入任何宿主配置。
 
 ## 版本历史
 
@@ -98,7 +111,7 @@ npx -y @grape-dev/grape-kit doctor --probe   # node / 服务端连通性 / 工�
 
 ```bash
 npm install
-npm test        # 52 个单测（fake-grape 替身，不依赖真实服务端）
+npm test        # 70 个单测（fake-grape 替身 + 临时 HOME 隔离，不依赖真实服务端与宿主）
 npm run smoke   # 真实 stdio JSON-RPC 往返：initialize → tools/list → tools/call
 ```
 
@@ -112,7 +125,7 @@ node scripts/live-smoke.mjs
 ## Roadmap
 
 - [ ] 版本更新检测与升级提示（对齐 huaweicloud-devkit `check_update` 体验）
-- [ ] install 目标扩展：codearts / workbuddy / officeace（integrations 三型）
+- [x] install 目标扩展：codearts / workbuddy / officeace（integrations 三型）
 - [ ] 组织仓归位（grape-dev/grape-kit，待 #1773 授权）+ CI
 - [ ] dsh 宿主由 [grape-dsh](https://gitcode.com/grape-dev/grape-dsh) 独立插件承载，不重复建设
 
