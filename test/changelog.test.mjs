@@ -121,11 +121,11 @@ function runGenerator(dir, prev) {
 }
 
 test('gen-changelog 可在文件头插入新版本节且不改动历史节', () => {
-  const dir = tempRepo('0.3.3')
+  const dir = tempRepo('0.3.4')
   const before = readFileSync(join(dir, 'CHANGELOG.md'), 'utf8')
   const after = runGenerator(dir, 'HEAD~1')
-  assert.match(after, /^## 0\.3\.3 \(\d{4}-\d{2}-\d{2}\)/, '新版本节应插入文件头')
-  assert.equal(after.match(/^## 0\.3\.3 \(/gm).length, 1, '同一版本不应出现两个节')
+  assert.match(after, /^## 0\.3\.4 \(\d{4}-\d{2}-\d{2}\)/, '新版本节应插入文件头')
+  assert.equal(after.match(/^## 0\.3\.4 \(/gm).length, 1, '同一版本不应出现两个节')
   assert.ok(after.endsWith(before), '历史版本节应逐字保留（原文件内容为新文件后缀）')
   rmSync(dir, { recursive: true, force: true })
 })
