@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test, beforeEach } from 'node:test'
-import { mkdtempSync, writeFileSync, mkdirSync } from 'node:fs'
+import { mkdtempSync, writeFileSync, mkdirSync, readFileSync } from 'node:fs'
 import { tmpdir, homedir } from 'node:os'
 import { join } from 'node:path'
 import { rmSync, existsSync } from 'node:fs'
@@ -159,5 +159,49 @@ test('checkUpdate：HOME 下无 .grape 目录时自动创建缓存，24h 去重�
     const second = await checkUpdate('0.3.2', { now: Date.now(), fetchImpl, env: {} })
     assert.equal(second, null)
     assert.equal(called, 1, '缓存命中后不应再次请求 registry')
+  } finally { restore() }
+})
+
+test('checkUpdate：registry 异常时落 24h 退避缓存，下次不再请求', async () => {
+  const { checkUpdate } = await loadMod()
+  const { home, restore } = withTempHome()
+  try {
+    let called = 0
+    const first = await checkUpdate('0.3.2', {
+      now: Date.now(),
+      fetchImpl: async () => { called++; throw new Error('registry down') },
+      env: {},
+    })
+    assert.equal(first, null)
+    const cache = JSON.parse(readFileSync(join(home, '.grape', 'grape-kit-update-check.json'), 'utf-8'))
+    assert.equal(cache.latest, '', '失败路径也应落空结果缓存')
+    assert.equal(typeof cache.checkedAt, 'number')
+    const second = await checkUpdate('0.3.2', {
+      now: Date.now(),
+      fetchImpl: async () => { called++; return { ok: true, json: async () => ({ version: '9.9.9' }) } },
+      env: {},
+    })
+    assert.equal(second, null)
+    assert.equal(called, 1, '24h 内不应重试 registry')
+  } finally { restore() }
+})
+
+test('checkUpdate：非 2xx 响应同样落 24h 退避缓存', async () => {
+  const { checkUpdate } = await loadMod()
+  const { home, restore } = withTempHome()
+  try {
+    let called = 0
+    await checkUpdate('0.3.2', {
+      now: Date.now(),
+      fetchImpl: async () => { called++; return { ok: false, status: 500, json: async () => ({}) } },
+      env: {},
+    })
+    assert.ok(existsSync(join(home, '.grape', 'grape-kit-update-check.json')))
+    await checkUpdate('0.3.2', {
+      now: Date.now(),
+      fetchImpl: async () => { called++; return { ok: true, json: async () => ({ version: '9.9.9' }) } },
+      env: {},
+    })
+    assert.equal(called, 1)
   } finally { restore() }
 })
