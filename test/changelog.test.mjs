@@ -86,3 +86,9 @@ test('README 版本历史节链接 CHANGELOG.md 且 0.3.2 日期为 npm 发布�
   assert.ok(row, '版本历史表应保留 0.3.2 行')
   assert.match(row, /\| 2026-11-17 \|/, '0.3.2 日期应为 npm 发布日 2026-11-17（README 旧值 2026-11-14 是 commit 日）')
 })
+
+test('package.json files 含 CHANGELOG.md（随 npm tarball 发布）', () => {
+  const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'))
+  assert.ok(Array.isArray(pkg.files), 'package.json 应有 files 白名单')
+  assert.ok(pkg.files.includes('CHANGELOG.md'), 'files 应含 CHANGELOG.md，否则即使提交也不进 npm tarball')
+})
