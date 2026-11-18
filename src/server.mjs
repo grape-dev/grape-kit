@@ -58,13 +58,19 @@ export function createServer(deps = {}) {
         json = tool.waitBased ? { ...r.json, timedOut: !!r.timedOut, polls: r.polls } : r
       } else if (tool.native) {
         // v0.3.0 传输层原生化：优先原生 HTTP（无 Python/CLI 依赖）。
-        // 派发层只把「凭据缺失(401)」回退 CLI（CLI 可能有自己的缓存通道），其余 API 错误如实上抛。
+        // 401 宽触发回退 CLI（CLI 可能有自己的缓存通道），但回退仅作最佳努力：
+        // CLI 不可用/失败时回抛原始 native 401，保留 hintFor(401) 的 token 失效指引；
+        // 其余 API 错误如实上抛，不进入回退。
         try {
           json = await tool.native(args)
         } catch (e) {
           if (e instanceof GrapeApiError && e.status === 401) {
-            const r = await _runGrape(tool.buildArgs(args))
-            json = r.json
+            try {
+              const r = await _runGrape(tool.buildArgs(args))
+              json = r.json
+            } catch {
+              throw e
+            }
           } else {
             throw e
           }

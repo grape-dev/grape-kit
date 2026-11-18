@@ -64,15 +64,16 @@ test('tools/call wait 工具带 polls 元信息与超时提示', async () => {
   await client.close()
 })
 
-test('未知工具与 CLI 错误都走 isError 文本', async () => {
+test('未知工具与 native 401（CLI 回退失败）都走 isError 文本', async () => {
   const client = await pair({
     runGrape: async () => { const e = new Error('HTTP 403'); e.code = 403; throw e },
   })
   const unknown = await client.callTool({ name: 'grape_nope', arguments: {} })
   assert.equal(unknown.isError, true)
+  // CLI 回退失败不再吞掉 native 401：仍如实上抛 401（而非 CLI 侧 403 文案）
   const denied = await client.callTool({ name: 'grape_list_issues', arguments: { owner: 'a', repo: 'b' } })
   assert.equal(denied.isError, true)
-  assert.match(denied.content[0].text, /session_only|403/)
+  assert.match(denied.content[0].text, /Missing token|401/)
   await client.close()
 })
 
