@@ -3,6 +3,8 @@ import assert from 'node:assert/strict'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import { createServer, INSTRUCTIONS } from '../src/server.mjs'
+import { GrapeApiError, api } from '../src/api.mjs'
+import { GrapeCliError } from '../src/cli.mjs'
 
 async function pair(deps) {
   // 环境隔离：屏蔽宿主真实凭据（真实机器会让 native 通道直连成功、绕开注入 mock）
@@ -107,4 +109,78 @@ test('cancel_issue 有凭据时原生直调成功', async () => {
   const r = await t.run({ owner: 'a', repo: 'b', number: 4 }, { runGrape: null, apiModule: fakeApi })
   assert.deepEqual(r, { ok: true, issue_id: 11079 })
   await client.close()
+})
+
+async function withNative(method, impl, fn) {
+  const orig = api[method]
+  api[method] = impl
+  try {
+    return await fn()
+  } finally {
+    api[method] = orig
+  }
+}
+
+test('native 401 且 CLI 缺失时回抛原始 401：输出 token 指引，不误导安装 CLI', async () => {
+  await withNative('taskStatus', async () => {
+    throw new GrapeApiError('grape API 401: invalid token', {
+      status: 401,
+      hint: 'token 无效或过期：在 Grape WebUI → 设置 → API Keys 重新生成，并更新 GRAPE_API_TOKEN / ~/.grape/config.json',
+    })
+  }, async () => {
+    let cliCalled = 0
+    const client = await pair({
+      runGrape: async () => {
+        cliCalled += 1
+        throw new GrapeCliError('找不到 grape CLI（bin=grape）', { code: 127 })
+      },
+    })
+    const res = await client.callTool({ name: 'grape_get_task_status', arguments: { seq: 1 } })
+    assert.equal(cliCalled, 1)
+    assert.equal(res.isError, true)
+    assert.match(res.content[0].text, /401/)
+    assert.match(res.content[0].text, /WebUI → 设置 → API Keys 重新生成/)
+    assert.doesNotMatch(res.content[0].text, /安装|pip install/)
+    await client.close()
+  })
+})
+
+test('native 401 且 CLI 可用时沿用 CLI 结果', async () => {
+  await withNative('taskStatus', async () => {
+    throw new GrapeApiError('Missing token: 请设置 GRAPE_API_TOKEN', { status: 401 })
+  }, async () => {
+    const client = await pair({
+      runGrape: async (args) => {
+        assert.deepEqual(args, ['events', 'detail', '--seq', '5'])
+        return { json: { seq: 5, status: 'running' } }
+      },
+    })
+    const res = await client.callTool({ name: 'grape_get_task_status', arguments: { seq: 5 } })
+    assert.equal(res.isError, undefined)
+    assert.match(res.content[0].text, /running/)
+    await client.close()
+  })
+})
+
+test('URL 不可达（status 0）不回退 CLI，原错误上抛', async () => {
+  await withNative('taskStatus', async () => {
+    throw new GrapeApiError('无法连接 https://unreachable.test（ECONNREFUSED）', {
+      status: 0,
+      hint: '检查 GRAPE_BASE_URL 是否正确 / 网络可达',
+    })
+  }, async () => {
+    let cliCalled = 0
+    const client = await pair({
+      runGrape: async () => {
+        cliCalled += 1
+        return { json: { seq: 1, status: 'completed' } }
+      },
+    })
+    const res = await client.callTool({ name: 'grape_get_task_status', arguments: { seq: 1 } })
+    assert.equal(cliCalled, 0)
+    assert.equal(res.isError, true)
+    assert.match(res.content[0].text, /grape API 失败（0）/)
+    assert.match(res.content[0].text, /网络可达/)
+    await client.close()
+  })
 })
