@@ -45,3 +45,61 @@ test('未知 target：install / uninstall / doctor 均非零退出并列出受�
     rmSync(h, { recursive: true, force: true })
   }
 })
+
+/* ---------- S2：codearts（华为云码道 CodeArts Agent） ---------- */
+
+test('codearts 全新安装写入官方 MCP 配置，doctor 检出', () => {
+  const h = home()
+  const r = run(['install', '--target', 'codearts'], h)
+  assert.equal(r.status, 0, r.stderr)
+
+  // 官方文档：码道 CLI 全局 MCP 配置 ~/.codeartsdoer/codearts_cli.jsonc，结构 {"mcp": {"<名称>": {...}}}
+  const cfgPath = join(h, '.codeartsdoer', 'codearts_cli.jsonc')
+  assert.ok(existsSync(cfgPath), `应写入 ${cfgPath}`)
+  const text = readFileSync(cfgPath, 'utf8')
+  const cfg = parseJsonc(text)
+  const entry = cfg.mcp['grape-kit']
+  assert.ok(entry, 'mcp 块内应有 grape-kit 条目')
+  assert.equal(entry.command, 'npx')
+  assert.match(entry.args.join(' '), /@grape-dev\/grape-kit/)
+  assert.match(entry.args.join(' '), /grape-kit-mcp/)
+
+  const d = run(['doctor', '--target', 'codearts'], h)
+  assert.equal(d.status, 0, d.stderr)
+  assert.match(d.stdout, /\[ok\][^\n]*codearts/i)
+  rmSync(h, { recursive: true, force: true })
+})
+
+test('codearts 二次安装幂等并生成备份，他人条目保留', () => {
+  const h = home()
+  const dir = join(h, '.codeartsdoer')
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(join(dir, 'codearts_cli.jsonc'), `{
+  // 用户注释必须保留
+  "mcp": {
+    "other": {
+      "command": "npx",
+      "args": ["other-mcp"]
+    }
+  }
+}
+`)
+  assert.equal(run(['install', '--target', 'codearts'], h).status, 0)
+  const r2 = run(['install', '--target', 'codearts'], h)
+  assert.equal(r2.status, 0, r2.stderr)
+
+  const text = readFileSync(join(dir, 'codearts_cli.jsonc'), 'utf8')
+  assert.equal(countEntries(text, 'grape-kit'), 1, '重复安装不应产生重复条目')
+  assert.match(text, /用户注释必须保留/)
+  const cfg = parseJsonc(text)
+  assert.ok(cfg.mcp.other, '他人条目必须保留')
+  assert.ok(cfg.mcp['grape-kit'])
+  assert.ok(backupsIn(dir).length >= 1, '每次写入应生成 *.bak-grapemcp-<ts> 备份')
+
+  const u = run(['uninstall', '--target', 'codearts'], h)
+  assert.equal(u.status, 0, u.stderr)
+  const after = parseJsonc(readFileSync(join(dir, 'codearts_cli.jsonc'), 'utf8'))
+  assert.equal(after.mcp['grape-kit'], undefined)
+  assert.ok(after.mcp.other, '卸载只删 grape 条目')
+  rmSync(h, { recursive: true, force: true })
+})
