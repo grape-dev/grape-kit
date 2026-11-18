@@ -37,7 +37,7 @@
 ### Fixed
 
 - 接管 `abort` / `start` 渲染补上台面 #2517 的平台披露：重派失败告警与竞态警告不再被吞掉。
-- 安装器安全加固：`--target workbuddy` 只写 stdio 命令与环境变量引用，凭据不落 `mcp.json`。
+- 安装器安全加固：`--target workbuddy` 的 `mcp.json` 只写 stdio 命令与参数（`npx -y -p @grape-dev/grape-kit grape-kit-mcp`），凭据走环境变量、不落配置文件；改写前先备份原文件。
 
 ## 0.3.1 (2026-11-11)
 
@@ -92,7 +92,7 @@
 ### Added
 
 - `grape_list_knowledge` 改为必填 `repo`（服务端契约要求）并新增可选 `q` 关键字过滤。
-- `grape_worker_onboard` 重复设备名自动加后缀（凭据名全局唯一，token 仅显示一次），并优先返回服务端下发的一次性安装命令。
+- `grape_worker_onboard` 在凭据名已存在（400）时自动加时间戳后缀重试一次（凭据名全局唯一、token 仅显示一次），并改用本机 `GRAPE_BASE_URL` 组装一次性安装命令（安装命令不内联真实 token）。
 
 ### Changed
 
@@ -114,7 +114,7 @@
 
 ### Fixed
 
-- 用真实用户 token 在 issue #4 上验证接管上下文：无在跑任务时返回 404 语义正确，不再被包装成成功。
+- 用真实用户 token 在 issue #4 上验证接管上下文：修正后的动词链在「无在跑任务」时返回 404，语义正确。
 
 ## 0.2.0 (2026-11-08)
 
