@@ -1,6 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, copyFileSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
+import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { join } from 'node:path'
 
@@ -91,4 +93,51 @@ test('package.json files 含 CHANGELOG.md（随 npm tarball 发布）', () => {
   const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'))
   assert.ok(Array.isArray(pkg.files), 'package.json 应有 files 白名单')
   assert.ok(pkg.files.includes('CHANGELOG.md'), 'files 应含 CHANGELOG.md，否则即使提交也不进 npm tarball')
+})
+
+/** 造一个「上一次发版后又有新提交」的临时仓库：CHANGELOG.md 为仓内正式文件，package.json 版本可指定 */
+function tempRepo(version) {
+  const dir = mkdtempSync(join(tmpdir(), 'grape-kit-changelog-'))
+  const git = (...args) =>
+    spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.com', ...args], { cwd: dir, encoding: 'utf8' })
+  copyFileSync(join(ROOT, 'CHANGELOG.md'), join(dir, 'CHANGELOG.md'))
+  writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: '@grape-dev/grape-kit', version }, null, 2))
+  assert.equal(git('init', '-q').status, 0)
+  git('add', '-A')
+  assert.equal(git('commit', '-q', '-m', 'chore: init').status, 0)
+  writeFileSync(join(dir, 'next.txt'), 'x')
+  git('add', '-A')
+  assert.equal(git('commit', '-q', '-m', 'feat: 下一版本功能').status, 0)
+  return dir
+}
+
+function runGenerator(dir, prev) {
+  const r = spawnSync(process.execPath, [join(ROOT, 'scripts', 'gen-changelog.mjs'), prev, 'HEAD'], {
+    cwd: dir,
+    encoding: 'utf8',
+  })
+  assert.equal(r.status, 0, r.stderr)
+  return readFileSync(join(dir, 'CHANGELOG.md'), 'utf8')
+}
+
+test('gen-changelog 可在文件头插入新版本节且不改动历史节', () => {
+  const dir = tempRepo('0.3.3')
+  const before = readFileSync(join(dir, 'CHANGELOG.md'), 'utf8')
+  const after = runGenerator(dir, 'HEAD~1')
+  assert.match(after, /^## 0\.3\.3 \(\d{4}-\d{2}-\d{2}\)/, '新版本节应插入文件头')
+  assert.equal(after.match(/^## 0\.3\.3 \(/gm).length, 1, '同一版本不应出现两个节')
+  assert.ok(after.endsWith(before), '历史版本节应逐字保留（原文件内容为新文件后缀）')
+  rmSync(dir, { recursive: true, force: true })
+})
+
+test('以当前 package 版本重跑生成器（AC 字面命令）不破坏历史节', () => {
+  const dir = tempRepo('0.3.2')
+  const before = readFileSync(join(dir, 'CHANGELOG.md'), 'utf8')
+  const after = runGenerator(dir, 'HEAD~1')
+  assert.ok(after.endsWith(before), '历史节应逐字保留，不被按字节切片截断')
+  assert.match(after, /^## 0\.3\.2 \(/, '新节仍应落在文件头')
+  for (const [v, d] of PUBLISHED) {
+    assert.ok(after.includes(`## ${v} (${d})`), `原有版本节 ${v} (${d}) 不应丢失`)
+  }
+  rmSync(dir, { recursive: true, force: true })
 })
