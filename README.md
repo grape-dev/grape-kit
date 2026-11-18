@@ -83,10 +83,12 @@ npx -y @grape-dev/grape-kit doctor --probe   # node / 服务端连通性 / 工�
 
 | 版本 | 日期 | 要点 |
 |---|---|---|
-| 0.3.2 | 2026-11-14 | takeover 会话原语五工具（start/status/progress/finish/abort）；#2517 端侧适配（abort 重派失败告警 + 竞态警告渲染）；SKILL.md 双路径语义 |
+| 0.3.2 | 2026-11-17 | takeover 会话原语五工具（start/status/progress/finish/abort）；#2517 端侧适配（abort 重派失败告警 + 竞态警告渲染）；SKILL.md 双路径语义 |
 | 0.3.1 | 2026-11-11 | cancel 三选决策门 · resume 事实复核 · search 契约收敛 · 结构化交回模板 |
-| 0.3.0 | 2026-11-10 | 传输层原生化：原生 HTTP 直连，grape CLI/Python 变可选（401 回退通道） |
+| 0.3.0 | 2026-11-11 | 传输层原生化：原生 HTTP 直连，grape CLI/Python 变可选（401 回退通道） |
 | 0.2.x | 2026-11-09 前 | 13→31 工具扩展 · worker_onboard · B1 接管闭环 |
+
+逐版本完整记录（发布日期、工具面变化、行为修复，覆盖 npm 全部 12 个已发布版本）：[CHANGELOG.md](CHANGELOG.md)
 
 ## 设计原则
 
