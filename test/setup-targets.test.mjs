@@ -67,6 +67,8 @@ test('codearts 全新安装写入官方 MCP 配置，doctor 检出', () => {
   const cfg = parseJsonc(text)
   const entry = cfg.mcp['grape-kit']
   assert.ok(entry, 'mcp 块内应有 grape-kit 条目')
+  // 字段清单必须与 README 受支持宿主表一致（type/command/args/env），否则排障对不上
+  assert.deepEqual(Object.keys(entry).sort(), ['args', 'command', 'env', 'type'], `条目字段: ${Object.keys(entry)}`)
   assert.equal(entry.command, 'npx')
   assert.match(entry.args.join(' '), /@grape-dev\/grape-kit/)
   assert.match(entry.args.join(' '), /grape-kit-mcp/)
@@ -477,4 +479,60 @@ test('doctor 对损坏的宿主配置报「配置损坏」而非「未安装」'
   assert.equal(dw.status, 0, dw.stderr)
   assert.match(dw.stdout, /\[!!\][^\n]*workbuddy[^\n]*(损坏|解析失败)/i, 'workbuddy 损坏不应报「未安装」')
   assert.doesNotMatch(dw.stdout, /workbuddy mcpServers\.grape-kit[^\n]*未安装/i)
+})
+
+/* ---------- 第 4 轮：损坏配置不得静默重置；doctor 错误归因到实际文件 ---------- */
+
+test('workbuddy 遇损坏 mcp.json 非零退出且不改写文件（不静默重置他人连接器）', () => {
+  const h = home()
+  const dir = join(h, '.workbuddy')
+  mkdirSync(dir, { recursive: true })
+  const mcpJson = join(dir, 'mcp.json')
+  // 半截 JSON（解析失败）且含他人连接器 keep-me
+  const broken = `{
+  "mcpServers": {
+    "keep-me": { "command": "npx", "args": ["keep-me"] }
+  },
+`
+  writeFileSync(mcpJson, broken)
+
+  const r = run(['install', '--target', 'workbuddy'], h)
+  // 回归：解析失败曾静默重置为 { mcpServers: {} } → 他人连接器只剩在 .bak 里
+  assert.notEqual(r.status, 0, '解析失败必须非零退出（与 officeace 对齐）')
+  assert.match(`${r.stderr}${r.stdout}`, /解析失败|损坏/, '应明确告知解析失败')
+  assert.match(`${r.stderr}${r.stdout}`, /修复|移走/, '应提示先修复或移走该文件')
+  assert.equal(readFileSync(mcpJson, 'utf8'), broken, '解析失败时不得改写用户文件')
+  assert.deepEqual(backupsIn(dir), [], '失败路径不应产生「已重置」的写入')
+})
+
+test('doctor 把解析错误归因到实际损坏的候选文件（opencode.jsonc 合法 + opencode.json 损坏）', () => {
+  const h = home()
+  const dir = join(h, '.config', 'opencode')
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(join(dir, 'opencode.jsonc'), '{\n  "mcp": {\n    "other": { "type": "local", "command": ["node", "x"] }\n  }\n}\n')
+  writeFileSync(join(dir, 'opencode.json'), '{ "mcp": { broken')
+
+  const d = run(['doctor', '--target', 'opencode'], h)
+  assert.equal(d.status, 0, d.stderr)
+  const line = d.stdout.split('\n').find((l) => l.includes('opencode mcp.grape 条目')) || ''
+  // 回归：错误归因曾写死在 cfgPath（优先的 .jsonc），指向正常文件
+  assert.match(line, /损坏|解析失败/, `应报配置损坏，实际: ${line}`)
+  assert.match(line, /opencode\.json）/, `损坏项应指向实际出错文件 opencode.json，实际: ${line}`)
+  assert.doesNotMatch(line, /opencode\.jsonc）/, '不得把错误归因到合法的 opencode.jsonc')
+})
+
+test('opencode 纯 JSON 无 mcp 块：整体重写保留既有字段并留备份', () => {
+  const h = home()
+  const dir = join(h, '.config', 'opencode')
+  mkdirSync(dir, { recursive: true })
+  const cfgPath = join(dir, 'opencode.json')
+  const seed = JSON.stringify({ theme: 'dark' }, null, 2) + '\n'
+  writeFileSync(cfgPath, seed)
+
+  const r = run(['install', '--target', 'opencode'], h)
+  assert.equal(r.status, 0, r.stderr)
+  const cfg = JSON.parse(readFileSync(cfgPath, 'utf8'))
+  assert.equal(cfg.theme, 'dark', '既有字段必须保留')
+  assert.ok(cfg.mcp.grape, '应新建 mcp.grape 条目')
+  assert.deepEqual(backupContents(dir), [seed], '备份内容必须是改动前原文')
 })
