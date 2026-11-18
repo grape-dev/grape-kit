@@ -62,12 +62,16 @@ export function isNewerVersion(latest, local) {
 
 export function checkUpdate(localVersion, { now = Date.now(), fetchImpl = fetch, env = process.env } = {}) {
   if (isUpdateCheckDisabled(env)) return Promise.resolve(null)
-  // 缓存：24h 内已查过（无论结果）不再打 registry
+  // 缓存：24h 内已查过（无论结果）不再打 registry；
+  // notified 记录已提示过的 latest —— 同一新版本只打扰一次
   try {
     if (existsSync(cachePath)) {
       const c = JSON.parse(readFileSync(cachePath, 'utf-8'))
       if (c && typeof c.checkedAt === 'number' && now - c.checkedAt < CACHE_TTL_MS) {
-        if (c.latest && isNewerVersion(c.latest, localVersion)) return Promise.resolve({ latest: c.latest, cached: true })
+        if (c.latest && c.notified !== c.latest && isNewerVersion(c.latest, localVersion)) {
+          try { writeFileSync(cachePath, JSON.stringify({ ...c, notified: c.latest })) } catch { /* 只读失败忽略 */ }
+          return Promise.resolve({ latest: c.latest, cached: true })
+        }
         return Promise.resolve(null)
       }
     }
@@ -77,8 +81,9 @@ export function checkUpdate(localVersion, { now = Date.now(), fetchImpl = fetch,
     .then(r => (r.ok ? r.json() : null))
     .then(d => {
       const latest = d && typeof d.version === 'string' ? d.version : ''
-      try { writeFileSync(cachePath, JSON.stringify({ checkedAt: now, latest })) } catch { /* 只读失败忽略 */ }
-      if (latest && isNewerVersion(latest, localVersion)) return { latest, cached: false }
+      const newer = !!latest && isNewerVersion(latest, localVersion)
+      try { writeFileSync(cachePath, JSON.stringify({ checkedAt: now, latest, notified: newer ? latest : '' })) } catch { /* 只读失败忽略 */ }
+      if (newer) return { latest, cached: false }
       return null
     })
     .catch(() => null)
