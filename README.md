@@ -61,7 +61,7 @@ export GRAPE_API_TOKEN=grape_xxx      # Grape WebUI → 设置 → API Key
 
 # 装配（写 opencode mcp.grape 条目 + skill 副本 + receipt，带备份幂等）
 npx -y @grape-dev/grape-kit install --target opencode
-npx -y @grape-dev/grape-kit doctor --probe   # node / 服务端连通性 / 工具面逐项自检
+npx -y @grape-dev/grape-kit doctor --probe   # node / 服务端连通性 / 各宿主条目检出
 # 重启 opencode 会话后生效
 ```
 
@@ -85,12 +85,14 @@ npx -y @grape-dev/grape-kit doctor --probe   # node / 服务端连通性 / 工�
 
 | target | 写入位置 | 条目格式 | 自检 |
 |--------|----------|----------|------|
-| `opencode` | `~/.config/opencode/opencode.jsonc`（或 `opencode.json`） | `mcp.grape`（文本外科手术，保留注释） | `doctor` |
+| `opencode` | `~/.config/opencode/opencode.jsonc`（或 `opencode.json`） | `mcp.grape`（文本外科手术，保留注释） | `doctor --target opencode` |
 | `workbuddy` | `~/.workbuddy/mcp.json` | `mcpServers.grape-kit` | `doctor --target workbuddy` |
 | `codearts` | `~/.codeartsdoer/codearts_cli.jsonc` | `mcp.grape-kit`（`command`/`args`/`env`） | `doctor --target codearts` |
 | `officeace` | `~/.officeace/mcp.json`（可导入清单） | `mcpServers.grape-kit` | `doctor --target officeace` |
 
-四类宿主共用同一套写入引擎：写前 `*.bak-grapemcp-<ts>` 备份、先移除再插入的幂等策略、只增删 grape 条目不动他人配置；`install` 与 `doctor` 共用同一份宿主路径定义，未知 `--target` 直接报错并列出受支持宿主。凭据一律走环境变量（`GRAPE_BASE_URL` / `GRAPE_API_TOKEN`），不写入任何宿主配置。
+`doctor` **不带 `--target` 时汇总检出全部宿主**（逐条列出 `[ok]`/`未安装`），装过哪个宿主都能一眼看到；`doctor --target <宿主>` 查看单宿主详情（skill 副本、OfficeAce 导入状态等）。
+
+四类宿主共用同一套写入引擎：写前 `*.bak-grapemcp-<ts>` 备份（时间戳精确到秒，同秒重复写入自动加 `-2` 后缀不覆盖）、先移除再插入的幂等策略、只增删 grape 条目不动他人配置；写入前后各做一次结构校验，校验失败即非零退出并保留改动前的原文件。`install` 与 `doctor` 共用同一份宿主路径与条目判定，未知 `--target` 直接报错并列出受支持宿主。凭据一律走环境变量（`GRAPE_BASE_URL` / `GRAPE_API_TOKEN`），不写入任何宿主配置。
 
 ## 版本历史
 
@@ -111,7 +113,7 @@ npx -y @grape-dev/grape-kit doctor --probe   # node / 服务端连通性 / 工�
 
 ```bash
 npm install
-npm test        # 70 个单测（fake-grape 替身 + 临时 HOME 隔离，不依赖真实服务端与宿主）
+npm test        # 80 个单测（fake-grape 替身 + 临时 HOME 隔离，不依赖真实服务端与宿主）
 npm run smoke   # 真实 stdio JSON-RPC 往返：initialize → tools/list → tools/call
 ```
 
