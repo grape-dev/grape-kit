@@ -17,7 +17,7 @@ import { homedir, tmpdir } from 'node:os'
 import { join, dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
-import { checkUpdate, isUpdateCheckDisabled } from './src/update-check.mjs'
+import { checkUpdate, formatUpdateNotice, isUpdateCheckDisabled } from './src/update-check.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const DEFAULT_SCRIPT = resolve(HERE, 'grape-kit-mcp.mjs')
@@ -302,7 +302,7 @@ Promise.all([
   try { upd = await checkUpdate(pkgVersion) } catch { /* 版本检查绝不影响 doctor */ }
   const disabled = isUpdateCheckDisabled(process.env)
   checks.push(['版本更新', upd && upd.latest
-    ? `有新版本 ${pkgVersion} → ${upd.latest}（npm i -g @grape-dev/grape-kit 更新；GRAPE_KIT_SKIP_UPDATE_CHECK=1 关闭提醒）`
+    ? formatUpdateNotice(pkgVersion, upd.latest)
     : disabled
       ? 'ok（提示已关闭）'
       : `ok（已是最新 ${pkgVersion} / 24h 内已提示过或检测不可用）`])

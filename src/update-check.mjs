@@ -23,6 +23,11 @@ function writeCache(data) {
   } catch { /* 只读失败忽略：升级提示是尽力而为 */ }
 }
 
+/** 升级提示文案：doctor 的「版本更新」行与 MCP stderr 共用，避免两份拷贝分叉 */
+export function formatUpdateNotice(localVersion, latest) {
+  return `有新版本 ${localVersion} → ${latest}（npm i -g @grape-dev/grape-kit 更新；GRAPE_KIT_SKIP_UPDATE_CHECK=1 或 GRAPE_KIT_NO_UPDATE_CHECK=1 关闭提醒）`
+}
+
 /** 开关：任一开关名置 1 即关闭全部升级提示 */
 export function isUpdateCheckDisabled(env = process.env) {
   const on = (name) => String(env[name] ?? '').trim() === '1'

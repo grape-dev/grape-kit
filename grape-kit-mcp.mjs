@@ -2,7 +2,7 @@
 /** stdio 入口：node grape-kit-mcp.mjs */
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { createServer } from './src/server.mjs'
-import { checkUpdate } from './src/update-check.mjs'
+import { checkUpdate, formatUpdateNotice } from './src/update-check.mjs'
 import { readFileSync } from 'node:fs'
 
 const server = createServer()
@@ -13,6 +13,6 @@ try {
   const { version } = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf-8'))
   const upd = await checkUpdate(version)
   if (upd && upd.latest) {
-    process.stderr.write(`[grape-kit] 有新版本：${version} → ${upd.latest}（npm i -g @grape-dev/grape-kit 更新；GRAPE_KIT_SKIP_UPDATE_CHECK=1 或 GRAPE_KIT_NO_UPDATE_CHECK=1 关闭提醒）\n`)
+    process.stderr.write(`[grape-kit] ${formatUpdateNotice(version, upd.latest)}\n`)
   }
 } catch { /* 版本检查绝不影响工具可用性 */ }
