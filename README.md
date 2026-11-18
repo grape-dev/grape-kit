@@ -105,7 +105,9 @@ npx -y @grape-dev/grape-kit doctor
 
 - 只提示不自动升级，提示不阻塞 doctor 自检与 stdio 工具调用
 - 5s 有界超时 + 任何失败静默降级：registry 不可达时 `doctor` 与工具均正常
-- 24h 缓存（`~/.grape/grape-kit-update-check.json`）：同一新版本 24h 内只提示一次，不重复打扰
+- 24h 缓存（`~/.grape/grape-kit-update-check.json`）：同一新版本 24h 内只提示一次，不重复打扰；缓存目录不存在时自动创建
+- 检测失败（registry 不可达 / 非 2xx）同样写入 24h 退避缓存，doctor 显示「检测不可用」，不冒充「已最新」
+- doctor 的「版本更新」行区分「已最新 / 已提示过 / 检测不可用 / 已关闭」四种状态
 - 关闭开关：`export GRAPE_KIT_SKIP_UPDATE_CHECK=1`（等价别名 `GRAPE_KIT_NO_UPDATE_CHECK=1`）
 - 版本比较按 semver：仅本地 < latest 才提示，本地更高或预发布版本不会被误报
 
@@ -113,7 +115,7 @@ npx -y @grape-dev/grape-kit doctor
 
 ```bash
 npm install
-npm test        # 75 个单测（fake-grape 替身，不依赖真实服务端）
+npm test        # 82 个单测（fake-grape 替身，不依赖真实服务端）
 npm run smoke   # 真实 stdio JSON-RPC 往返：initialize → tools/list → tools/call
 ```
 
