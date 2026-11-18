@@ -110,3 +110,30 @@ test('checkUpdate：本地正式版高于 latest 预发布 → null', async () =
   })
   assert.equal(r, null)
 })
+
+test('checkUpdate：24h 缓存命中 → 同一新版本只提示一次且不再请求 registry', async () => {
+  const { checkUpdate } = await loadMod()
+  mkdirSync(join(homedir(), '.grape'), { recursive: true })
+  writeFileSync(CACHE, JSON.stringify({ checkedAt: Date.now(), latest: '0.3.9' }))
+  let called = 0
+  const fetchImpl = async () => { called++; throw new Error('should not hit registry') }
+  const first = await checkUpdate('0.3.2', { fetchImpl, env: {} })
+  assert.deepEqual(first, { latest: '0.3.9', cached: true })
+  const second = await checkUpdate('0.3.2', { fetchImpl, env: {} })
+  assert.equal(second, null)
+  assert.equal(called, 0)
+})
+
+test('checkUpdate：24h 缓存过期 → 重新请求 registry', async () => {
+  const { checkUpdate } = await loadMod()
+  mkdirSync(join(homedir(), '.grape'), { recursive: true })
+  writeFileSync(CACHE, JSON.stringify({ checkedAt: 1, latest: '0.3.9' }))
+  let called = 0
+  const r = await checkUpdate('0.3.2', {
+    now: 1 + 24 * 3600 * 1000,
+    fetchImpl: async () => { called++; return { ok: true, json: async () => ({ version: '0.4.0' }) } },
+    env: {},
+  })
+  assert.equal(called, 1)
+  assert.deepEqual(r, { latest: '0.4.0', cached: false })
+})
