@@ -177,3 +177,12 @@ test('doctor 24h 缓存内同一新版本不重复打扰', () => {
   assert.doesNotMatch(second.stdout, /有新版本/)
   rmSync(h, { recursive: true, force: true })
 })
+
+test('doctor 升级提示与 MCP 共用文案：两个等价开关都列出', () => {
+  const h = home()
+  seedUpdateCache(h, '9.9.9')
+  const r = run(['doctor'], h)
+  assert.equal(r.status, 0, r.stderr)
+  assert.match(r.stdout, /GRAPE_KIT_SKIP_UPDATE_CHECK=1 或 GRAPE_KIT_NO_UPDATE_CHECK=1 关闭提醒/)
+  rmSync(h, { recursive: true, force: true })
+})

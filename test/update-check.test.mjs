@@ -205,3 +205,11 @@ test('checkUpdate：非 2xx 响应同样落 24h 退避缓存', async () => {
     assert.equal(called, 1)
   } finally { restore() }
 })
+
+test('formatUpdateNotice：doctor 与 MCP 共用文案，包含两个等价开关', async () => {
+  const { formatUpdateNotice } = await loadMod()
+  const msg = formatUpdateNotice('0.3.2', '0.3.3')
+  assert.match(msg, /^有新版本 0\.3\.2 → 0\.3\.3（npm i -g @grape-dev\/grape-kit 更新；/)
+  assert.match(msg, /GRAPE_KIT_SKIP_UPDATE_CHECK=1/)
+  assert.match(msg, /GRAPE_KIT_NO_UPDATE_CHECK=1/)
+})
