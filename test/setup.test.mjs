@@ -124,9 +124,11 @@ test('install 升级「grape 为唯一条目」的配置不产生悬挂逗号', 
 const PKG_VERSION = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version
 const UPDATE_CACHE = (h) => join(h, '.grape', 'grape-kit-update-check.json')
 
-function seedUpdateCache(h, latest) {
+function seedUpdateCache(h, latest, notified) {
   mkdirSync(join(h, '.grape'), { recursive: true })
-  writeFileSync(UPDATE_CACHE(h), JSON.stringify({ checkedAt: Date.now(), latest }))
+  const data = { checkedAt: Date.now(), latest }
+  if (notified !== undefined) data.notified = notified
+  writeFileSync(UPDATE_CACHE(h), JSON.stringify(data))
 }
 
 test('doctor 在本地版本落后时输出升级提示与更新命令', () => {
@@ -175,6 +177,28 @@ test('doctor 24h 缓存内同一新版本不重复打扰', () => {
   assert.match(first.stdout, /有新版本/)
   const second = run(['doctor'], h)
   assert.doesNotMatch(second.stdout, /有新版本/)
+  assert.match(second.stdout, /\[ok\] 版本更新: ok（已提示过 9\.9\.9/)
+  rmSync(h, { recursive: true, force: true })
+})
+
+test('doctor 对已被 MCP 消费过的提示显示「已提示过」而非「已是最新」', () => {
+  const h = home()
+  // 模拟 MCP 先启动并消费提示：notified 已等于 latest
+  seedUpdateCache(h, '9.9.9', '9.9.9')
+  const r = run(['doctor'], h)
+  assert.equal(r.status, 0, r.stderr)
+  assert.doesNotMatch(r.stdout, /已是最新/)
+  assert.match(r.stdout, /\[ok\] 版本更新: ok（已提示过 9\.9\.9/)
+  rmSync(h, { recursive: true, force: true })
+})
+
+test('doctor 在检测不可用时明确提示，不冒充「已是最新」', () => {
+  const h = home()
+  seedUpdateCache(h, '')
+  const r = run(['doctor'], h)
+  assert.equal(r.status, 0, r.stderr)
+  assert.doesNotMatch(r.stdout, /已是最新/)
+  assert.match(r.stdout, /\[ok\] 版本更新: ok（检测不可用/)
   rmSync(h, { recursive: true, force: true })
 })
 
