@@ -78,7 +78,7 @@ npx -y @grape-dev/grape-kit doctor --probe   # node / 服务端连通性 / 各�
 **hermes**（无 MCP client）：复制 `skills/grape-remote/` 到其 skill 目录，agent 以 bash 调 `grape` CLI 即可。
 **codex**：`~/.codex/config.toml` 加 `[mcp_servers.grape]`（command/args/env），示例见使用指南。
 **WorkBuddy**：`npx -y @grape-dev/grape-kit install --target workbuddy` —— 写入 `~/.workbuddy/mcp.json`（`mcpServers.grape-kit`，走 npx 免全局安装）+ skill 落 `~/.workbuddy/skills/grape-remote/`；自检 `doctor --target workbuddy --probe`。装完需在 WorkBuddy 中手动「信任」连接器（一次性）；凭据走环境变量，**不要**写进 mcp.json。
-**CodeArts（华为云码道 CodeArts Agent）**：`npx -y @grape-dev/grape-kit install --target codearts` —— 写入码道 MCP 配置 `~/.codeartsdoer/codearts_cli.jsonc` 的 `mcp.grape-kit`（官方《MCP命令》文档的全局位置；IDE 侧同源文件为 `mcp_settings.json`）；默认只写**全局**配置，项目级需显式 `GRAPE_CODEARTS_CONFIG=<项目>/.codeartsdoer/codearts_cli.jsonc`。写前备份、重复安装先移除再插入；自检 `doctor --target codearts --probe`。装配后在码道「设置 → MCP工具 → 已安装」对 `grape-kit` 点一次「重启」生效。
+**CodeArts（华为云码道 CodeArts Agent）**：`npx -y @grape-dev/grape-kit install --target codearts` —— 写入码道 MCP 配置 `~/.codeartsdoer/codearts_cli.jsonc` 的 `mcp.grape-kit`（官方《MCP命令》文档的「全局」位置）；本安装器**只写码道 CLI/全局配置**，不写 IDE 的 `mcp_settings.json`（该文件顶层为 `mcpServers`，结构与 CLI 的 `mcp` 不同，IDE 侧需按官方文档单独配置）；默认只写**全局**配置，项目级需显式 `GRAPE_CODEARTS_CONFIG=<项目>/.codeartsdoer/codearts_cli.jsonc`。写前备份、重复安装先移除再插入；自检 `doctor --target codearts --probe`。装配后在码道「设置 → MCP工具 → 已安装」对 `grape-kit` 点一次「重启」生效。
 **OfficeAce（果办OfficeAce）**：`npx -y @grape-dev/grape-kit install --target officeace` —— 果办OfficeAce 的连接器**仅支持 GUI 注册**，安装器写一份可直接粘贴的清单 `~/.officeace/mcp.json`（`mcpServers.grape-kit`，可用 `GRAPE_OFFICEACE_MANIFEST` 覆盖）并打印手动步骤：扩展 → 连接器 → 我的连接器 → 自定义添加 → JSON配置 → 粘贴 → 确认并连接；自检 `doctor --target officeace`（清单存在 ≠ 已在客户端导入）。
 
 ### 受支持宿主（`--target`）
@@ -86,13 +86,13 @@ npx -y @grape-dev/grape-kit doctor --probe   # node / 服务端连通性 / 各�
 | target | 写入位置 | 条目格式 | 自检 |
 |--------|----------|----------|------|
 | `opencode` | `~/.config/opencode/opencode.jsonc`（或 `opencode.json`） | `mcp.grape`（文本外科手术，保留注释） | `doctor --target opencode` |
-| `workbuddy` | `~/.workbuddy/mcp.json` | `mcpServers.grape-kit` | `doctor --target workbuddy` |
-| `codearts` | `~/.codeartsdoer/codearts_cli.jsonc` | `mcp.grape-kit`（`command`/`args`/`env`） | `doctor --target codearts` |
-| `officeace` | `~/.officeace/mcp.json`（可导入清单） | `mcpServers.grape-kit` | `doctor --target officeace` |
+| `workbuddy` | `~/.workbuddy/mcp.json` | `mcpServers.grape-kit`（纯 JSON） | `doctor --target workbuddy` |
+| `codearts` | `~/.codeartsdoer/codearts_cli.jsonc` | `mcp.grape-kit`（`command`/`args`/`env`，文本外科手术） | `doctor --target codearts` |
+| `officeace` | `~/.officeace/mcp.json`（可导入清单） | `mcpServers.grape-kit`（纯 JSON） | `doctor --target officeace` |
 
 `doctor` **不带 `--target` 时汇总检出全部宿主**（逐条列出 `[ok]`/`未安装`），装过哪个宿主都能一眼看到；`doctor --target <宿主>` 查看单宿主详情（skill 副本、OfficeAce 导入状态等）。
 
-四类宿主共用同一套写入引擎：写前 `*.bak-grapemcp-<ts>` 备份（时间戳精确到秒，同秒重复写入自动加 `-2` 后缀不覆盖）、先移除再插入的幂等策略、只增删 grape 条目不动他人配置；写入前后各做一次结构校验，校验失败即非零退出并保留改动前的原文件。`install` 与 `doctor` 共用同一份宿主路径与条目判定，未知 `--target` 直接报错并列出受支持宿主。凭据一律走环境变量（`GRAPE_BASE_URL` / `GRAPE_API_TOKEN`），不写入任何宿主配置。
+写入引擎按宿主格式分两类：`opencode` / `codearts` 走**文本外科手术**（结构扫描、保留注释、先移除再插入的幂等升级）；`workbuddy` / `officeace` 的宿主格式为纯 JSON，走**结构化 JSON 读写**（同名字段整体覆盖即幂等，JSON 往返不保留注释——OfficeAce 的粘贴导入本身也不接受注释）。四类宿主写入前均生成 `*.bak-grapemcp-<ts>` 备份（时间戳精确到秒，同秒重复写入自动加 `-2` 后缀不覆盖），写入前后各做一次结构校验，校验失败即非零退出并保留/回滚改动前的原文件；只增删 grape 条目不动他人配置。`install` 与 `doctor` 共用同一份宿主路径与条目判定；`doctor` 对损坏的配置显式报「配置损坏」而非「未安装」。未知 `--target` 直接报错并列出受支持宿主（`--target x` 与 `--target=x` 等价）。凭据一律走环境变量（`GRAPE_BASE_URL` / `GRAPE_API_TOKEN`），不写入任何宿主配置。
 
 ## 版本历史
 
@@ -113,7 +113,7 @@ npx -y @grape-dev/grape-kit doctor --probe   # node / 服务端连通性 / 各�
 
 ```bash
 npm install
-npm test        # 80 个单测（fake-grape 替身 + 临时 HOME 隔离，不依赖真实服务端与宿主）
+npm test        # 85 个单测（fake-grape 替身 + 临时 HOME 隔离，不依赖真实服务端与宿主）
 npm run smoke   # 真实 stdio JSON-RPC 往返：initialize → tools/list → tools/call
 ```
 
