@@ -3,10 +3,18 @@ import { test, beforeEach } from 'node:test'
 import { mkdtempSync, writeFileSync, mkdirSync } from 'node:fs'
 import { tmpdir, homedir } from 'node:os'
 import { join } from 'node:path'
-import { rmSync, existsSync as _ex } from 'node:fs'
+import { rmSync, existsSync } from 'node:fs'
 
 const CACHE = join(homedir(), '.grape', 'grape-kit-update-check.json')
 beforeEach(() => { try { rmSync(CACHE, { force: true }) } catch {} })
+
+/** 临时 HOME（不预建 .grape）：返回 home 与恢复函数 */
+function withTempHome() {
+  const home = mkdtempSync(join(tmpdir(), 'grape-kit-update-home-'))
+  const prev = process.env.HOME
+  process.env.HOME = home
+  return { home, restore: () => { process.env.HOME = prev; rmSync(home, { recursive: true, force: true }) } }
+}
 
 // update-check 的缓存路径是模块常量（homedir 固定），测试通过注入 fetch/now/env 控制，
 // 缓存文件侧通过 mock existsSync/readFileSync 隔离——这里用注入参数覆盖全部外部 IO 判断。
@@ -136,4 +144,20 @@ test('checkUpdate：24h 缓存过期 → 重新请求 registry', async () => {
   })
   assert.equal(called, 1)
   assert.deepEqual(r, { latest: '0.4.0', cached: false })
+})
+
+test('checkUpdate：HOME 下无 .grape 目录时自动创建缓存，24h 去重仍生效', async () => {
+  const { checkUpdate } = await loadMod()
+  const { home, restore } = withTempHome()
+  try {
+    let called = 0
+    const fetchImpl = async () => { called++; return { ok: true, json: async () => ({ version: '9.9.9' }) } }
+    const first = await checkUpdate('0.3.2', { now: Date.now(), fetchImpl, env: {} })
+    assert.deepEqual(first, { latest: '9.9.9', cached: false })
+    const cacheFile = join(home, '.grape', 'grape-kit-update-check.json')
+    assert.ok(existsSync(cacheFile), '应自动创建 ~/.grape 并落盘缓存')
+    const second = await checkUpdate('0.3.2', { now: Date.now(), fetchImpl, env: {} })
+    assert.equal(second, null)
+    assert.equal(called, 1, '缓存命中后不应再次请求 registry')
+  } finally { restore() }
 })
