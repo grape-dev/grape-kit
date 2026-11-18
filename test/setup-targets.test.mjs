@@ -103,3 +103,72 @@ test('codearts 二次安装幂等并生成备份，他人条目保留', () => {
   assert.ok(after.mcp.other, '卸载只删 grape 条目')
   rmSync(h, { recursive: true, force: true })
 })
+
+/* ---------- S4：officeace（果办OfficeAce） ---------- */
+
+test('officeace 全新安装写可导入清单并提示手动步骤，doctor 检出', () => {
+  const h = home()
+  const r = run(['install', '--target', 'officeace'], h)
+  assert.equal(r.status, 0, r.stderr)
+
+  // OfficeAce 连接器仅支持 GUI 注册 → 写「自定义添加 > JSON配置」可直接粘贴的清单
+  const manifest = join(h, '.officeace', 'mcp.json')
+  assert.ok(existsSync(manifest), `应写入 ${manifest}`)
+  const cfg = JSON.parse(readFileSync(manifest, 'utf8'))
+  const entry = cfg.mcpServers['grape-kit']
+  assert.ok(entry, 'mcpServers 内应有 grape-kit 连接器')
+  assert.equal(entry.command, 'npx')
+  assert.match(entry.args.join(' '), /grape-kit-mcp/)
+  assert.match(`${r.stdout}`, /连接器/, '应提示 OfficeAce 侧的导入步骤')
+
+  const d = run(['doctor', '--target', 'officeace'], h)
+  assert.equal(d.status, 0, d.stderr)
+  assert.match(d.stdout, /\[ok\][^\n]*officeace/i)
+  rmSync(h, { recursive: true, force: true })
+})
+
+test('officeace 二次安装幂等并生成备份，他人连接器保留；卸载只删 grape 条目', () => {
+  const h = home()
+  const dir = join(h, '.officeace')
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(join(dir, 'mcp.json'), JSON.stringify({
+    mcpServers: { 'tyc-mcp': { command: 'npx', args: ['-y', 'mcp-remote'] } },
+  }, null, 2))
+
+  assert.equal(run(['install', '--target', 'officeace'], h).status, 0)
+  const r2 = run(['install', '--target', 'officeace'], h)
+  assert.equal(r2.status, 0, r2.stderr)
+
+  const text = readFileSync(join(dir, 'mcp.json'), 'utf8')
+  const cfg = JSON.parse(text)
+  assert.deepEqual(Object.keys(cfg.mcpServers).sort(), ['grape-kit', 'tyc-mcp'], '不应产生重复条目且他人连接器保留')
+  assert.ok(backupsIn(dir).length >= 1, '每次写入应生成 *.bak-grapemcp-<ts> 备份')
+
+  const u = run(['uninstall', '--target', 'officeace'], h)
+  assert.equal(u.status, 0, u.stderr)
+  const after = JSON.parse(readFileSync(join(dir, 'mcp.json'), 'utf8'))
+  assert.equal(after.mcpServers['grape-kit'], undefined)
+  assert.ok(after.mcpServers['tyc-mcp'], '卸载只删 grape 条目')
+  rmSync(h, { recursive: true, force: true })
+})
+
+/* ---------- 回归护栏：既有 workbuddy 目标 ---------- */
+
+test('workbuddy 安装/自检/卸载不回归', () => {
+  const h = home()
+  const r = run(['install', '--target', 'workbuddy'], h)
+  assert.equal(r.status, 0, r.stderr)
+  const mcpJson = join(h, '.workbuddy', 'mcp.json')
+  assert.ok(JSON.parse(readFileSync(mcpJson, 'utf8')).mcpServers['grape-kit'])
+  assert.ok(existsSync(join(h, '.workbuddy', 'skills', 'grape-remote', 'SKILL.md')))
+
+  const d = run(['doctor', '--target', 'workbuddy'], h)
+  assert.equal(d.status, 0, d.stderr)
+  assert.match(d.stdout, /\[ok\][^\n]*workbuddy/i)
+
+  const u = run(['uninstall', '--target', 'workbuddy'], h)
+  assert.equal(u.status, 0, u.stderr)
+  assert.equal(JSON.parse(readFileSync(mcpJson, 'utf8')).mcpServers['grape-kit'], undefined)
+  assert.ok(!existsSync(join(h, '.workbuddy', 'skills', 'grape-remote')))
+  rmSync(h, { recursive: true, force: true })
+})

@@ -58,8 +58,6 @@ const arg = (name, def = undefined) => {
 const cmd = process.argv[2] || 'help'
 const target = arg('target', 'opencode')
 
-/** 受支持宿主；hermes 无 MCP client（走 skill 手动复制）、dsh 由 grape-dsh 独立插件承载 */
-const SUPPORTED_TARGETS = ['opencode', 'workbuddy', 'codearts', 'officeace']
 
 /** 未知 target 明确报错，不静默回落到 opencode（否则会写错宿主的配置） */
 function resolveTarget() {
@@ -217,6 +215,76 @@ function doctorCodearts(probe) {
     try { mcpOk = hasEntry(readFileSync(cfgPath, 'utf8'), 'grape-kit') } catch {}
   }
   checks.push([`codearts mcp.grape-kit（${cfgPath}）`, mcpOk ? 'ok' : '未安装（npx -y @grape-dev/grape-kit install --target codearts）'])
+  if (probe && process.env.GRAPE_BASE_URL) checks.push(['契约连通性', connectivityCheck(process.env.GRAPE_BASE_URL)])
+  printChecks(checks)
+}
+
+/* ---------- officeace（果办OfficeAce） ---------- */
+
+/**
+ * 果办OfficeAce 的连接器（MCP）只能通过 GUI 注册（扩展 > 连接器 > 我的连接器 > 自定义添加，
+ * 支持「JSON配置」与「表单配置」，无文件式注册入口）。因此这里写一份**可直接粘贴导入**的清单，
+ * 并打印手动步骤；doctor 检出该清单条目（Spec Risks & Mitigations：无文件注册的宿主降级方案）。
+ * 清单路径可用 GRAPE_OFFICEACE_MANIFEST 覆盖。
+ */
+function officeacePaths() {
+  const home = homedir()
+  const override = String(process.env.GRAPE_OFFICEACE_MANIFEST || '').trim()
+  return { manifest: override || join(home, '.officeace', 'mcp.json') }
+}
+
+function officeaceEntry() {
+  return { command: 'npx', args: [...NPX_ARGS], env: {} }
+}
+
+function installOfficeace() {
+  const { manifest } = officeacePaths()
+  let cfg = { mcpServers: {} }
+  if (existsSync(manifest)) {
+    try {
+      cfg = JSON.parse(readFileSync(manifest, 'utf8'))
+    } catch (e) {
+      console.error(`${manifest} 解析失败（${e.message}），请先修复或移走该文件`)
+      process.exit(1)
+    }
+    if (!cfg.mcpServers || typeof cfg.mcpServers !== 'object') cfg.mcpServers = {}
+  }
+  mkdirSync(dirname(manifest), { recursive: true })
+  const backup = backupOf(manifest)
+  // 先移除再插入：幂等，且不覆盖文件内其他连接器
+  cfg.mcpServers['grape-kit'] = officeaceEntry()
+  writeFileSync(manifest, JSON.stringify(cfg, null, 2) + '\n')
+  console.log(`已写入 ${manifest}（mcpServers.grape-kit${backup ? `，备份: ${backup}` : '，新建'}）`)
+  console.log('⚠️ 果办OfficeAce 不支持文件式注册，需在客户端完成一次导入：')
+  console.log('   扩展 → 连接器 → 我的连接器 → 自定义添加 → JSON配置 → 粘贴上述文件内容 → 确认并连接')
+  console.log('凭据走环境变量（GRAPE_BASE_URL / GRAPE_API_TOKEN），不要写进连接器配置')
+}
+
+function uninstallOfficeace() {
+  const { manifest } = officeacePaths()
+  if (!existsSync(manifest)) { console.log(`未找到 ${manifest}，无需卸载`); return }
+  let cfg
+  try { cfg = JSON.parse(readFileSync(manifest, 'utf8')) } catch (e) {
+    console.error(`${manifest} 解析失败（${e.message}），跳过`)
+    return
+  }
+  if (!cfg.mcpServers || !cfg.mcpServers['grape-kit']) { console.log('未发现 grape-kit 连接器，跳过'); return }
+  const backup = backupOf(manifest)
+  delete cfg.mcpServers['grape-kit']
+  writeFileSync(manifest, JSON.stringify(cfg, null, 2) + '\n')
+  console.log(`已移除 mcpServers.grape-kit（备份: ${backup}）`)
+  console.log('⚠️ 果办OfficeAce 侧还需在「扩展 → 连接器 → 我的连接器」中手动删除该连接器')
+}
+
+function doctorOfficeace(probe) {
+  const { manifest } = officeacePaths()
+  const checks = baseChecks()
+  let ok = false
+  if (existsSync(manifest)) {
+    try { ok = !!JSON.parse(readFileSync(manifest, 'utf8')).mcpServers?.['grape-kit'] } catch {}
+  }
+  checks.push([`officeace mcpServers.grape-kit（${manifest}）`, ok ? 'ok' : '未安装（npx -y @grape-dev/grape-kit install --target officeace）'])
+  if (ok) checks.push(['officeace 导入状态', '需在客户端「扩展 → 连接器」中确认已连接（清单存在 ≠ 已导入）'])
   if (probe && process.env.GRAPE_BASE_URL) checks.push(['契约连通性', connectivityCheck(process.env.GRAPE_BASE_URL)])
   printChecks(checks)
 }
@@ -476,7 +544,17 @@ const HOSTS = {
     uninstall: uninstallCodearts,
     doctor: doctorCodearts,
   },
+  officeace: {
+    label: 'officeace（果办OfficeAce）',
+    paths: officeacePaths,
+    install: installOfficeace,
+    uninstall: uninstallOfficeace,
+    doctor: doctorOfficeace,
+  },
 }
+
+/* 受支持宿主以 HOSTS 为唯一来源（hermes 无 MCP client 走 skill 手动复制；dsh 由 grape-dsh 插件承载） */
+const SUPPORTED_TARGETS = Object.keys(HOSTS)
 
 /* ---------- main ---------- */
 
