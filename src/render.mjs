@@ -35,14 +35,24 @@ export function mdTable(rows, columns) {
   return [head, sep, ...body].join('\n')
 }
 
+const STAGE_ORDER = ['vod', 'issue', 'coding', 'qa', 'sre']
+function stageBar(stage) {
+  const st = String(stage ?? '').toLowerCase()
+  if (!st) return ''
+  const idx = STAGE_ORDER.indexOf(st)
+  if (idx < 0) return st
+  return '●'.repeat(idx + 1) + '○'.repeat(STAGE_ORDER.length - idx - 1) + ` ${idx + 1}/${STAGE_ORDER.length}`
+}
+
 export function renderIssues(data) {
   const rows = asArray(data)
   if (!rows) return fallbackJson(data)
   return mdTable(rows.slice(0, 30), [
     { h: '#', v: (r) => r.number ?? r.issue_number ?? '' },
-    { h: '标题', v: (r) => r.title ?? '' },
-    { h: '状态', v: (r) => r.state ?? r.status ?? '' },
-    { h: '流水线', v: (r) => r.pipeline_status ?? r.stage ?? '' },
+    { h: '标题', v: (r) => (r.title ?? '').slice(0, 40) },
+    { h: '状态', v: (r) => { const st = String(r.state ?? r.status ?? ''); const em = NODE_ICON[st.toLowerCase()] ?? (st === 'processing' ? '⚙️' : st === 'active' ? '🟢' : st === 'done' || st === 'completed' ? '✅' : st === 'cancelled' ? '🚫' : ''); return (em ? em + ' ' : '') + st } },
+    { h: '进度', v: (r) => stageBar(r.stage ?? r.pipeline_status) },
+    { h: '节点', v: (r) => (r.stage ?? r.pipeline_status ?? '') + (r.task_status ? ` (${r.task_status})` : '') },
   ]) + (rows.length > 30 ? `\n_（共 ${rows.length} 条，仅显示前 30）_` : '')
 }
 
@@ -59,17 +69,66 @@ export function renderIssueDetail(data) {
 }
 
 /** 节点链：vod → issue → coding → qa → sre，带状态标记 */
+const NODE_ICON = { completed: '✅', running: '🏃', queued: '📦', failed: '❌', skipped: '⏭️', pending: '⏳', takeover: '🤝' }
+const NODE_TAG = { completed: '[OK]', running: '[RUN]', queued: '[QUEUE]', failed: '[FAIL]', skipped: '[SKIP]', pending: '[WAIT]', takeover: '[TAKEOVER]' }
+const ST_CLASS = { completed: 'done', running: 'run', takeover: 'run', failed: 'fail' }
+function pickNodes(data) {
+  const stages = (data.stages ?? data.pipeline?.stages)
+  if (stages?.length) {
+    return stages.map((st) => {
+      const ev = st.latest_event ?? st.event ?? {}
+      return { agent: st.agent ?? ev.agent, status: st.status ?? ev.status, scene_id: st.scene_id, scene_name: st.scene_name }
+    })
+  }
+  const nodes = asArray(data) ?? data.nodes ?? data.pipeline?.nodes
+  if (!nodes) return null
+  return nodes.map((n) => (typeof n === 'string' ? { agent: n, status: '' } : n))
+}
+
 export function renderPipeline(data) {
   if (!data || typeof data !== 'object') return fallbackJson(data)
-  const icon = { completed: '[OK]', running: '[RUN]', queued: '[QUEUE]', failed: '[FAIL]', skipped: '[SKIP]', pending: '[WAIT]' }
-  const nodes = asArray(data) ?? data.nodes ?? data.pipeline?.nodes
+  const nodes = pickNodes(data)
   if (!nodes) return fallbackJson(data)
-  const chain = nodes.map((n) => {
+  const sceneName = data.scene ?? data.scene_name ?? data.scene_id ?? (nodes[0]?.scene_name ?? '-')
+  const issueLabel = data.issue ? ` ─ Issue #${data.issue_number ?? ''} ${data.title ?? ''}`.trimEnd() : ''
+  const stats = { done: 0, run: 0, fail: 0, wait: 0 }
+  for (const n of nodes) {
+    const st = String(n.status ?? '').toLowerCase()
+    if (st === 'completed') stats.done++
+    else if (st === 'running' || st === 'takeover') stats.run++
+    else if (st === 'failed') stats.fail++
+    else stats.wait++
+  }
+  const current = nodes.find((n) => ['running', 'takeover'].includes(String(n.status ?? '').toLowerCase()))
+  const lines = []
+  lines.push(`┌─ 流水线：${sceneName}${issueLabel}`)
+  for (const n of nodes) {
     const tag = n.tag ?? n.agent ?? n.id ?? '?'
     const st = String(n.status ?? '').toLowerCase()
-    return `${icon[st] || '·'} ${tag}(${st || '?'})`
-  }).join(' → ')
-  const lines = [`**流水线**: ${data.scene ?? data.scene_id ?? '-'}`, '', chain]
+    lines.push(`│  ${NODE_ICON[st] ?? '·'} ${String(tag).padEnd(8)} ${NODE_TAG[st] ?? (st || '?')}`)
+  }
+  const total = nodes.length
+  const bar = '█'.repeat(stats.done * 2 + (stats.run ? 1 : 0)) + '░'.repeat(Math.max(0, (total * 2) - stats.done * 2 - (stats.run ? 1 : 0)))
+  const pct = Math.round((stats.done / Math.max(1, total)) * 100)
+  let verdict = `${stats.done}/${total} 节点完成`
+  if (stats.fail) verdict += ` · ❌ ${stats.fail} 个失败节点`
+  if (current) verdict += ` · 当前：${current.agent ?? current.tag ?? '?'} ${String(current.status).toLowerCase() === 'takeover' ? '已被本地接管' : '执行中'}`
+  lines.push(`│  进度 [${bar}] ${pct}%`)
+  lines.push(`└─ ${verdict}`)
+  // Mermaid 图形（宿主支持则渲染为图，不支持则忽略）
+  const mm = ['```mermaid', 'flowchart LR']
+  nodes.forEach((n, i) => {
+    const tag = n.tag ?? n.agent ?? n.id ?? ('n' + i)
+    const st = String(n.status ?? '').toLowerCase()
+    mm.push(`    n${i}["${tag}"]:::${ST_CLASS[st] ?? 'wait'}`)
+    if (i > 0) mm.push(`    n${i - 1} --> n${i}`)
+  })
+  mm.push('    classDef done fill:#1a7f37,color:#fff')
+  mm.push('    classDef run fill:#d4a72c,color:#fff,stroke-width:3px')
+  mm.push('    classDef fail fill:#cf222e,color:#fff')
+  mm.push('    classDef wait fill:#eaeef2,color:#888')
+  mm.push('```')
+  lines.push('', mm.join('\n'))
   return lines.join('\n')
 }
 
@@ -102,6 +161,10 @@ export function renderScenes(data) {
     { h: '名称', v: (r) => r.display_name ?? r.name ?? '' },
     { h: '类目', v: (r) => r.category ?? '' },
     { h: '描述', v: (r) => String(r.description ?? '').slice(0, 80) },
+    { h: '节点链', v: (r) => {
+      const ns = r.agents ?? r.nodes ?? []
+      return Array.isArray(ns) ? ns.join('→') : String(ns)
+    } },
   ])
 }
 

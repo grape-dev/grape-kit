@@ -47,12 +47,17 @@ test('wait_task 声明 waitBased', () => {
 
 test('render: issues 表格 / pipeline 节点链 / 打回事件', () => {
   const issues = R.renderIssues([{ number: 23, title: '实现登录', state: 'open', pipeline_status: 'coding' }])
-  assert.match(issues, /\| # \| 标题 \| 状态 \| 流水线 \|/)
-  assert.match(issues, /\| 23 \| 实现登录 \| open \| coding \|/)
+  assert.match(issues, /\| # \| 标题 \| 状态 \| 进度 \| 节点 \|/, 'issues 表含新进度/节点列')
+  assert.match(issues, /\| 23 \|/, '行数据仍在')
+  assert.match(issues, /●/, '进度点阵渲染')
   const pipe = R.renderPipeline({ scene: 'default', nodes: [
     { tag: 'vod', status: 'completed' }, { tag: 'coding', status: 'running' },
   ] })
-  assert.match(pipe, /\[OK\] vod\(completed\) → \[RUN\] coding\(running\)/)
+  assert.match(pipe, /┌─ 流水线：default/, '竖排状态卡头')
+  assert.match(pipe, /✅ vod .*\[OK\]/, '完成节点图标+标签')
+  assert.match(pipe, /🏃 coding .*\[RUN\]/, '运行节点图标+标签')
+  assert.match(pipe, /当前：coding 执行中/, '判读行')
+  assert.match(pipe, /```mermaid/, '附 Mermaid 图形')
   const ev = R.renderEventTimeline([{ seq: 91, type: 'issue_comment', agent_type: 'qa', summary: 'PR 打回' }])
   assert.match(ev, /#91.*issue_comment.*qa/)
 })
