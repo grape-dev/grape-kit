@@ -120,7 +120,7 @@ node scripts/live-smoke.mjs
 
 - [Grape 平台](https://www.grapedev.cn/) · [grape 主仓](https://gitcode.com/grape-dev/grape) · [grape-cli](https://gitcode.com/grape-dev/grape-cli) · [grape-dsh（DSH 宿主插件）](https://gitcode.com/grape-dev/grape-dsh)
 - 端云协同架构与验证报告：[docs/20261114-takeover-architecture.md](docs/20261114-takeover-architecture.md)
-- 贡献指南：[CONTRIBUTING.md](CONTRIBUTING.md) · 安全报告：[SECURITY.md](SECURITY.md)
+- 贡献指南：[CONTRIBUTING.md](CONTRIBUTING.md) · 安全报告：[SECURITY.md](SECURITY.md) · 行为准则：[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) · 支持渠道：[SUPPORT.md](SUPPORT.md) · AI Agent 工作指引：[AGENTS.md](AGENTS.md)
 
 ## License
 
