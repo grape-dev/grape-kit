@@ -1,4 +1,4 @@
-import { test } from 'node:test'
+import { test, after } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import { mkdtempSync, readFileSync, writeFileSync, existsSync, rmSync, mkdirSync } from 'node:fs'
@@ -7,9 +7,16 @@ import { join } from 'node:path'
 
 const SETUP = new URL('../grape-kit.mjs', import.meta.url).pathname
 
+/* 临时 HOME 统一登记，文件级 after 钩子收尾（用例中途失败也不残留临时目录） */
+const homes = []
 function home() {
-  return mkdtempSync(join(tmpdir(), 'grape-kit-home-'))
+  const h = mkdtempSync(join(tmpdir(), 'grape-kit-home-'))
+  homes.push(h)
+  return h
 }
+after(() => {
+  for (const h of homes) rmSync(h, { recursive: true, force: true })
+})
 
 function run(args, h) {
   return spawnSync(process.execPath, [SETUP, ...args], {
@@ -57,7 +64,6 @@ test('install 幂等插入且保留既有条目与注释', () => {
   const stripped = (t) => JSON.parse(t.replace(/^\s*\/\/.*$/gm, ''))
   stripped(text1)
   stripped(text2)
-  rmSync(h, { recursive: true, force: true })
 })
 
 test('uninstall 移除条目与 skill，保留他人内容', () => {
@@ -70,7 +76,6 @@ test('uninstall 移除条目与 skill，保留他人内容', () => {
   assert.doesNotMatch(text, /"grape"\s*:\s*\{/)
   assert.match(text, /"existing"/)
   assert.ok(!existsSync(join(h, '.config', 'opencode', 'skills', 'grape-remote')))
-  rmSync(h, { recursive: true, force: true })
 })
 
 test('install 在无 mcp 块的纯 JSON 配置上自动新建块', () => {
@@ -91,7 +96,6 @@ test('install 在无 mcp 块的纯 JSON 配置上自动新建块', () => {
   const after = JSON.parse(readFileSync(join(dir, 'opencode.json'), 'utf8'))
   assert.equal(after.model, 'deepseek/glm-5.3')
   assert.equal(after.mcp.grape, undefined)
-  rmSync(h, { recursive: true, force: true })
 })
 
 test('doctor 在干净 HOME 下逐项报告', () => {
@@ -100,7 +104,6 @@ test('doctor 在干净 HOME 下逐项报告', () => {
   assert.equal(r.status, 0, r.stderr)
   assert.match(r.stdout, /node >= 20/)
   assert.match(r.stdout, /GRAPE_BASE_URL/)
-  rmSync(h, { recursive: true, force: true })
 })
 
 test('install 升级「grape 为唯一条目」的配置不产生悬挂逗号', () => {
@@ -116,5 +119,26 @@ test('install 升级「grape 为唯一条目」的配置不产生悬挂逗号', 
   const text = readFileSync(join(dir, 'opencode.json'), 'utf8')
   const cfg = JSON.parse(text) // 旧路径升级后必须仍是合法 JSON（悬挂逗号回归）
   assert.match(cfg.mcp.grape.command[1], /grape-kit-mcp\.mjs$/)
-  rmSync(h, { recursive: true, force: true })
+})
+
+test('install 升级位于 mcp 块中间的 grape 条目不破坏兄弟条目', () => {
+  const h = home()
+  const dir = join(h, '.config', 'opencode')
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(join(dir, 'opencode.json'), JSON.stringify({
+    model: 'm',
+    mcp: {
+      before: { type: 'local', command: ['echo', 'before'] },
+      grape: { type: 'local', command: ['node', '/old/path.mjs'], enabled: true, timeout: 600000 },
+      after: { type: 'local', command: ['echo', 'after'] },
+    },
+  }, null, 2))
+  const r = run(['install', '--target', 'opencode'], h)
+  assert.equal(r.status, 0, r.stderr)
+  // 回归 P0：中段条目重插后逗号错位 → 非法 JSON
+  const cfg = JSON.parse(readFileSync(join(dir, 'opencode.json'), 'utf8'))
+  assert.deepEqual(Object.keys(cfg.mcp).sort(), ['after', 'before', 'grape'])
+  assert.deepEqual(cfg.mcp.before.command, ['echo', 'before'])
+  assert.deepEqual(cfg.mcp.after.command, ['echo', 'after'])
+  assert.match(cfg.mcp.grape.command[1], /grape-kit-mcp\.mjs$/)
 })
