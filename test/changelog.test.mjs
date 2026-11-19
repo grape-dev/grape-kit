@@ -11,11 +11,12 @@ const PACKAGE_NAME = '@grape-dev/grape-kit'
 const GIT_IDENTITY = ['-c', 'user.name=changelog-test', '-c', 'user.email=changelog-test@example.com']
 
 /**
- * npm 已发布版本 → 发布日期（基准：`npm view @grape-dev/grape-kit time`；0.3.5 为本版待发布，发布后以 npm view time 复核）。
+ * npm 已发布版本 → 发布日期（基准：`npm view @grape-dev/grape-kit time`；0.3.6 为本版待发布，发布后以 npm view time 复核）。
  * `0.0.0-stage` 是 npm staged publishing 占位包（tarball 不含 `src/`），与功能版本一并计入发布记录；
  * `0.2.3` 从未发布，不得补造。
  */
 const PUBLISHED = [
+  ['0.3.6', '2026-11-19'],
   ['0.3.5', '2026-11-19'],
   ['0.3.4', '2026-11-19'],
   ['0.3.3', '2026-11-18'],
@@ -125,11 +126,15 @@ test('每个版本节含发布日期与至少一条 Added/Changed/Fixed 条目',
   }
 })
 
-test('README 版本历史节链接 CHANGELOG.md、含 0.3.3/0.3.5 行且计数与 npm 发布记录一致', () => {
+test('README 版本历史节链接 CHANGELOG.md、含 0.3.3/0.3.5/0.3.6 行且计数与 npm 发布记录一致', () => {
   const md = readme()
   const section = mdSection(md, '版本历史')
   assert.ok(section, 'README 应保留版本历史节')
   assert.match(section, /\[[^\]]*CHANGELOG[^\]]*\]\(\.?\/?CHANGELOG\.md\)/, '版本历史节应含指向 CHANGELOG.md 的相对链接')
+
+  const row036 = section.split('\n').find((l) => /^\| 0\.3\.6 \|/.test(l))
+  assert.ok(row036, '版本历史表应含 0.3.6 行')
+  assert.match(row036, /\| 2026-11-19 \|/, '0.3.6 日期应为 npm 发布日 2026-11-19')
 
   const row035 = section.split('\n').find((l) => /^\| 0\.3\.5 \|/.test(l))
   assert.ok(row035, '版本历史表应含 0.3.5 行')
@@ -143,7 +148,7 @@ test('README 版本历史节链接 CHANGELOG.md、含 0.3.3/0.3.5 行且计数�
   assert.ok(row033, '版本历史表应含 0.3.3 行')
   assert.match(row033, /\| 2026-11-18 \|/, '0.3.3 日期应为 npm 发布日 2026-11-18')
 
-  assert.match(section, /15 条发布记录/, '发布记录计数应为 15（含 0.0.0-stage 占位包）')
+  assert.match(section, /16 条发布记录/, '发布记录计数应为 16（含 0.0.0-stage 占位包）')
   assert.ok(!/12 个已发布版本|12 条发布记录/.test(section), '不得再写「12 个已发布版本」')
 })
 
@@ -179,12 +184,12 @@ function runGenerator(dir, prev) {
 }
 
 test('gen-changelog 把新版本节插在标题与说明之后，历史节逐字保留', () => {
-  const dir = tempRepo('0.3.6')
+  const dir = tempRepo('0.3.7')
   try {
     const before = readFileSync(join(dir, 'CHANGELOG.md'), 'utf8')
     const after = runGenerator(dir, 'HEAD~1')
     assert.equal(preambleOf(after), preambleOf(before), '标题与说明应保持原位（新节不得压到标题之上）')
-    assert.match(historyOf(after), /^## 0\.3\.6 \(\d{4}-\d{2}-\d{2}\)/, '新版本节应为首个版本节')
+    assert.match(historyOf(after), /^## 0\.3\.7 \(\d{4}-\d{2}-\d{2}\)/, '新版本节应为首个版本节')
     assert.ok(after.endsWith(historyOf(before)), '历史版本节应逐字保留')
     assert.match(after, /^# Changelog$/m, '文件仍应以 Keep a Changelog 标题开头')
   } finally {

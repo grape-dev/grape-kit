@@ -85,10 +85,11 @@ Then just talk to your agent:
 
 ## Version history
 
-Full release notes: [CHANGELOG.md](CHANGELOG.md) — 15 条发布记录（含 0.0.0-stage 占位包）
+Full release notes: [CHANGELOG.md](CHANGELOG.md) — 16 条发布记录（含 0.0.0-stage 占位包）
 
 | Version | Date | Highlights |
 |---|---|---|
+| 0.3.6 | 2026-11-19 | Pipeline rendering supports the segments event-stream shape (real API payloads; no more raw-JSON fallback); stall status surfaced in the verdict line ("⚠️ suspected stall for N minutes"); segments-shape regression case added (unit tests 114→115) |
 | 0.3.5 | 2026-11-19 | Host auto-detection from local traces (workbuddy/codearts/officeace); interactive host picker when none detected (no silent opencode fallback); clean-env auto-config + three-step onboarding output; host matrix docs (CodeArts section, openclaw/ClawHub channel) |
 | 0.3.4 | 2026-11-19 | codearts + officeace install targets (supported hosts 2→4); doctor version-update line (24h dedupe, five states); installer entry-engine structural scan hardening |
 | 0.3.3 | 2026-11-18 | check_update startup reminder + CHANGELOG generator; 401 fallback hardened |
@@ -124,6 +125,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the contribution flow, [AGENTS.md](AG
 
 | 版本 | 日期 | 要点 |
 |---|---|---|
+| 0.3.6 | 2026-11-19 | 流水线渲染支持 segments 事件流形态（真实 API 返回，不再回退原始 JSON）· 停滞状态「⚠️ 疑似停滞 N 分钟」透出到判读行 · 新增 segments 形态回归用例（单测 114→115） |
 | 0.3.5 | 2026-11-19 | 宿主自动检测 · 零宿主交互选择 · 干净环境自动建配置 + 三步上手引导 · 宿主矩阵补 codearts 专段与 ClawHub 渠道 |
 | 0.3.4 | 2026-11-19 | codearts/officeace 两宿主安装（受支持宿主 2→4）· doctor 版本更新行（24h 去重、五态）· 条目引擎结构扫描加固 |
 | 0.3.3 | 2026-11-18 | check_update 启动版本提醒 · CHANGELOG 生成器 · 401 回退回抛原始 native 提示 |
@@ -132,7 +134,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the contribution flow, [AGENTS.md](AG
 | 0.3.0 | 2026-11-11 | 传输层原生化：原生 HTTP 直连，grape CLI/Python 变可选（401 回退通道） |
 | 0.2.x | 2026-11-09 前 | 13→31 工具扩展 · worker_onboard · B1 接管闭环 |
 
-逐版本完整记录（发布日期、工具面变化、行为修复，覆盖 npm 全部 15 条发布记录——含 `0.0.0-stage` 占位包，0.2.3 从未发布）：[CHANGELOG.md](CHANGELOG.md)
+逐版本完整记录（发布日期、工具面变化、行为修复，覆盖 npm 全部 16 条发布记录——含 `0.0.0-stage` 占位包，0.2.3 从未发布）：[CHANGELOG.md](CHANGELOG.md)
 
 ## Roadmap
 

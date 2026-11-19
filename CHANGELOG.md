@@ -4,6 +4,12 @@
 
 > 发布口径说明：npm 已发布版本不可回写——0.3.3 的 npm tarball 内 CHANGELOG 仅含本节（10 行）、README 尚无本节链接且把 0.3.2 记为 2026-11-14（commit 日）。因此「npm 页面与仓内 CHANGELOG 一致」自下一版发布起生效。
 
+## 0.3.6 (2026-11-19)
+
+### Fixed
+
+- 流水线渲染支持 `segments` 事件流形态（pipeline API 真实返回）：此前 `pickNodes` 只认 stages/nodes 形态，真实返回时渲染回退原始 JSON；segments 分支按 agent 取最新事件态，整体 status 与 stalled/stalled_minutes 以「⚠️ 疑似停滞 N 分钟」透出到判读行；新增 segments 形态回归用例（#45 停滞 178 分钟真实数据），单测面 114 → 115。
+
 ## 0.3.5 (2026-11-19)
 
 ### Added
