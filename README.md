@@ -78,6 +78,9 @@ Then just talk to your agent:
 
 **hermes** (no MCP client): copy `skills/grape-remote/` into its skill directory; the agent calls the `grape` CLI via bash.
 **codex**: add `[mcp_servers.grape]` (command/args/env) to `~/.codex/config.toml` — see the usage guide.
+**CodeArts Agent** (华为云码道): `npx -y @grape-dev/grape-kit install --target codearts` — writes the `mcpServers` entry into `~/.codeartsdoer/codearts_cli.jsonc` (global) or `<project>/.codeartsdoer/codearts_cli.jsonc` (project-level). After install, restart the entry in CodeArts: 设置 → MCP工具 → 已安装 → grape-kit → 「重启」. Credentials via environment variables only.
+**openclaw (ClawHub)**: install from the marketplace — `openclaw plugins install clawhub:grape-kit@latest` (bundle-plugin; the `clawhub:` prefix is the source, matching devkit's listing form). Verify with the plugin's MCP tools list (36 tools). Marketplace page: https://clawhub.ai/grape-dev/plugins/grape-kit
+
 **WorkBuddy**: `npx -y @grape-dev/grape-kit install --target workbuddy` — writes `~/.workbuddy/mcp.json` (`mcpServers.grape-kit`, via npx, no global install) + skill to `~/.workbuddy/skills/grape-remote/`; self-check with `doctor --target workbuddy --probe`. Trust the connector once in WorkBuddy; credentials go through environment variables — **never** write them into mcp.json.
 
 ## Version history
