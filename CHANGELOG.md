@@ -4,6 +4,23 @@
 
 > 发布口径说明：npm 已发布版本不可回写——0.3.3 的 npm tarball 内 CHANGELOG 仅含本节（10 行）、README 尚无本节链接且把 0.3.2 记为 2026-11-14（commit 日）。因此「npm 页面与仓内 CHANGELOG 一致」自下一版发布起生效。
 
+## 0.3.5 (2026-11-19)
+
+### Added
+
+- `install` 宿主自动检测：未指定 `--target` 时按本机宿主痕迹自动选择（WorkBuddy 客户端机裸跑即写对 `mcp.json`）；显式 `--target` 语义不变。
+- 零宿主交互选择：痕迹检测升级为 huaweicloud-devkit 同款（workbuddy / codearts / officeace / opencode）——1 个痕迹直装该宿主、多个痕迹全装，零痕迹时 TTY 下列出宿主菜单由用户按编号/名称选择；非交互环境列出支持项并非零退出、指引 `--target`，不再静默兜底 opencode。
+- 干净环境安装引导：无现有配置时自动创建空配置继续安装（此前新用户第一面即报错退出）；完成输出重构为三步上手（配置凭证 → `doctor --probe` 自检 → 重启宿主会话），附 36 工具能力地图与建单/查进度/接管/确认交回四条示例。
+
+### Changed
+
+- 宿主矩阵文档补全（中英双语）：CodeArts 专段（全局/项目级 `codearts_cli.jsonc` 路径 + 装后「重启」步骤）、openclaw/ClawHub 市场直装渠道（`clawhub:grape-kit@latest`）与 36 工具验证方式。
+- 裸 `doctor` 仍汇总自检全部宿主；显式 `--target` 行为不变。
+
+### Fixed
+
+- 宿主检测重构的顶层引用 TDZ：`SUPPORTED_TARGETS` 改为惰性求值，修复未指定 `--target` 时顶层 `await` 引用未初始化变量的问题。
+
 ## 0.3.4 (2026-11-19)
 
 ### Added

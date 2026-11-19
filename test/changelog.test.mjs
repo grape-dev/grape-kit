@@ -11,11 +11,12 @@ const PACKAGE_NAME = '@grape-dev/grape-kit'
 const GIT_IDENTITY = ['-c', 'user.name=changelog-test', '-c', 'user.email=changelog-test@example.com']
 
 /**
- * npm 已发布版本 → 发布日期（基准：`npm view @grape-dev/grape-kit time`，2026-11-19 核对，共 14 条）。
+ * npm 已发布版本 → 发布日期（基准：`npm view @grape-dev/grape-kit time`，2026-11-19 核对，共 15 条）。
  * `0.0.0-stage` 是 npm staged publishing 占位包（tarball 不含 `src/`），与功能版本一并计入发布记录；
  * `0.2.3` 从未发布，不得补造。
  */
 const PUBLISHED = [
+  ['0.3.5', '2026-11-19'],
   ['0.3.4', '2026-11-19'],
   ['0.3.3', '2026-11-18'],
   ['0.3.2', '2026-11-17'],
@@ -138,7 +139,7 @@ test('README 版本历史节链接 CHANGELOG.md、含 0.3.3 行且计数与 npm 
   assert.ok(row033, '版本历史表应含 0.3.3 行')
   assert.match(row033, /\| 2026-11-18 \|/, '0.3.3 日期应为 npm 发布日 2026-11-18')
 
-  assert.match(section, /14 条发布记录/, '发布记录计数应为 14（含 0.0.0-stage 占位包）')
+  assert.match(section, /15 条发布记录/, '发布记录计数应为 15（含 0.0.0-stage 占位包）')
   assert.ok(!/12 个已发布版本|12 条发布记录/.test(section), '不得再写「12 个已发布版本」')
 })
 
@@ -174,12 +175,12 @@ function runGenerator(dir, prev) {
 }
 
 test('gen-changelog 把新版本节插在标题与说明之后，历史节逐字保留', () => {
-  const dir = tempRepo('0.3.4')
+  const dir = tempRepo('0.3.6')
   try {
     const before = readFileSync(join(dir, 'CHANGELOG.md'), 'utf8')
     const after = runGenerator(dir, 'HEAD~1')
     assert.equal(preambleOf(after), preambleOf(before), '标题与说明应保持原位（新节不得压到标题之上）')
-    assert.match(historyOf(after), /^## 0\.3\.4 \(\d{4}-\d{2}-\d{2}\)/, '新版本节应为首个版本节')
+    assert.match(historyOf(after), /^## 0\.3\.6 \(\d{4}-\d{2}-\d{2}\)/, '新版本节应为首个版本节')
     assert.ok(after.endsWith(historyOf(before)), '历史版本节应逐字保留')
     assert.match(after, /^# Changelog$/m, '文件仍应以 Keep a Changelog 标题开头')
   } finally {
