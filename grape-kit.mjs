@@ -62,7 +62,7 @@ const cliCheck = () => {
 }
 const envChecks = () => [
   ['GRAPE_BASE_URL', process.env.GRAPE_BASE_URL ? `ok（${process.env.GRAPE_BASE_URL}）` : '未设置（FAIL）：export GRAPE_BASE_URL=https://www.grapedev.cn'],
-  ['GRAPE_API_TOKEN', process.env.GRAPE_API_TOKEN ? 'ok（已设置，不回显）' : '未设置（FAIL）：在 Grape WebUI 生成用户级 API Key（用环境变量传递，不要写进宿主配置）'],
+  ['GRAPE_API_TOKEN', process.env.GRAPE_API_TOKEN ? 'ok（已设置，不回显）' : '未设置（FAIL）：打开 https://www.grapedev.cn/app/#account/profile 生成用户级 API Key（自部署实例用「你的地址/app/#account/profile」），用环境变量传递，不要写进宿主配置'],
 ]
 const baseChecks = () => [nodeCheck(), ...envChecks()]
 /** 单宿主详情与裸 doctor 汇总共用的检查序列（CLI 位于 node 之后），避免位置切片耦合 */
@@ -825,7 +825,7 @@ const HOSTS = {
       copySkill()
       console.log('\n完成。环境变量（用户侧一次性）：')
       console.log('  export GRAPE_BASE_URL=https://www.grapedev.cn')
-      console.log('  export GRAPE_API_TOKEN=grape_xxx   # WebUI 生成')
+      console.log('  export GRAPE_API_TOKEN=grape_xxx   # 在 https://www.grapedev.cn/app/#account/profile 生成（自部署实例用「你的地址/app/#account/profile」）')
       console.log('重启 opencode 会话后生效；用 node setup.mjs doctor 验证。')
     },
     uninstall: uninstallOpencode,

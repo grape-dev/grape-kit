@@ -45,7 +45,7 @@ export function resolveCredentials(env = process.env) {
 }
 
 function hintFor(status) {
-  if (status === 401) return 'token 无效或过期：在 Grape WebUI → 设置 → API Keys 重新生成，并更新 GRAPE_API_TOKEN / ~/.grape/config.json'
+  if (status === 401) return 'token 无效或过期：打开 https://www.grapedev.cn/app/#account/profile 生成/重置 API Key（生产实例；自部署实例用「你的地址/app/#account/profile」），再更新 GRAPE_API_TOKEN 环境变量或 ~/.grape/config.json 的 token'
   if (status === 403) return '可能是 session_only 端点（外部用户 token 不可用，属预期边界）或权限不足'
   return ''
 }
