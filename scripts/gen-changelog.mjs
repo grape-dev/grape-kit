@@ -4,6 +4,8 @@
  *   node scripts/gen-changelog.mjs <prev_tag_or_ref> [head]
  * 输出：标准 Keep a Changelog 风格片段（Added/Changed/Fixed 归类）到 stdout + 写入 CHANGELOG.md。
  * 分类规则：feat→Added、fix→Fixed、其余（chore/docs/refactor/perf/test）→Changed/Internal。
+ * 插入位置：标题与说明（首个 `## ` 版本节之前的全部内容）之后、历史版本节之前；
+ * 若该版本节已存在则跳过写入（不覆盖已定稿内容、不产生重复节）。
  */
 import { execFileSync } from 'node:child_process'
 import { readFileSync, existsSync, writeFileSync } from 'node:fs'
@@ -44,11 +46,21 @@ for (const [k, items] of Object.entries(buckets)) {
 }
 md = md.replace(/\n+$/, '\n')
 
+const version = String(pkg.version)
+const sectionRe = new RegExp(`^## ${version.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} `, 'm')
 const out = existsSync('CHANGELOG.md') ? readFileSync('CHANGELOG.md', 'utf-8') : ''
-if (out.startsWith(`## ${pkg.version}`)) {
-  writeFileSync('CHANGELOG.md', md + out.slice(md.length))
+
+if (sectionRe.test(out)) {
+  // 该版本节已存在：不覆盖已定稿内容，也不产生重复节
+  console.error(`CHANGELOG.md 已存在 ${version} 版本节，跳过写入（历史节不改动）`)
 } else {
-  writeFileSync('CHANGELOG.md', md + '\n' + out)
-  console.log('CHANGELOG.md 头部插入完成')
+  // 标题 + 说明保持原位，新节插在其后、历史版本节之前
+  const first = out.search(/^## /m)
+  const preamble = first === -1 ? out : out.slice(0, first)
+  const history = first === -1 ? '' : out.slice(first)
+  const headMd = preamble ? preamble.replace(/\n+$/, '') + '\n\n' : ''
+  const tailMd = history ? '\n' + history : ''
+  writeFileSync('CHANGELOG.md', headMd + md + tailMd)
+  console.log(`CHANGELOG.md 已写入 ${version} 版本节`)
 }
 process.stdout.write(md)
