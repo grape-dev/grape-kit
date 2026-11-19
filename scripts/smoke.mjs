@@ -97,7 +97,7 @@ try {
   }
 
   const r3 = await rpc('tools/call', { name: 'grape_get_pipeline_info', arguments: { owner: 'acme', repo: 'demo', number: 23 } })
-  if (/vod\(completed\)/.test(r3.content[0].text)) {
+  if (/┌─ 流水线：/.test(r3.content[0].text) && /节点完成/.test(r3.content[0].text) && /```mermaid/.test(r3.content[0].text)) {
     console.log('[ok] tools/call grape_get_pipeline_info → 节点链')
   } else if (/401|无法连接/.test(r3.content[0].text)) {
     console.log('[ok] tools/call grape_get_pipeline_info → 双通道派发正确')
