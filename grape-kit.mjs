@@ -530,10 +530,12 @@ function opencodeEntry(scriptAbs) {
 
 function installOpencode(scriptAbs) {
   const p = opencodePaths()
-  const cfgPath = existsSync(p.config) ? p.config : p.configAlt
+  let cfgPath = existsSync(p.config) ? p.config : p.configAlt
   if (!existsSync(cfgPath)) {
-    console.error(`未找到 opencode 配置: ${p.config}（或 opencode.json）`)
-    process.exit(1)
+    mkdirSync(dirname(p.config), { recursive: true })
+    writeFileSync(p.config, '{}\n')
+    console.log(`未找到 opencode 配置，已自动创建空配置: ${p.config}`)
+    cfgPath = p.config
   }
   const text = readFileSync(cfgPath, 'utf8')
   const inner = buildEntry('grape', opencodeEntry(scriptAbs))
@@ -823,10 +825,36 @@ const HOSTS = {
     install: () => {
       installOpencode(resolve(String(arg('script', DEFAULT_SCRIPT))))
       copySkill()
-      console.log('\n完成。环境变量（用户侧一次性）：')
-      console.log('  export GRAPE_BASE_URL=https://www.grapedev.cn')
-      console.log('  export GRAPE_API_TOKEN=grape_xxx   # 在 https://www.grapedev.cn/app/#account/profile 生成（自部署实例用「你的地址/app/#account/profile」）')
-      console.log('重启 opencode 会话后生效；用 node setup.mjs doctor 验证。')
+      console.log(`
+──────────────────────────────────────────────
+ grape-kit 安装完成 · 接下来 3 步上手
+──────────────────────────────────────────────
+【第 1 步 · 配置凭证】（一次性，约 1 分钟）
+  1. 打开 https://www.grapedev.cn/app/#account/profile（自部署实例换成「你的地址/app/#account/profile」）
+  2. 生成 API Key（grape_ 前缀），明文只显示一次，立即复制
+  3. 写入环境变量（建议写进 shell 配置文件长期生效）：
+       export GRAPE_BASE_URL=https://www.grapedev.cn
+       export GRAPE_API_TOKEN=grape_你的Key
+【第 2 步 · 自检】
+       npx -y @grape-dev/grape-kit doctor --probe
+  全部 [ok] 即就绪；每个 [!!] 行都会给出对应修复动作。
+【第 3 步 · 重启宿主会话】然后对 agent 说一句话即可（见能力地图）。
+
+能力地图（36 个 MCP 工具，5 大类）：
+  ▸ 流水线遥控   建/查/触发/取消需求，看流水线进度与节点状态
+  ▸ 端云接管     takeover 五件套：云端任务让渡到本地 agent，人工确认后交回
+  ▸ Worker 接入  本机注册成 grape 执行引擎（worker_onboard）
+  ▸ 仓库/项目    托管仓库、项目模板、看板数据
+  ▸ 知识/技能    平台知识库与技能检索
+
+上手案例（对 agent 直接说，自然语言即可）：
+  ·「帮我建一个需求单：标题 xxx、描述 yyy」 → 建单进入流水线
+  ·「查 xxx/yyy 仓库流水线，#12 到哪个节点了」 → 观察进度
+  ·「接管 xxx/yyy 的 #12」 → 端云接管，本地干活
+  · 干完审查它的证据后说「确认」 → 正式交回，流水线自动接力
+
+完整文档：https://gitcode.com/grape-dev/grape-kit/blob/dev/README.md
+──────────────────────────────────────────────`)
     },
     uninstall: uninstallOpencode,
     doctor: doctorOpencode,
