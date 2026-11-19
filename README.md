@@ -117,7 +117,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the contribution flow, [AGENTS.md](AG
 
 - [x] Org repo home (grape-dev/grape-kit)
 - [ ] Full CI gating (GitHub Actions-compatible workflow provided today; enable GitCode GoCI once generally available)
-- [ ] More install targets: codearts / officeace (three integration types)
+- [x] More install targets: codearts / officeace (three integration types)
 - [ ] dsh hosts served by the dedicated [grape-dsh](https://gitcode.com/grape-dev/grape-dsh) plugin, no duplicate effort
 
 ## Links
