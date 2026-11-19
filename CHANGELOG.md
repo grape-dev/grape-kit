@@ -1,26 +1,8 @@
-## 0.3.6 (2026-11-19)
-
-### Changed
-
-- test: 场景验证版（grape-kit-release-only 三节点场景首测）
-
 # Changelog
 
 > `@grape-dev/grape-kit` 的变更记录。分组方式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)（Added / Changed / Fixed），版本按 npm 发布倒序；各节日期为 npm 发布时间（UTC，取自 `npm view @grape-dev/grape-kit time`），与 git 提交日期可能相差一天。发版续写方式见文末。
 
 > 发布口径说明：npm 已发布版本不可回写——0.3.3 的 npm tarball 内 CHANGELOG 仅含本节（10 行）、README 尚无本节链接且把 0.3.2 记为 2026-11-14（commit 日）。因此「npm 页面与仓内 CHANGELOG 一致」自下一版发布起生效。
-
-## 0.3.6 (2026-11-19)
-
-### Added
-
-- feat(ux): 宿主检测升级为 devkit 同款+交互选择——零宿主不再兜底 opencode，让用户选
-- feat(ux): 宿主自动检测——未指定 --target 时按本机宿主痕迹自动选择
-- feat(ux): 安装引导系统化——干净环境自动建配置 + 完成 output 改为三步上手引导
-
-### Changed
-
-- docs: 宿主矩阵补全——codearts 专段安装说明 + openclaw/ClawHub 市场渠道（双语）
 
 ## 0.3.5 (2026-11-19)
 
