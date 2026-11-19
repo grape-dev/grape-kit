@@ -1,128 +1,130 @@
 <h1 align="center">@grape-dev/grape-kit</h1>
 
+<p align="center">English | <a href="README.zh.md">简体中文</a></p>
+
 <p align="center">
   <a href="https://www.npmjs.com/package/@grape-dev/grape-kit"><img src="https://img.shields.io/npm/v/@grape-dev/grape-kit" alt="npm version"></a>
   <a href="https://www.npmjs.com/package/@grape-dev/grape-kit"><img src="https://img.shields.io/npm/dm/@grape-dev/grape-kit" alt="npm downloads"></a>
-  <a href="https://gitcode.com/grape-dev/grape-kit/blob/main/LICENSE"><img src="https://img.shields.io/npm/l/@grape-dev/grape-kit" alt="License: MIT"></a>
+  <a href="https://gitcode.com/grape-dev/grape-kit/blob/dev/LICENSE"><img src="https://img.shields.io/npm/l/@grape-dev/grape-kit" alt="License: MIT"></a>
   <img src="https://img.shields.io/node/v/@grape-dev/grape-kit" alt="node">
   <a href="https://www.grapedev.cn/"><img src="https://img.shields.io/badge/grape-www.grapedev.cn-2563eb" alt="grape"></a>
 </p>
 
 <p align="center">
-  <strong>Grape DevOps 流水线工具 × 无界面编码 agent</strong><br>
-  在 opencode / hermes / codex 等终端 agent 里触发、观察、推进 Grape 多 agent DevOps 流水线，<br>
-  并以<strong>接管会话（takeover）原语</strong>把云端节点原子让渡到本地——链不断、成果结构化交回。<br>
-  <a href="https://www.npmjs.com/package/@grape-dev/grape-kit">npm</a> · <a href="https://www.grapedev.cn/">Grape 官网</a> · <a href="https://gitcode.com/grape-dev/grape-kit">源码仓库</a>
+  <strong>Grape DevOps pipeline tools × headless coding agents</strong><br>
+  Trigger, observe and advance Grape multi-agent DevOps pipelines from terminal agents like opencode / hermes / codex,<br>
+  and atomically hand over cloud nodes to your local machine via <strong>takeover sessions</strong> — the chain never breaks, results return in structured form.<br>
+  <a href="https://www.npmjs.com/package/@grape-dev/grape-kit">npm</a> · <a href="https://www.grapedev.cn/">Grape website</a> · <a href="https://gitcode.com/grape-dev/grape-kit">Source</a>
 </p>
 
 ---
 
-帮助**无 Web UI 的编码 agent**（opencode / hermes / codex 等）安全、结构化地使用 [Grape](https://gitcode.com/grape-dev/grape) —— 多 agent 协作的 AI Native DevOps 平台（vod → issue → coding → qa → sre）。
+Grape-kit helps **coding agents without a Web UI** (opencode / hermes / codex, etc.) use [Grape](https://gitcode.com/grape-dev/grape) safely and in a structured way — an AI-native DevOps platform with multi-agent pipelines (vod → issue → coding → qa → sre).
 
 ```
-agent 宿主（MCP stdio：opencode / codex…；skill 引导 bash：hermes…）
-  → grape-kit（36 工具 · 原生 HTTP 直连 · Markdown 渲染 · initialize instructions 自举）
-    → grape 服务端（流水线 / events / takeover 会话 API；CLI 仅 401 回退用）
+agent host (MCP stdio: opencode / codex…; skill-guided bash: hermes…)
+  → grape-kit (36 tools · native HTTP · Markdown rendering · initialize-instruction bootstrap)
+    → grape server (pipelines / events / takeover session API; CLI only as 401 fallback)
 ```
 
-## 端云协同（v0.3.2+ 核心：接管会话原语）
+## Cloud-Local Collaboration (v0.3.2+ core: takeover sessions)
 
-> 平台要求 weekly-11+（takeover API）。旧平台自动回退老路径并提示。
+> Platform requirement: weekly-11+ (takeover API). Older platforms fall back to the legacy path automatically.
 
-| 工具 | 作用 |
-|------|------|
-| `grape_takeover_start` | **原子接管**：云端任务让渡（链不断）、签发 `tko_` 凭据（12h→24h）、返回完整接管上下文（prompt/env/workspace/skill/history） |
-| `grape_takeover_progress` | 接管期间回报进度（云端面板可见，可 attach 本地会话） |
-| `grape_takeover_status` | 会话查询/列表；`renew` 顺带续期凭据 |
-| `grape_takeover_finish` | **两阶段交回**：先 `request_only=true` 报告完成 → 用户确认 → 正式 finish（结构化结论落事件流，coding→qa 自动接力） |
-| `grape_takeover_abort` | 让渡回流水线：当前节点重派云端（`redispatch=false` 只停不重派），链不中断 |
-| `grape_takeover_context` | 旧路径（无 takeover API 平台的回退）：只读接管上下文 |
+| Tool | Purpose |
+|------|---------|
+| `grape_takeover_start` | **Atomic takeover**: the cloud task is handed over (chain intact), a `tko_` credential is issued (12h→24h), full takeover context returned (prompt/env/workspace/skill/history) |
+| `grape_takeover_progress` | Report progress during takeover (visible on the cloud panel, can attach a local session) |
+| `grape_takeover_status` | Query/list sessions; `renew` also extends the credential |
+| `grape_takeover_finish` | **Two-phase hand-back**: first `request_only=true` to report completion → user confirms → formal finish (structured conclusion lands in the event stream, coding→qa relays automatically) |
+| `grape_takeover_abort` | Yield the node back to the pipeline: redispatch to cloud (`redispatch=false` stops without redispatch), chain stays intact |
+| `grape_takeover_context` | Legacy path (fallback for platforms without the takeover API): read-only takeover context |
 
-全生命周期时序与架构图：
-[20261114-takeover-architecture.html](https://devkit-docs-pub-20261030.obs.cn-north-4.myhuaweicloud.com/plans/20261114-takeover-architecture.html)
+Full lifecycle sequence and architecture: [docs/20261114-takeover-architecture.md](docs/20261114-takeover-architecture.md)
 
-## 其余工具面（30 个）
+## The other 30 tools
 
-- **触发/等待**：`grape_trigger_pipeline`（A2A 唯一入口）· `grape_wait_task` · `grape_get_task_status`
-- **issue/事件**：`list_issues` / `list_my_issues` / `get_issue_detail` / `get_pipeline_info` / `get_issue_events` / `create_issue` / `cancel_issue`（三选决策门）· `resume_issue`（事实复核）
-- **场景/仓库**：`list_scenes` / `apply_scene`（用户决策层）· `host_repo` / `sync_repos` / `managed/member repos` / `project-info`
-- **搜索/知识**：`search`（all/event/repo/agent）· skills ×3 · knowledge ×2 · dashboard
-- **项目/端侧**：`create_project` · `list_project_templates` · `worker_onboard`（本机接入 worker 池）
+- **Trigger/wait**: `grape_trigger_pipeline` (the only A2A entry) · `grape_wait_task` · `grape_get_task_status`
+- **Issue/events**: `list_issues` / `list_my_issues` / `get_issue_detail` / `get_pipeline_info` / `get_issue_events` / `create_issue` / `cancel_issue` (three-choice decision gate) · `resume_issue` (fact re-verification)
+- **Scenes/repos**: `list_scenes` / `apply_scene` (user decision layer) · `host_repo` / `sync_repos` / `managed/member repos` / `project-info`
+- **Search/knowledge**: `search` (all/event/repo/agent) · skills ×3 · knowledge ×2 · dashboard
+- **Project/local**: `create_project` · `list_project_templates` · `worker_onboard` (join this machine to the worker pool)
 
-**边界**：不暴露 A2A 节点间交接；terminate / delete / credential 类高危与 session_only 命令（git-repo 等 28 个）不纳管；cancel / apply_scene / takeover_finish 强制「需用户确认」。
+**Boundaries**: A2A node hand-offs are never exposed; high-risk terminate / delete / credential commands and session-only commands (git-repo, 28 others) are out of scope; cancel / apply_scene / takeover_finish enforce an explicit user-confirmation gate.
 
-## 快速开始（opencode）
+## Quick start (opencode)
 
 ```bash
-# 前提：Node >= 20（无需 Python——v0.3.0 起原生 HTTP 直连）
+# Prerequisite: Node >= 20 (no Python needed — native HTTP since v0.3.0)
 export GRAPE_BASE_URL=https://www.grapedev.cn
-export GRAPE_API_TOKEN=grape_xxx      # Grape WebUI → 设置 → API Key
-# hermes 等会清洗 env 的宿主：写文件通道 ~/.grape/config.json {"token":"grape_xxx","base_url":"..."}
+export GRAPE_API_TOKEN=grape_xxx      # Grape WebUI → Settings → API Key
+# Hosts that sanitize env (hermes etc.): file channel ~/.grape/config.json {"token":"grape_xxx","base_url":"..."}
 
-# 装配（写 opencode mcp.grape 条目 + skill 副本 + receipt，带备份幂等）
+# Install (writes the opencode mcp.grape entry + skill copy + receipt, idempotent with backup)
 npx -y @grape-dev/grape-kit install --target opencode
-npx -y @grape-dev/grape-kit doctor --probe   # node / 服务端连通性 / 工具面逐项自检
-# 重启 opencode 会话后生效
+npx -y @grape-dev/grape-kit doctor --probe   # node / server connectivity / per-tool self-check
+# Restart your opencode session to take effect
 ```
 
-安装后在对话里直接说：
+Then just talk to your agent:
 
 ```
-> 帮我看看我的 grape issue 里有哪些在跑流水线
-> 触发 acme/demo 仓库 issue #12 的流水线，然后等到终态
-> #12 的 coding 在跑，让本机接手这个节点，别断链        ← takeover_start
-> 改完了，跟平台报一声，等我确认再正式交回              ← progress + request-finish
-> 这节点我做不了，还回云端让别人做，链别断              ← takeover_abort
+> Which of my grape issues have pipelines running?
+> Trigger the pipeline for issue #12 of acme/demo, then wait for a terminal state
+> #12's coding node is running — take it over on this machine, keep the chain   ← takeover_start
+> Done — report to the platform, wait for my confirmation before formal hand-back  ← progress + request-finish
+> Can't finish this node — give it back to the cloud, keep the chain            ← takeover_abort
 ```
 
-**hermes**（无 MCP client）：复制 `skills/grape-remote/` 到其 skill 目录，agent 以 bash 调 `grape` CLI 即可。
-**codex**：`~/.codex/config.toml` 加 `[mcp_servers.grape]`（command/args/env），示例见使用指南。
-**WorkBuddy**：`npx -y @grape-dev/grape-kit install --target workbuddy` —— 写入 `~/.workbuddy/mcp.json`（`mcpServers.grape-kit`，走 npx 免全局安装）+ skill 落 `~/.workbuddy/skills/grape-remote/`；自检 `doctor --target workbuddy --probe`。装完需在 WorkBuddy 中手动「信任」连接器（一次性）；凭据走环境变量，**不要**写进 mcp.json。
+**hermes** (no MCP client): copy `skills/grape-remote/` into its skill directory; the agent calls the `grape` CLI via bash.
+**codex**: add `[mcp_servers.grape]` (command/args/env) to `~/.codex/config.toml` — see the usage guide.
+**WorkBuddy**: `npx -y @grape-dev/grape-kit install --target workbuddy` — writes `~/.workbuddy/mcp.json` (`mcpServers.grape-kit`, via npx, no global install) + skill to `~/.workbuddy/skills/grape-remote/`; self-check with `doctor --target workbuddy --probe`. Trust the connector once in WorkBuddy; credentials go through environment variables — **never** write them into mcp.json.
 
-## 版本历史
+## Version history
 
-| 版本 | 日期 | 要点 |
+| Version | Date | Highlights |
 |---|---|---|
-| 0.3.3 | 2026-11-18 | check_update 启动版本提醒 · CHANGELOG 生成器 · 401 回退回抛原始 native 提示 |
-| 0.3.2 | 2026-11-17 | takeover 会话原语五工具（start/status/progress/finish/abort）；#2517 端侧适配（abort 重派失败告警 + 竞态警告渲染）；SKILL.md 双路径语义 |
-| 0.3.1 | 2026-11-11 | cancel 三选决策门 · resume 事实复核 · search 契约收敛 · 结构化交回模板 |
-| 0.3.0 | 2026-11-11 | 传输层原生化：原生 HTTP 直连，grape CLI/Python 变可选（401 回退通道） |
-| 0.2.x | 2026-11-09 前 | 13→31 工具扩展 · worker_onboard · B1 接管闭环 |
+| 0.3.3 | 2026-11-18 | check_update startup reminder + CHANGELOG generator; 401 fallback hardened |
+| 0.3.2 | 2026-11-14 | Takeover session five tools (start/status/progress/finish/abort); #2517 client-side adaptation (abort redispatch failure alert + race warning rendering); SKILL.md dual-path semantics |
+| 0.3.1 | 2026-11-11 | cancel three-choice decision gate · resume fact re-verification · search contract convergence · structured hand-back template |
+| 0.3.0 | 2026-11-10 | Native HTTP transport; grape CLI/Python becomes optional (401 fallback channel) |
+| 0.2.x | pre 2026-11-09 | 13→31 tools · worker_onboard · B1 takeover loop |
 
-逐版本完整记录（发布日期、工具面变化、行为修复，覆盖 npm 全部 13 条发布记录——含 `0.0.0-stage` 占位包，0.2.3 从未发布）：[CHANGELOG.md](CHANGELOG.md)
+## Design principles
 
-## 设计原则
+- **Trigger, observe, advance, take over — nothing more**: A2A orchestration is server-driven; the plugin never interferes with node hand-offs; takeovers use session primitives for atomic hand-over and hand-back
+- **Scope is the first gate**: of the 219 contract commands, the 28 session-only ones (git-repo etc.) always 403 for external tokens — excluded outright; `tko_` takeover credentials are repo_session-only and revoked on completion
+- **UI-less compensation**: tool responses are Markdown tables / node chains / event timelines; `wait_task` polls with stage summaries and timeout hints
 
-- **只触发、只观察、可推进、可接管**：A2A 编排由服务端 `pipelines.json` 驱动，插件永不干预节点交接；接管以会话原语完成原子让渡与交回
-- **scope 是第一道门禁**：契约 219 命令中 session_only 的 28 个（git-repo 等）对外部 token 必 403，直接排除；`tko_` 接管凭据仅 repo_session 能力、结束即吊销
-- **无 UI 补偿**：工具返回即 Markdown 表格 / 节点链 / 事件时间线；`wait_task` 轮询带阶段摘要与超时提示
-
-## 开发与测试
+## Development & testing
 
 ```bash
 npm install
-npm test        # 52 个单测（fake-grape 替身，不依赖真实服务端）
-npm run smoke   # 真实 stdio JSON-RPC 往返：initialize → tools/list → tools/call
+npm test        # 64 unit tests (fake-grape stand-in, no real server needed)
+npm run smoke   # real stdio JSON-RPC round-trip: initialize → tools/list → tools/call
 ```
 
-对真实服务端只读冒烟：
+Read-only smoke against a real server:
 
 ```bash
 export GRAPE_BASE_URL=https://www.grapedev.cn GRAPE_API_TOKEN=grape_xxx
 node scripts/live-smoke.mjs
 ```
 
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the contribution flow, [AGENTS.md](AGENTS.md) if you are an AI coding agent working on this repo.
+
 ## Roadmap
 
-- [ ] 版本更新检测与升级提示（对齐 huaweicloud-devkit `check_update` 体验）
-- [ ] install 目标扩展：codearts / workbuddy / officeace（integrations 三型）
-- [ ] 组织仓归位（grape-dev/grape-kit，待 #1773 授权）+ CI
-- [ ] dsh 宿主由 [grape-dsh](https://gitcode.com/grape-dev/grape-dsh) 独立插件承载，不重复建设
+- [x] Org repo home (grape-dev/grape-kit)
+- [ ] Full CI gating (GitHub Actions-compatible workflow provided today; enable GitCode GoCI once generally available)
+- [ ] More install targets: codearts / officeace (three integration types)
+- [ ] dsh hosts served by the dedicated [grape-dsh](https://gitcode.com/grape-dev/grape-dsh) plugin, no duplicate effort
 
-## 相关链接
+## Links
 
-- [Grape 平台](https://www.grapedev.cn/) · [grape 主仓](https://gitcode.com/grape-dev/grape) · [grape-cli](https://gitcode.com/grape-dev/grape-cli) · [grape-dsh（DSH 宿主插件）](https://gitcode.com/grape-dev/grape-dsh)
-- 端云协同架构与验证报告：`docs/20261114-takeover-architecture.md`（[OBS 在线版](https://devkit-docs-pub-20261030.obs.cn-north-4.myhuaweicloud.com/plans/20261114-takeover-architecture.html)）
+- [Grape platform](https://www.grapedev.cn/) · [grape main repo](https://gitcode.com/grape-dev/grape) · [grape-cli](https://gitcode.com/grape-dev/grape-cli) · [grape-dsh (DSH host plugin)](https://gitcode.com/grape-dev/grape-dsh)
+- Takeover architecture & verification report: [docs/20261114-takeover-architecture.md](docs/20261114-takeover-architecture.md)
+- Contributing: [CONTRIBUTING.md](CONTRIBUTING.md) · Security: [SECURITY.md](SECURITY.md) · Code of conduct: [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) · Support: [SUPPORT.md](SUPPORT.md) · Agent guide: [AGENTS.md](AGENTS.md)
 
 ## License
 
