@@ -13,6 +13,7 @@
  *   node setup.mjs doctor [--probe]
  */
 import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync, readdirSync, statSync } from 'node:fs'
+import { createInterface } from 'node:readline'
 import { homedir, tmpdir } from 'node:os'
 import { join, dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -107,24 +108,16 @@ const arg = (name, def = undefined) => {
   return i >= 0 ? (process.argv[i + 1] && !process.argv[i + 1].startsWith('--') ? process.argv[i + 1] : true) : def
 }
 const cmd = process.argv[2] || 'help'
-const target = process.argv.some((a) => a === '--target' || a.startsWith('--target='))
-  ? arg('target', 'opencode')
-  : detectHost() || 'opencode'
+const targetExplicit = process.argv.some((a) => a === '--target' || a.startsWith('--target='))
+let target = targetExplicit ? arg('target', 'opencode') : ''  // install/uninstall 分发处惰性求值（SUPPORTED_TARGETS 定义在文件后段，顶层求值会 TDZ）
 
 /** 宿主自动检测：未显式指定 --target 时按本机宿主痕迹选择，避免用户背宿主名。
  *  优先级：WorkBuddy > CodeArts > OfficeAce > 兜底 opencode（无痕迹机器多为 opencode/hermes 场景）。 */
-function detectHost() {
-  const home = homedir()
-  if (existsSync(join(home, '.workbuddy'))) return 'workbuddy'
-  if (existsSync(join(home, '.codeartsdoer'))) return 'codearts'
-  if (existsSync(join(home, '.officeace'))) return 'officeace'
-  return ''
-}
 
 /** 未知 target 明确报错，不静默回落到 opencode（否则会写错宿主的配置） */
 function resolveTarget() {
   const t = String(target)
-  if (!SUPPORTED_TARGETS.includes(t)) {
+  if (t !== 'all' && !SUPPORTED_TARGETS.includes(t)) {
     console.error(`不支持的 --target: ${t}`)
     console.error(`受支持宿主: ${SUPPORTED_TARGETS.join(' / ')}`)
     console.error('（hermes 无 MCP client，复制 skills/grape-remote 手动装配；dsh 由 grape-dsh 独立插件承载）')
@@ -902,6 +895,44 @@ const HOSTS = {
 /* 受支持宿主以 HOSTS 为唯一来源（hermes 无 MCP client 走 skill 手动复制；dsh 由 grape-dsh 插件承载） */
 const SUPPORTED_TARGETS = Object.keys(HOSTS)
 
+function detectHosts() {
+  const home = homedir()
+  const found = []
+  if (existsSync(join(home, '.workbuddy'))) found.push('workbuddy')
+  if (existsSync(join(home, '.codeartsdoer'))) found.push('codearts')
+  if (existsSync(join(home, '.officeace'))) found.push('officeace')
+  if (existsSync(join(home, '.config', 'opencode'))) found.push('opencode')
+  return found
+}
+
+/** 未指定 --target 时：检测到 1 个宿主直接装；多个全装；零宿主进入交互菜单让用户选（参考 huaweicloud-devkit 检测 + 交互化改进）。
+ *  非交互环境（无 TTY，如 agent 代跑/CI）退化为列出支持项并退出，指引 --target。 */
+async function resolveTargetAuto() {
+  const found = detectHosts()
+  if (found.length === 1) return found[0]
+  if (found.length > 1) return 'all'
+  if (!process.stdin.isTTY) {
+    console.error('未检测到任何已安装的宿主 agent。')
+    console.error('支持的宿主: opencode / workbuddy / codearts / officeace')
+    console.error('请用 --target <宿主> 指定后重跑（或先安装对应宿主 agent）。')
+    process.exit(1)
+  }
+  console.log('未检测到已安装的宿主 agent，请选择要安装的目标：')
+  const rl = createInterface({ input: process.stdin, output: process.stdout })
+  const ask = (q) => new Promise((r) => rl.question(q, r))
+  for (let i = 0; i < SUPPORTED_TARGETS.length; i++) {
+    const h = HOSTS[SUPPORTED_TARGETS[i]]
+    console.log(`  ${i + 1}. ${SUPPORTED_TARGETS[i].padEnd(10)} ${h ? h.label : ''}`)
+  }
+  while (true) {
+    const a = (await ask('输入编号（1-' + SUPPORTED_TARGETS.length + '）或宿主名：')).trim()
+    const byIdx = SUPPORTED_TARGETS[parseInt(a, 10) - 1]
+    const pick = byIdx || SUPPORTED_TARGETS.find((t) => t === a.toLowerCase())
+    if (pick) { rl.close(); return pick }
+    console.log('无效选择，请重输。')
+  }
+}
+
 /* ---------- main ---------- */
 
 if (cmd === '--version' || cmd === 'version' || cmd === '-v') {
@@ -914,10 +945,24 @@ if (cmd === 'install' || cmd === 'uninstall' || cmd === 'doctor') {
   if (cmd === 'doctor' && !process.argv.slice(2).some((a) => a === '--target' || a.startsWith('--target='))) {
     doctorAll(!!arg('probe'))
   } else {
-    const host = HOSTS[resolveTarget()]
-    if (cmd === 'install') host.install()
-    else if (cmd === 'uninstall') host.uninstall()
-    else await host.doctor(!!arg('probe'))
+    if (!targetExplicit && cmd !== 'doctor') target = await resolveTargetAuto()
+    const t = resolveTarget()
+    if (t === 'all') {
+      const names = SUPPORTED_TARGETS
+      console.log(`检测到多个宿主痕迹，全部安装/自检: ${names.join(' + ')}`)
+      for (const n of names) {
+        console.log(`
+===== ${n} =====`)
+        if (cmd === 'install') HOSTS[n].install()
+        else if (cmd === 'uninstall') HOSTS[n].uninstall()
+        else await HOSTS[n].doctor(!!arg('probe'))
+      }
+    } else {
+      const host = HOSTS[t]
+      if (cmd === 'install') host.install()
+      else if (cmd === 'uninstall') host.uninstall()
+      else await host.doctor(!!arg('probe'))
+    }
   }
 } else {
   console.log(`用法: node setup.mjs install|uninstall|doctor [--target ${SUPPORTED_TARGETS.join('|')}] [--probe]`)
