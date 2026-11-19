@@ -1,15 +1,15 @@
 # Changelog
 
-> `@grape-dev/grape-kit` 的变更记录。分组方式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)（Added / Changed / Fixed），版本按 npm 发布倒序；各节日期取自 `npm view @grape-dev/grape-kit time` 的发布时间（UTC），与 git 提交日期可能相差一天。发版续写方式见文末。
+> `@grape-dev/grape-kit` 的变更记录。分组方式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)（Added / Changed / Fixed），版本按 npm 发布倒序；各节日期为 npm 发布时间（UTC，取自 `npm view @grape-dev/grape-kit time`），与 git 提交日期可能相差一天。发版续写方式见文末。
+
+> 发布口径说明：npm 已发布版本不可回写——0.3.3 的 npm tarball 内 CHANGELOG 仅含本节（10 行）、README 尚无本节链接且把 0.3.2 记为 2026-11-14（commit 日）。因此「npm 页面与仓内 CHANGELOG 一致」自下一版发布起生效。
 
 ## 0.3.3 (2026-11-18)
-
-> 版本号已在 dev 预置、尚未发布到 npm；发布后由生成器按发布日刷新本节。
 
 ### Added
 
 - `check_update`：MCP 启动时异步比对 npm registry 版本并一次性提醒（24h 缓存、失败静默、可用 `GRAPE_KIT_SKIP_UPDATE_CHECK=1` 关闭）。
-- `scripts/gen-changelog.mjs`：发版时按 `feat→Added / fix→Fixed / 其余→Changed` 从 git log 生成 CHANGELOG 片段并头插。
+- `scripts/gen-changelog.mjs`：发版时按 `feat→Added / fix→Fixed / 其余→Changed` 从 git log 生成 CHANGELOG 片段，插入到标题与说明之后（该版本节已存在则跳过）。
 
 ### Changed
 
@@ -75,6 +75,8 @@
 
 ## 0.2.4 (2026-11-08)
 
+> 0.2.3 从未在 npm 发布（0.2.2 之后版本号直接跳到 0.2.4），故本文件无该节。
+
 ### Added
 
 - 无新增工具，工具面维持 31 个。
@@ -91,11 +93,11 @@
 
 ### Added
 
-- `grape_list_knowledge` 改为必填 `repo`（服务端契约要求）并新增可选 `q` 关键字过滤。
 - `grape_worker_onboard` 在凭据名已存在（400）时自动加时间戳后缀重试一次（凭据名全局唯一、token 仅显示一次），并改用本机 `GRAPE_BASE_URL` 组装一次性安装命令（安装命令不内联真实 token）。
 
 ### Changed
 
+- `grape_list_knowledge` 改为必填 `repo`（服务端契约要求）并新增可选 `q` 关键字过滤；属破坏性契约变更——未带 `repo` 的既有调用会失败。
 - `grape_get_repo_project_info` 动词链修正为 `repos project info`、参数标准化为 `--repo`（原 `repos project-info` + `--repo_name` 会被 CLI 拒绝）。
 
 ### Fixed
@@ -205,4 +207,4 @@
 
 ---
 
-**发版续写**：`node scripts/gen-changelog.mjs <上一版本> <head>` 会读取 `package.json` 的 `version`，按 `feat→Added / fix→Fixed / 其余→Changed` 归类，并把新版本节（`## <version> (YYYY-MM-DD)`）插入文件头，历史版本节不改动。因生成器只做头部插入，新节会落在本文档的标题与说明之上（标题随每次发版下沉一次）。
+**发版续写**：`node scripts/gen-changelog.mjs <上一版本> <head>` 会读取 `package.json` 的 `version`，按 `feat→Added / fix→Fixed / 其余→Changed` 归类，并把新版本节（`## <version> (YYYY-MM-DD)`）插入到本文档标题与说明之后、历史版本节之前；若该版本节已存在则跳过写入并提示，避免重复节。日期取脚本运行当日，发版后按 npm 发布时间校正。
