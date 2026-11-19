@@ -111,8 +111,8 @@ const cmd = process.argv[2] || 'help'
 const targetExplicit = process.argv.some((a) => a === '--target' || a.startsWith('--target='))
 let target = targetExplicit ? arg('target', 'opencode') : ''  // install/uninstall 分发处惰性求值（SUPPORTED_TARGETS 定义在文件后段，顶层求值会 TDZ）
 
-/** 宿主自动检测：未显式指定 --target 时按本机宿主痕迹选择，避免用户背宿主名。
- *  优先级：WorkBuddy > CodeArts > OfficeAce > 兜底 opencode（无痕迹机器多为 opencode/hermes 场景）。 */
+/** 宿主自动检测：detectHosts() 扫描本机宿主痕迹，resolveTargetAuto() 未显式指定 --target 时据此选择。
+ *  单个痕迹直装该宿主、多个痕迹全装；零痕迹时交互选择，非交互则列出支持项并非零退出（不再兜底 opencode）。 */
 
 /** 未知 target 明确报错，不静默回落到 opencode（否则会写错宿主的配置） */
 function resolveTarget() {

@@ -124,6 +124,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the contribution flow, [AGENTS.md](AG
 
 | 版本 | 日期 | 要点 |
 |---|---|---|
+| 0.3.5 | 2026-11-19 | 宿主自动检测 · 零宿主交互选择 · 干净环境自动建配置 + 三步上手引导 · 宿主矩阵补 codearts 专段与 ClawHub 渠道 |
 | 0.3.4 | 2026-11-19 | codearts/officeace 两宿主安装（受支持宿主 2→4）· doctor 版本更新行（24h 去重、五态）· 条目引擎结构扫描加固 |
 | 0.3.3 | 2026-11-18 | check_update 启动版本提醒 · CHANGELOG 生成器 · 401 回退回抛原始 native 提示 |
 | 0.3.2 | 2026-11-17 | takeover 会话原语五工具（start/status/progress/finish/abort）；#2517 端侧适配（abort 重派失败告警 + 竞态警告渲染）；SKILL.md 双路径语义 |

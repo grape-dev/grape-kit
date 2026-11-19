@@ -10,12 +10,12 @@
 
 - `install` 宿主自动检测：未指定 `--target` 时按本机宿主痕迹自动选择（WorkBuddy 客户端机裸跑即写对 `mcp.json`）；显式 `--target` 语义不变。
 - 零宿主交互选择：痕迹检测升级为 huaweicloud-devkit 同款（workbuddy / codearts / officeace / opencode）——1 个痕迹直装该宿主、多个痕迹全装，零痕迹时 TTY 下列出宿主菜单由用户按编号/名称选择；非交互环境列出支持项并非零退出、指引 `--target`，不再静默兜底 opencode。
-- 干净环境安装引导：无现有配置时自动创建空配置继续安装（此前新用户第一面即报错退出）；完成输出重构为三步上手（配置凭证 → `doctor --probe` 自检 → 重启宿主会话），附 36 工具能力地图与建单/查进度/接管/确认交回四条示例。
+- 干净环境安装引导：无现有配置时自动创建空配置继续安装（此前新用户第一面即报错退出）；完成输出重构为三步上手（配置凭证 → `doctor --probe` 自检 → 重启宿主会话，opencode 安装分支），附 36 工具能力地图与建单/查进度/接管/确认交回四条示例。
 
 ### Changed
 
 - 宿主矩阵文档补全（中英双语）：CodeArts 专段（全局/项目级 `codearts_cli.jsonc` 路径 + 装后「重启」步骤）、openclaw/ClawHub 市场直装渠道（`clawhub:grape-kit@latest`）与 36 工具验证方式。
-- 裸 `doctor` 仍汇总自检全部宿主；显式 `--target` 行为不变。
+- 渲染升级：流水线竖排状态卡 + Mermaid 图、issues 表进度点阵、场景节点链（宿主支持 Mermaid 时渲图为图，不支持则作代码块兜底）。
 
 ### Fixed
 
