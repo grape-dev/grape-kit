@@ -15,7 +15,8 @@
     "grape-kit.mjs",
     "LICENSE",
     "README.md",
-    "README.zh.md"
+    "README.zh.md",
+    "CHANGELOG.md"
   ],
   "engines": {
     "node": ">=20"
