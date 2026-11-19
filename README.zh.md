@@ -84,6 +84,7 @@ npx -y @grape-dev/grape-kit doctor --probe   # node / 服务端连通性 / 工�
 
 | 版本 | 日期 | 要点 |
 |---|---|---|
+| 0.3.3 | 2026-11-18 | check_update 启动版本提醒 + CHANGELOG 生成器；401 回退最佳努力（#1） |
 | 0.3.2 | 2026-11-14 | takeover 会话原语五工具（start/status/progress/finish/abort）；#2517 端侧适配（abort 重派失败告警 + 竞态警告渲染）；SKILL.md 双路径语义 |
 | 0.3.1 | 2026-11-11 | cancel 三选决策门 · resume 事实复核 · search 契约收敛 · 结构化交回模板 |
 | 0.3.0 | 2026-11-10 | 传输层原生化：原生 HTTP 直连，grape CLI/Python 变可选（401 回退通道） |
@@ -99,7 +100,7 @@ npx -y @grape-dev/grape-kit doctor --probe   # node / 服务端连通性 / 工�
 
 ```bash
 npm install
-npm test        # 52 个单测（fake-grape 替身，不依赖真实服务端）
+npm test        # 64 个单测（fake-grape 替身，不依赖真实服务端）
 npm run smoke   # 真实 stdio JSON-RPC 往返：initialize → tools/list → tools/call
 ```
 
@@ -112,10 +113,11 @@ node scripts/live-smoke.mjs
 
 ## Roadmap
 
-- [ ] 版本更新检测与升级提示（对齐 huaweicloud-devkit `check_update` 体验）
-- [ ] install 目标扩展：codearts / workbuddy / officeace（integrations 三型）
 - [x] 组织仓归位（grape-dev/grape-kit）
+- [x] 版本更新检测与升级提示（0.3.3 check_update）
+- [x] install 目标 workbuddy（0.3.2）
 - [ ] CI 门禁全面接入（当前提供 GitHub Actions 兼容 workflow，GitCode GoCI 转正后启用）
+- [ ] install 目标扩展：codearts / officeace（integrations 三型）
 - [ ] dsh 宿主由 [grape-dsh](https://gitcode.com/grape-dev/grape-dsh) 独立插件承载，不重复建设
 
 ## 相关链接
