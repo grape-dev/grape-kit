@@ -18,10 +18,10 @@ after(() => {
   for (const h of homes) rmSync(h, { recursive: true, force: true })
 })
 
-function run(args, h) {
+function run(args, h, extraEnv = {}) {
   return spawnSync(process.execPath, [SETUP, ...args], {
     encoding: 'utf8',
-    env: { ...process.env, HOME: h },
+    env: { ...process.env, HOME: h, ...extraEnv },
     timeout: 30_000,
   })
 }
@@ -100,7 +100,7 @@ test('install 在无 mcp 块的纯 JSON 配置上自动新建块', () => {
 
 test('doctor 在干净 HOME 下逐项报告', () => {
   const h = home()
-  const r = run(['doctor'], h)
+  const r = run(['doctor'], h, { GRAPE_KIT_SKIP_UPDATE_CHECK: '1' })
   assert.equal(r.status, 0, r.stderr)
   assert.match(r.stdout, /node >= 20/)
   assert.match(r.stdout, /GRAPE_BASE_URL/)
@@ -141,4 +141,96 @@ test('install 升级位于 mcp 块中间的 grape 条目不破坏兄弟条目', 
   assert.deepEqual(cfg.mcp.before.command, ['echo', 'before'])
   assert.deepEqual(cfg.mcp.after.command, ['echo', 'after'])
   assert.match(cfg.mcp.grape.command[1], /grape-kit-mcp\.mjs$/)
+})
+
+/* ---------- Issue #4：doctor 版本更新检查 ---------- */
+
+const PKG_VERSION = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version
+const UPDATE_CACHE = (h) => join(h, '.grape', 'grape-kit-update-check.json')
+
+function seedUpdateCache(h, latest, notified) {
+  mkdirSync(join(h, '.grape'), { recursive: true })
+  const data = { checkedAt: Date.now(), latest }
+  if (notified !== undefined) data.notified = notified
+  writeFileSync(UPDATE_CACHE(h), JSON.stringify(data))
+}
+
+test('doctor 在本地版本落后时输出升级提示与更新命令', () => {
+  const h = home()
+  seedUpdateCache(h, '9.9.9')
+  const r = run(['doctor'], h)
+  assert.equal(r.status, 0, r.stderr)
+  assert.match(r.stdout, /\[!!\] 版本更新: 有新版本 \d+\.\d+\.\d+ → 9\.9\.9/)
+  assert.match(r.stdout, /npm i -g @grape-dev\/grape-kit/)
+  rmSync(h, { recursive: true, force: true })
+})
+
+test('doctor 已是最新版本时不提示升级', () => {
+  const h = home()
+  seedUpdateCache(h, PKG_VERSION)
+  const r = run(['doctor'], h)
+  assert.equal(r.status, 0, r.stderr)
+  assert.doesNotMatch(r.stdout, /有新版本/)
+  assert.match(r.stdout, /\[ok\] 版本更新: ok（已是最新/)
+  rmSync(h, { recursive: true, force: true })
+})
+
+test('doctor 在 GRAPE_KIT_NO_UPDATE_CHECK=1 别名开关下静默', () => {
+  const h = home()
+  seedUpdateCache(h, '9.9.9')
+  const r = run(['doctor'], h, { GRAPE_KIT_NO_UPDATE_CHECK: '1' })
+  assert.equal(r.status, 0, r.stderr)
+  assert.doesNotMatch(r.stdout, /有新版本/)
+  assert.match(r.stdout, /\[ok\] 版本更新: ok（提示已关闭/)
+  rmSync(h, { recursive: true, force: true })
+})
+
+test('doctor 在 GRAPE_KIT_SKIP_UPDATE_CHECK=1 下静默', () => {
+  const h = home()
+  seedUpdateCache(h, '9.9.9')
+  const r = run(['doctor'], h, { GRAPE_KIT_SKIP_UPDATE_CHECK: '1' })
+  assert.equal(r.status, 0, r.stderr)
+  assert.doesNotMatch(r.stdout, /有新版本/)
+  rmSync(h, { recursive: true, force: true })
+})
+
+test('doctor 24h 缓存内同一新版本不重复打扰', () => {
+  const h = home()
+  seedUpdateCache(h, '9.9.9')
+  const first = run(['doctor'], h)
+  assert.match(first.stdout, /有新版本/)
+  const second = run(['doctor'], h)
+  assert.doesNotMatch(second.stdout, /有新版本/)
+  assert.match(second.stdout, /\[ok\] 版本更新: ok（已提示过 9\.9\.9/)
+  rmSync(h, { recursive: true, force: true })
+})
+
+test('doctor 对已被 MCP 消费过的提示显示「已提示过」而非「已是最新」', () => {
+  const h = home()
+  // 模拟 MCP 先启动并消费提示：notified 已等于 latest
+  seedUpdateCache(h, '9.9.9', '9.9.9')
+  const r = run(['doctor'], h)
+  assert.equal(r.status, 0, r.stderr)
+  assert.doesNotMatch(r.stdout, /已是最新/)
+  assert.match(r.stdout, /\[ok\] 版本更新: ok（已提示过 9\.9\.9/)
+  rmSync(h, { recursive: true, force: true })
+})
+
+test('doctor 在检测不可用时明确提示，不冒充「已是最新」', () => {
+  const h = home()
+  seedUpdateCache(h, '')
+  const r = run(['doctor'], h)
+  assert.equal(r.status, 0, r.stderr)
+  assert.doesNotMatch(r.stdout, /已是最新/)
+  assert.match(r.stdout, /\[ok\] 版本更新: ok（检测不可用/)
+  rmSync(h, { recursive: true, force: true })
+})
+
+test('doctor 升级提示与 MCP 共用文案：两个等价开关都列出', () => {
+  const h = home()
+  seedUpdateCache(h, '9.9.9')
+  const r = run(['doctor'], h)
+  assert.equal(r.status, 0, r.stderr)
+  assert.match(r.stdout, /GRAPE_KIT_SKIP_UPDATE_CHECK=1 或 GRAPE_KIT_NO_UPDATE_CHECK=1 关闭提醒/)
+  rmSync(h, { recursive: true, force: true })
 })

@@ -17,6 +17,7 @@ import { homedir, tmpdir } from 'node:os'
 import { join, dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
+import { checkUpdateStatus, formatUpdateNotice } from './src/update-check.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const DEFAULT_SCRIPT = resolve(HERE, 'grape-kit-mcp.mjs')
@@ -717,10 +718,22 @@ function uninstallSkill() {
   console.log(`skill 已卸载: ${skills.join(', ')}`)
 }
 
+/** doctor「版本更新」行：拆开有新版本/已提示过/已最新/检测不可用/已关闭，避免误报「已是最新」 */
+function updateCheckLine(pkgVersion, status) {
+  switch (status && status.state) {
+    case 'newer': return formatUpdateNotice(pkgVersion, status.latest)
+    case 'disabled': return 'ok（提示已关闭）'
+    case 'notified': return `ok（已提示过 ${status.latest}，24h 内不重复提醒；npm i -g @grape-dev/grape-kit 可更新）`
+    case 'unavailable': return 'ok（检测不可用：registry 不可达或响应异常）'
+    default: return `ok（已是最新 ${pkgVersion}）`
+  }
+}
+
 /* ---------- doctor ---------- */
 
 /** 检出 opencode 条目（install / doctor 共用同一判定，防「装了检不出」/嵌套误判） */
 function detectOpencode() {
+
   const p = opencodePaths()
   const cfgPath = existsSync(p.config) ? p.config : p.configAlt
   let error
@@ -735,7 +748,7 @@ function detectOpencode() {
   return { ok: false, path: errorPath || cfgPath, ...(error ? { error } : {}) }
 }
 
-function doctorOpencode(probe) {
+async function doctorOpencode(probe) {
   const p = opencodePaths()
   // 与其它宿主共用 baseChecksWithCli / printChecks，避免文案与判定各写一份后漂移
   const checks = baseChecksWithCli()
@@ -756,6 +769,12 @@ Promise.all([
 `, baseUrl], { encoding: 'utf8', timeout: 20_000 })
     checks.push(['服务端能力探测', String(ok.stdout).trim() || '探测失败'])
   }
+  // check_update：复用 src/update-check.mjs（24h 缓存 + 5s 有界超时，失败静默，不阻塞其它检查）
+  const pkgVersion = JSON.parse(readFileSync(join(HERE, 'package.json'), 'utf8')).version
+  let updateStatus = { state: 'unavailable' }
+  try { updateStatus = await checkUpdateStatus(pkgVersion) } catch { /* 版本检查绝不影响 doctor */ }
+  checks.push(['版本更新', updateCheckLine(pkgVersion, updateStatus)])
+  for (const [k, v] of checks) console.log(`  ${String(v).startsWith('ok') ? '[ok]' : '[!!]'} ${k}: ${v}`)
   printChecks(checks)
 }
 
@@ -782,13 +801,18 @@ function uninstallOpencode() {
  * Issue 验收要求「两宿主全新安装后 doctor 检出对应条目」——裸 doctor 必须覆盖全部宿主，
  * 而不是默认只看 opencode（已装 codearts 却报 opencode 未安装会误导用户）。
  */
-function doctorAll(probe) {
+async function doctorAll(probe) {
   const checks = baseChecksWithCli()
   for (const [name, host] of Object.entries(HOSTS)) {
     const found = host.detect()
     checks.push(entryCheck(`${name} 条目`, found, `npx -y @grape-dev/grape-kit install --target ${name}`))
   }
   if (probe && process.env.GRAPE_BASE_URL) checks.push(['契约连通性', connectivityCheck(process.env.GRAPE_BASE_URL)])
+  // check_update：汇总模式同样提示版本（24h 缓存 + 5s 有界超时，失败静默）
+  const pkgVersion = JSON.parse(readFileSync(join(HERE, 'package.json'), 'utf8')).version
+  let updateStatus = { state: 'unavailable' }
+  try { updateStatus = await checkUpdateStatus(pkgVersion) } catch { /* 版本检查绝不影响 doctor */ }
+  checks.push(['版本更新', updateCheckLine(pkgVersion, updateStatus)])
   printChecks(checks)
   console.log('  提示：doctor --target <宿主> 可查看单宿主详情（skill 副本 / OfficeAce 导入状态等）')
 }
@@ -853,7 +877,7 @@ if (cmd === 'install' || cmd === 'uninstall' || cmd === 'doctor') {
     const host = HOSTS[resolveTarget()]
     if (cmd === 'install') host.install()
     else if (cmd === 'uninstall') host.uninstall()
-    else host.doctor(!!arg('probe'))
+    else await host.doctor(!!arg('probe'))
   }
 } else {
   console.log(`用法: node setup.mjs install|uninstall|doctor [--target ${SUPPORTED_TARGETS.join('|')}] [--probe]`)
