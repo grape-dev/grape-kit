@@ -4,6 +4,28 @@
 
 > 发布口径说明：npm 已发布版本不可回写——0.3.3 的 npm tarball 内 CHANGELOG 仅含本节（10 行）、README 尚无本节链接且把 0.3.2 记为 2026-11-14（commit 日）。因此「npm 页面与仓内 CHANGELOG 一致」自下一版发布起生效。
 
+## 0.3.4 (2026-11-19)
+
+### Added
+
+- `install --target codearts` / `install --target officeace`：受支持宿主 2 → 4——codearts 复用条目引擎与 HOSTS 表，officeace 无 MCP client、走注册清单 + GUI 导入降级方案；`uninstall` / `doctor` 同步覆盖，裸 `doctor` 汇总检出全部宿主。
+- `doctor` 新增「版本更新」检查行：有界超时、失败静默、24h 缓存内同一新版本只提示一次；状态拆分「有新版本 / 已提示过 / 已最新 / 检测不可用 / 已关闭」，升级文案 `formatUpdateNotice` 与 MCP 启动提醒共用。
+- 升级提示开关别名兼容与 semver 版本比较。
+
+### Changed
+
+- README 中英双语化（英文主 README + `README.zh.md` 中文副本），版本历史对齐 npm 发布日；补 `CODE_OF_CONDUCT.md` / `SUPPORT.md` / `AGENTS.md` 社区文档。
+- `CHANGELOG.md` 覆盖 npm 全部已发布版本并随包发布；`scripts/gen-changelog.mjs` 改为在标题与说明之后插入新节、同版本节跳过（不产生重复节），配套契约测试固化版本口径。
+- HOSTS 表收敛为 target 唯一来源（help 列受支持宿主），条目引擎与 doctor 判定收敛为单一实现；单测面扩容至 114 个。
+
+### Fixed
+
+- `--target=codearts` 等号写法此前被静默当成默认 opencode（写错宿主/删错配置），分发处改按等号前缀判定。
+- 条目引擎改为结构扫描：中段逗号、备份原文、嵌套同名键误判修复；四宿主写入统一备份校验、保留用户注释。
+- workbuddy 损坏配置改为非零退出，`doctor` 错误归因到实际解析失败的文件；无 `mcpServers` 块的重写统一走 `writeValidated`。
+- 24h 提示去重失效修复（缓存写入前创建 `~/.grape` 目录）；失败路径落退避缓存，与模块注释一致。
+- 401 / doctor / install 三处 API Key 指引补可点击入口。
+
 ## 0.3.3 (2026-11-18)
 
 ### Added
