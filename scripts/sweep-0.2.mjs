@@ -8,7 +8,12 @@ import { spawn } from 'node:child_process'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-const [ownerRepo = 'qq_44826240/eos-cloud-album', issueNumber = '4'] = process.argv.slice(2)
+const [ownerRepo, issueNumber] = process.argv.slice(2)
+if (!ownerRepo || !issueNumber) {
+  console.error('用法: GRAPE_BASE_URL=... GRAPE_API_TOKEN=... node scripts/sweep-0.2.mjs <owner/repo> <issue_number>')
+  console.error('注意: 请在自有测试载体（如一次性 eval 仓库）上运行，cancel/resume 会变更 issue 状态。')
+  process.exit(1)
+}
 const [owner, repo] = ownerRepo.split('/')
 const SERVER = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'grape-kit-mcp.mjs')
 
