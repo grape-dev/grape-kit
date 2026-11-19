@@ -73,6 +73,17 @@ const NODE_ICON = { completed: '✅', running: '🏃', queued: '📦', failed: '
 const NODE_TAG = { completed: '[OK]', running: '[RUN]', queued: '[QUEUE]', failed: '[FAIL]', skipped: '[SKIP]', pending: '[WAIT]', takeover: '[TAKEOVER]' }
 const ST_CLASS = { completed: 'done', running: 'run', takeover: 'run', failed: 'fail' }
 function pickNodes(data) {
+  const segments = (data.segments ?? data.pipeline?.segments)
+  if (segments?.length) {
+    // 事件流形态：每段一个节点事件（按 seq 去重取每 agent 最新），running/takeover 段是当前节点
+    const byAgent = new Map()
+    for (const sg of segments) {
+      const a = sg.agent ?? sg.agent_type
+      if (!a) continue
+      byAgent.set(a, { agent: a, status: sg.status, seq: sg.seq })
+    }
+    return [...byAgent.values()]
+  }
   const stages = (data.stages ?? data.pipeline?.stages)
   if (stages?.length) {
     return stages.map((st) => {
@@ -100,6 +111,7 @@ export function renderPipeline(data) {
     else stats.wait++
   }
   const current = nodes.find((n) => ['running', 'takeover'].includes(String(n.status ?? '').toLowerCase()))
+  const overall = data.status ? ` · 整体：${data.status}${data.stalled ? `（⚠️ 疑似停滞 ${data.stalled_minutes ?? '?'} 分钟）` : ''}` : ''
   const lines = []
   lines.push(`┌─ 流水线：${sceneName}${issueLabel}`)
   for (const n of nodes) {
@@ -114,7 +126,7 @@ export function renderPipeline(data) {
   if (stats.fail) verdict += ` · ❌ ${stats.fail} 个失败节点`
   if (current) verdict += ` · 当前：${current.agent ?? current.tag ?? '?'} ${String(current.status).toLowerCase() === 'takeover' ? '已被本地接管' : '执行中'}`
   lines.push(`│  进度 [${bar}] ${pct}%`)
-  lines.push(`└─ ${verdict}`)
+  lines.push(`└─ ${verdict}${overall}`)
   // Mermaid 图形（宿主支持则渲染为图，不支持则忽略）
   const mm = ['```mermaid', 'flowchart LR']
   nodes.forEach((n, i) => {

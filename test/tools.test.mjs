@@ -62,6 +62,21 @@ test('render: issues 表格 / pipeline 节点链 / 打回事件', () => {
   assert.match(ev, /#91.*issue_comment.*qa/)
 })
 
+test('render: pipeline segments 事件流形态渲染（真实 API 形态回归）', () => {
+  const pipe = R.renderPipeline({
+    issue: { number: 45 }, status: 'completed', stalled: true, stalled_minutes: 178,
+    segments: [
+      { seq: 995049, agent: 'vod', status: 'completed' },
+      { seq: 995050, agent: 'issue', status: 'running' },
+    ],
+  })
+  assert.match(pipe, /┌─ 流水线/, '卡片头')
+  assert.match(pipe, /✅ vod/, '完成段渲染')
+  assert.match(pipe, /🏃 issue/, '运行段渲染')
+  assert.match(pipe, /疑似停滞 178 分钟/, '停滞警告透出')
+  assert.match(pipe, /```mermaid/, 'Mermaid 图形')
+})
+
 test('render: 非预期结构回退 JSON 不抛错', () => {
   assert.match(R.renderIssues({ weird: 1 }), /```json/)
   assert.doesNotThrow(() => R.fallbackJson(undefined))
