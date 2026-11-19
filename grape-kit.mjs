@@ -107,7 +107,19 @@ const arg = (name, def = undefined) => {
   return i >= 0 ? (process.argv[i + 1] && !process.argv[i + 1].startsWith('--') ? process.argv[i + 1] : true) : def
 }
 const cmd = process.argv[2] || 'help'
-const target = arg('target', 'opencode')
+const target = process.argv.some((a) => a === '--target' || a.startsWith('--target='))
+  ? arg('target', 'opencode')
+  : detectHost() || 'opencode'
+
+/** 宿主自动检测：未显式指定 --target 时按本机宿主痕迹选择，避免用户背宿主名。
+ *  优先级：WorkBuddy > CodeArts > OfficeAce > 兜底 opencode（无痕迹机器多为 opencode/hermes 场景）。 */
+function detectHost() {
+  const home = homedir()
+  if (existsSync(join(home, '.workbuddy'))) return 'workbuddy'
+  if (existsSync(join(home, '.codeartsdoer'))) return 'codearts'
+  if (existsSync(join(home, '.officeace'))) return 'officeace'
+  return ''
+}
 
 /** 未知 target 明确报错，不静默回落到 opencode（否则会写错宿主的配置） */
 function resolveTarget() {
