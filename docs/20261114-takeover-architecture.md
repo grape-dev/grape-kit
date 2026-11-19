@@ -1,7 +1,7 @@
 # grape 端云协同 · Takeover 会话原语 —— 架构与验证报告
 
 > 版本基线：grape weekly-11（PR #1268 takeover 一等资源 + #2517 双缺陷修复 !1425）· grape-kit v0.3.2
-> 验证实例：ai-work-0007 本地 weekly-11（sqlite）；跨 agent 床：eng-0002（opencode / codex）
+> 验证实例：本地 weekly-11 实例（sqlite）；跨 agent 测试床（opencode / codex）
 > 结论：**端云协同（节点级接管）已完成**——单轮快照式介入升级为会话原语闭环，E2E + 多 agent 实测通过
 
 ---
@@ -24,7 +24,7 @@ flowchart TB
         AUTH["鉴权层<br/>grape_ user / tk_ agent / tko_ takeover<br/>tko_：repo_session-only，12h→24h，结束即吊销"]
         PIPE["流水线编排<br/>vod → issue → coding → qa → sre"]
         EV["事件流 events<br/>structured_output（与 worker 同构）"]
-        POOL["Worker 引擎池<br/>eng-0001~0004 / 端侧 worker（广播认领）"]
+        POOL["Worker 引擎池<br/>云端引擎 / 端侧 worker（广播认领）"]
         GW --> AUTH
         GW --> PIPE
         PIPE --> EV
@@ -90,17 +90,17 @@ sequenceDiagram
 | 验证项 | 环境 | 结果 |
 |---|---|---|
 | 单测 | weekly-11 + !1425 | 123 passed 零回归（新增 7 用例） |
-| E2E 全链（start→progress→request-finish→finish→qa 接力） | ai-work-0007 实例 #18/#19 | ✅ 链自动推进到 qa |
+| E2E 全链（start→progress→request-finish→finish→qa 接力） | 本地实例 #18/#19 | ✅ 链自动推进到 qa |
 | abort 让渡→重派 | 同上 #20 | ✅ 节点重派 running |
 | #2517-A 重放（幂等键 <30s 下 abort） | 同上 #21 | ✅ redispatched=true、事件回 running |
 | #2517-B 重放（更新 a2a_event 下 start） | 同上 #21 | ✅ 200 + node_already_advanced 警告 |
-| 自然语言卡 A1/A2/A3/B4/B5 | ai-work-0007 opencode | ✅ 全绿，两阶段纪律（request→确认→finish）生效 |
-| 跨 agent（SSH 隧道，零端口开放） | eng-0002 opencode | ✅ B8/A1/C6 |
-| 跨 agent | eng-0002 codex 0.90.0 | ✅ B8 + 克制卡（未接管、决策门声明） |
+| 自然语言卡 A1/A2/A3/B4/B5 | 本地实例 opencode | ✅ 全绿，两阶段纪律（request→确认→finish）生效 |
+| 跨 agent（SSH 隧道，零端口开放） | 测试床 opencode | ✅ B8/A1/C6 |
+| 跨 agent | 测试床 codex 0.90.0 | ✅ B8 + 克制卡（未接管、决策门声明） |
 
 ## 5. 遗留与边界
 
 - **生产未部署**：weekly-11（含 #1268 + !1425）未上 www.grapedev.cn——takeover 工具面在生产 404 属预期，grape-kit 已按 404 回退老路径并提示
 - **!1425 待合入**：修复在分支，PR 审核后随 weekly-11 发版列车走（与 #2238/2.4.0 同列）
 - npm v0.3.2 发布待 granular token（用户操作）
-- eng-0002 的 codex `OPENGW_API_KEY` 来自 hermes config 注入（env 通道，未落盘）
+- 外部 agent 的 API key 经宿主 config 注入（env 通道，不落盘、不外显）

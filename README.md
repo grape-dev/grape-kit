@@ -38,8 +38,7 @@ agent 宿主（MCP stdio：opencode / codex…；skill 引导 bash：hermes…�
 | `grape_takeover_abort` | 让渡回流水线：当前节点重派云端（`redispatch=false` 只停不重派），链不中断 |
 | `grape_takeover_context` | 旧路径（无 takeover API 平台的回退）：只读接管上下文 |
 
-全生命周期时序与架构图：
-[20261114-takeover-architecture.html](https://devkit-docs-pub-20261030.obs.cn-north-4.myhuaweicloud.com/plans/20261114-takeover-architecture.html)
+全生命周期时序与架构图：[docs/20261114-takeover-architecture.md](docs/20261114-takeover-architecture.md)
 
 ## 其余工具面（30 个）
 
@@ -113,13 +112,15 @@ node scripts/live-smoke.mjs
 
 - [ ] 版本更新检测与升级提示（对齐 huaweicloud-devkit `check_update` 体验）
 - [ ] install 目标扩展：codearts / workbuddy / officeace（integrations 三型）
-- [ ] 组织仓归位（grape-dev/grape-kit，待 #1773 授权）+ CI
+- [x] 组织仓归位（grape-dev/grape-kit）
+- [ ] CI 门禁全面接入（当前提供 GitHub Actions 兼容 workflow，GitCode GoCI 转正后启用）
 - [ ] dsh 宿主由 [grape-dsh](https://gitcode.com/grape-dev/grape-dsh) 独立插件承载，不重复建设
 
 ## 相关链接
 
 - [Grape 平台](https://www.grapedev.cn/) · [grape 主仓](https://gitcode.com/grape-dev/grape) · [grape-cli](https://gitcode.com/grape-dev/grape-cli) · [grape-dsh（DSH 宿主插件）](https://gitcode.com/grape-dev/grape-dsh)
-- 端云协同架构与验证报告：`docs/20261114-takeover-architecture.md`（[OBS 在线版](https://devkit-docs-pub-20261030.obs.cn-north-4.myhuaweicloud.com/plans/20261114-takeover-architecture.html)）
+- 端云协同架构与验证报告：[docs/20261114-takeover-architecture.md](docs/20261114-takeover-architecture.md)
+- 贡献指南：[CONTRIBUTING.md](CONTRIBUTING.md) · 安全报告：[SECURITY.md](SECURITY.md)
 
 ## License
 
