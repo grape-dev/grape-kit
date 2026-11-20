@@ -54,3 +54,31 @@ test('M2 takeover_start 描述与渲染披露 git 凭据边界', async () => {
   assert.match(out, /洁净机器/, '应给出洁净机器回推路径')
   assert.ok(!out.includes('tko_fake_for_test'), '完整 token 不得出现在渲染结果')
 })
+
+/* ── M3（P0-3）：warnings 全量透出 + 分支/MR 分叉裁决 playbook ── */
+
+test('M3 warnings 全量透出、不截断，并成前置检查清单', async () => {
+  const { findTool } = await import('../src/tools.mjs')
+  const t = findTool('grape_takeover_start')
+  const long = 'remote_may_still_run: ' + '云端 worker 在被杀前可能已推送分支并开 MR，'.repeat(8) + 'TAIL_MARKER'
+  const warnings = [
+    'w1', 'w2', 'w3', 'w4', 'w5', 'w6', long,
+    'node_already_advanced: 链已交棒至下一节点（更新事件 seq=99 qa）',
+    'w9_LAST_MARKER',
+  ]
+  const out = t.render({ takeover_id: 'tkos_x', warnings, bundle: {} })
+  assert.match(out, /前置检查清单/, '应把 warnings 呈现为前置检查清单')
+  assert.match(out, /w6/, '第 6 条警告必须透出（不得只取前 5 条）')
+  assert.match(out, /w9_LAST_MARKER/, '末尾警告必须透出')
+  assert.match(out, /TAIL_MARKER/, '长警告不得被截断')
+  assert.match(out, /远程分支可能已被云端 worker|分支\/MR 冲突/, 'remote_may_still_run 应给裁决说明')
+  assert.match(out, /分叉裁决 playbook/, '应指向分叉裁决 playbook')
+  assert.match(out, /docs\/20261114-takeover-architecture\.md/, '应给出 playbook 文档位置')
+})
+
+test('M3 架构文档含分叉裁决 playbook', () => {
+  const doc = read('docs/20261114-takeover-architecture.md')
+  assert.match(doc, /分叉裁决/)
+  assert.match(doc, /remote_may_still_run/)
+  assert.match(doc, /已有 MR|已开 MR|MR 列表/)
+})
