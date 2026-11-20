@@ -11,11 +11,12 @@ const PACKAGE_NAME = '@grape-dev/grape-kit'
 const GIT_IDENTITY = ['-c', 'user.name=changelog-test', '-c', 'user.email=changelog-test@example.com']
 
 /**
- * npm 已发布版本 → 发布日期（基准：`npm view @grape-dev/grape-kit time`；0.3.6 为本版待发布，发布后以 npm view time 复核）。
+ * npm 已发布版本 → 发布日期（基准：`npm view @grape-dev/grape-kit time`；0.3.7 为本版待发布，发布后以 npm view time 复核）。
  * `0.0.0-stage` 是 npm staged publishing 占位包（tarball 不含 `src/`），与功能版本一并计入发布记录；
  * `0.2.3` 从未发布，不得补造。
  */
 const PUBLISHED = [
+  ['0.3.7', '2026-11-20'],
   ['0.3.6', '2026-11-19'],
   ['0.3.5', '2026-11-19'],
   ['0.3.4', '2026-11-19'],
@@ -126,11 +127,15 @@ test('每个版本节含发布日期与至少一条 Added/Changed/Fixed 条目',
   }
 })
 
-test('README 版本历史节链接 CHANGELOG.md、含 0.3.3/0.3.5/0.3.6 行且计数与 npm 发布记录一致', () => {
+test('README 版本历史节链接 CHANGELOG.md、含 0.3.3/0.3.5/0.3.6/0.3.7 行且计数与 npm 发布记录一致', () => {
   const md = readme()
   const section = mdSection(md, '版本历史') || mdSection(md, 'Version history')
   assert.ok(section, 'README 应保留版本历史节（英文版为 Version history）')
   assert.match(section, /\[[^\]]*CHANGELOG[^\]]*\]\(\.?\/?CHANGELOG\.md\)/, '版本历史节应含指向 CHANGELOG.md 的相对链接')
+
+  const row037 = section.split('\n').find((l) => /^\| 0\.3\.7 \|/.test(l))
+  assert.ok(row037, '版本历史表应含 0.3.7 行')
+  assert.match(row037, /\| 2026-11-20 \|/, '0.3.7 日期应为 npm 发布日 2026-11-20')
 
   const row036 = section.split('\n').find((l) => /^\| 0\.3\.6 \|/.test(l))
   assert.ok(row036, '版本历史表应含 0.3.6 行')
@@ -148,7 +153,7 @@ test('README 版本历史节链接 CHANGELOG.md、含 0.3.3/0.3.5/0.3.6 行且�
   assert.ok(row033, '版本历史表应含 0.3.3 行')
   assert.match(row033, /\| 2026-11-18 \|/, '0.3.3 日期应为 npm 发布日 2026-11-18')
 
-  assert.match(section, /16 条发布记录/, '发布记录计数应为 16（含 0.0.0-stage 占位包）')
+  assert.match(section, /17 条发布记录/, '发布记录计数应为 17（含 0.0.0-stage 占位包）')
   assert.ok(!/12 个已发布版本|12 条发布记录/.test(section), '不得再写「12 个已发布版本」')
 })
 

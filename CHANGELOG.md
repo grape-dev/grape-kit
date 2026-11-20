@@ -4,6 +4,24 @@
 
 > 发布口径说明：npm 已发布版本不可回写——0.3.3 的 npm tarball 内 CHANGELOG 仅含本节（10 行）、README 尚无本节链接且把 0.3.2 记为 2026-11-14（commit 日）。因此「npm 页面与仓内 CHANGELOG 一致」自下一版发布起生效。
 
+## 0.3.7 (2026-11-20)
+
+### Added
+
+- `trigger_pipeline` / `get_task_status` 图形化渲染：触发即输出节点链图（各节点就绪/运行/完成状态一目了然），状态查询输出状态卡片 + 进度条 + 下一步指引，替代此前的纯文本摘要。
+
+### Changed
+
+- README Quick Start 重构对齐 devkit 模式：宿主平等罗列、每宿主独立小节、新增 Capabilities 总览节（端云协同单拎节并入，恢复「先会用再懂原理」阅读序）。
+- 生命周期三件套补全：版本查询 / 更新 / 卸载命令组对齐 huaweicloud-devkit README 模式。
+- 措辞口径全面对齐落地页与帮助文档：统一只写 Agent（支持面含 WorkBuddy 等非编码 Agent，去 coding 限定）、接管会话改称端云协同（cloud-local collaboration）。
+- Codex/hermes 移出露出面：grape-kit 安装器无对应 target、适配未完成不展示——Codex 节改为真实手动配置指导（删假指引 `install --target codex`），hermes 相关内容同步清理（简介 / 架构图 / env 注释）。
+
+### Fixed
+
+- `uninstall` 清理 receipt 与残留空目录：卸载不再遗留 receipt 记录文件；`update` 提醒文案补 npx 用户升级说明。
+- README 双语错位修复：删除英文版重复出现的中文「版本历史」节，双语内容归位并固化断言。
+
 ## 0.3.6 (2026-11-19)
 
 ### Fixed
