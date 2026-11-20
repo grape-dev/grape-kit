@@ -892,7 +892,7 @@ const HOSTS = {
   ·「接管 xxx/yyy 的 #12」 → 端云接管，本地干活
   · 干完审查它的证据后说「确认」 → 正式交回，流水线自动接力
 
-完整文档：https://gitcode.com/grape-dev/grape-kit/blob/dev/README.md
+完整文档：https://gitcode.com/grape-dev/grape-kit/blob/main/README.md
 ──────────────────────────────────────────────`)
     },
     uninstall: uninstallOpencode,

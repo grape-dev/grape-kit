@@ -5,7 +5,7 @@
 <p align="center">
   <a href="https://www.npmjs.com/package/@grape-dev/grape-kit"><img src="https://img.shields.io/npm/v/@grape-dev/grape-kit" alt="npm version"></a>
   <a href="https://www.npmjs.com/package/@grape-dev/grape-kit"><img src="https://img.shields.io/npm/dm/@grape-dev/grape-kit" alt="npm downloads"></a>
-  <a href="https://gitcode.com/grape-dev/grape-kit/blob/dev/LICENSE"><img src="https://img.shields.io/npm/l/@grape-dev/grape-kit" alt="License: MIT"></a>
+  <a href="https://gitcode.com/grape-dev/grape-kit/blob/main/LICENSE"><img src="https://img.shields.io/npm/l/@grape-dev/grape-kit" alt="License: MIT"></a>
   <img src="https://img.shields.io/node/v/@grape-dev/grape-kit" alt="node">
   <a href="https://www.grapedev.cn/"><img src="https://img.shields.io/badge/grape-www.grapedev.cn-2563eb" alt="grape"></a>
 </p>
@@ -23,11 +23,11 @@ Grape-kit helps **mainstream agents** (opencode / CodeArts / WorkBuddy / opencla
 
 ```
 agent (MCP stdio: opencode / CodeArts / WorkBuddy…; other MCP-capable agents wire up manually)
-  → grape-kit (36 tools · native HTTP · Markdown rendering · initialize-instruction bootstrap)
+  → grape-kit (39 tools · native HTTP · Markdown rendering · initialize-instruction bootstrap)
     → grape server (pipelines / events / takeover session API; CLI only as 401 fallback)
 ```
 
-## Capabilities (36 tools)
+## Capabilities (39 tools)
 
 - **Pipeline control**: trigger (the only A2A entry) · wait_task · task status · cancel/resume with decision gates
 - **Issues & events**: list/detail/events/my-issues · create · structured hand-back templates
@@ -102,7 +102,7 @@ npx -y @grape-dev/grape-kit uninstall --target workbuddy   # removes entry + ski
 openclaw plugins install clawhub:grape-kit@latest
 ```
 
-The `clawhub:` prefix is the source (matching devkit's listing form). Verify with the plugin's MCP tools list (36 tools). Marketplace page: https://clawhub.ai/grape-dev/plugins/grape-kit
+The `clawhub:` prefix is the source (matching devkit's listing form). Verify with the plugin's MCP tools list (39 tools). Marketplace page: https://clawhub.ai/grape-dev/plugins/grape-kit
 
 ### Version check & update (all targets)
 
