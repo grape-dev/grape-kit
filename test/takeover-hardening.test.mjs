@@ -82,3 +82,55 @@ test('M3 架构文档含分叉裁决 playbook', () => {
   assert.match(doc, /remote_may_still_run/)
   assert.match(doc, /已有 MR|已开 MR|MR 列表/)
 })
+
+/* ── M4（P1-4 / P1-5）：409 agent_mismatch 友好提示 + bundle 脚本渲染与 {{CWD}} ── */
+
+test('M4 409 agent_mismatch 给友好提示与轮询建议', async () => {
+  const { hintFor } = await import('../src/api.mjs')
+  const hint = hintFor(409, { detail: 'agent_mismatch: 目标节点不是当前活跃节点' })
+  assert.match(hint, /只能对准当前活跃节点|当前活跃节点/, '应解释节点对准约束')
+  assert.match(hint, /轮询/, '应给轮询建议')
+  assert.match(hint, /pipeline_info|takeover_status/, '应给出确认当前节点的工具')
+  assert.equal(hintFor(409, { detail: 'other conflict' }), '', '非 agent_mismatch 的 409 不套用该提示')
+})
+
+test('M4 takeover_start 渲染内置 Node 脚本（report / request-finish / finish）', async () => {
+  const { findTool } = await import('../src/tools.mjs')
+  const t = findTool('grape_takeover_start')
+  const out = t.render({
+    takeover_id: 'tkos_script1',
+    bundle: { env: { GRAPE_SESSION_TOKEN: 'tko_fake_for_test' }, workspace: { cwd_hint: '/work/proj' } },
+  })
+  assert.match(out, /接管脚本/, '应渲染脚本段')
+  assert.match(out, /scripts\/takeover\/report\.mjs/, '应给出 report 脚本')
+  assert.match(out, /scripts\/takeover\/request-finish\.mjs/, '应给出 request-finish 脚本')
+  assert.match(out, /scripts\/takeover\/finish\.mjs/, '应给出 finish 脚本')
+  assert.match(out, /--session tkos_script1/, '脚本应带会话 id')
+  assert.match(out, /用户级凭据/, 'finish 脚本应标注凭据要求')
+})
+
+test('M4 bundle 脚本与 GRAPE_AUTH_FILE 的 {{CWD}} 本地渲染', async () => {
+  const { findTool } = await import('../src/tools.mjs')
+  const t = findTool('grape_takeover_start')
+  const out = t.render({
+    takeover_id: 'tkos_cwd1',
+    bundle: {
+      env: { GRAPE_SESSION_TOKEN: 'tko_fake', GRAPE_AUTH_FILE: '{{CWD}}/.grape/config.json' },
+      workspace: { cwd_hint: 'C:\\work\\proj' },
+      scripts: { node: 'cd "{{CWD}}" && node run.mjs' },
+    },
+  })
+  assert.match(out, /C:\\work\\proj\/\.grape\/config\.json/, 'GRAPE_AUTH_FILE 的占位符应被渲染')
+  assert.match(out, /cd "C:\\work\\proj" && node run\.mjs/, 'bundle 脚本的占位符应被渲染')
+  assert.ok(!out.includes('{{CWD}}'), '渲染结果不应残留字面量占位符')
+})
+
+test('M4 Node 版接管脚本可执行（--help 自述用法）', async () => {
+  const { spawnSync } = await import('node:child_process')
+  for (const name of ['report', 'request-finish', 'finish']) {
+    const p = join(ROOT, 'skills/grape-remote/scripts/takeover', `${name}.mjs`)
+    const r = spawnSync(process.execPath, [p, '--help'], { encoding: 'utf8', timeout: 10_000 })
+    assert.equal(r.status, 0, `${name}.mjs --help 应成功：${r.stderr}`)
+    assert.match(r.stdout, /用法|usage/i, `${name}.mjs 应输出用法`)
+  }
+})
