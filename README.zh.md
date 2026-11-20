@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <strong>Grape DevOps 流水线工具 × 无界面编码 agent</strong><br>
+  <strong>Grape DevOps 流水线工具 × 主流 Agent</strong><br>
   在 opencode / hermes / codex 等终端 agent 里触发、观察、推进 Grape 多 agent DevOps 流水线，<br>
   并以<strong>接管会话（takeover）原语</strong>把云端节点原子让渡到本地——链不断、成果结构化交回。<br>
   <a href="https://www.npmjs.com/package/@grape-dev/grape-kit">npm</a> · <a href="https://www.grapedev.cn/">Grape 官网</a> · <a href="https://gitcode.com/grape-dev/grape-kit">源码仓库</a>
@@ -19,7 +19,7 @@
 
 ---
 
-帮助**无 Web UI 的编码 agent**（opencode / hermes / codex 等）安全、结构化地使用 [Grape](https://gitcode.com/grape-dev/grape) —— 多 agent 协作的 AI Native DevOps 平台（vod → issue → coding → qa → sre）。
+帮助各类 **Agent**（opencode / hermes / codex 等）安全、结构化地使用 [Grape](https://gitcode.com/grape-dev/grape) —— 多 agent 协作的 AI Native DevOps 平台（vod → issue → coding → qa → sre）。
 
 ```
 agent 宿主（MCP stdio：opencode / codex…；skill 引导 bash：hermes…）
