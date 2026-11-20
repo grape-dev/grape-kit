@@ -25,11 +25,11 @@ export class GrapeApiError extends Error {
 export function resolveCredentials(env = process.env) {
   // ① 一次性参数（进程内）
   if (env.GRAPE_API_TOKEN_ONCE) {
-    return { token: env.GRAPE_API_TOKEN_ONCE, baseUrl: env.GRAPE_BASE_URL || 'https://www.grapedev.cn' }
+    return { token: env.GRAPE_API_TOKEN_ONCE, baseUrl: env.GRAPE_BASE_URL || 'https://www.grapedev.cn', source: 'env:GRAPE_API_TOKEN_ONCE' }
   }
   // ② env（标准路径）
   if (env.GRAPE_API_TOKEN) {
-    return { token: env.GRAPE_API_TOKEN, baseUrl: env.GRAPE_BASE_URL || 'https://www.grapedev.cn' }
+    return { token: env.GRAPE_API_TOKEN, baseUrl: env.GRAPE_BASE_URL || 'https://www.grapedev.cn', source: 'env:GRAPE_API_TOKEN' }
   }
   // ③ 文件通道（hermes 等 env 清洗场景 + GRAPE_AUTH_FILE 显式指向）
   const authFile = env.GRAPE_AUTH_FILE || join(homedir(), '.grape', 'config.json')
@@ -37,11 +37,11 @@ export function resolveCredentials(env = process.env) {
     try {
       const cfg = JSON.parse(readFileSync(authFile, 'utf-8'))
       if (cfg.token) {
-        return { token: cfg.token, baseUrl: cfg.base_url || env.GRAPE_BASE_URL || 'https://www.grapedev.cn' }
+        return { token: cfg.token, baseUrl: cfg.base_url || env.GRAPE_BASE_URL || 'https://www.grapedev.cn', source: `file:${authFile}` }
       }
     } catch { /* 损坏文件按未配置处理 */ }
   }
-  return { token: '', baseUrl: env.GRAPE_BASE_URL || 'https://www.grapedev.cn' }
+  return { token: '', baseUrl: env.GRAPE_BASE_URL || 'https://www.grapedev.cn', source: '' }
 }
 
 /**

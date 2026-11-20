@@ -146,11 +146,17 @@ npx -y @grape-dev/grape-kit uninstall        # 卸载（宿主自动检测）
 - **scope 是第一道门禁**：契约 219 命令中 session_only 的 28 个（git-repo 等）对外部 token 必 403，直接排除；`tko_` 接管凭据仅 repo_session 能力、结束即吊销
 - **无 UI 补偿**：工具返回即 Markdown 表格 / 节点链 / 事件时间线；`wait_task` 轮询带阶段摘要与超时提示
 
+## Windows 注意事项
+
+1. **编码**：grape CLI / MCP 输出 UTF-8，PowerShell 默认按 GBK 解码会显示乱码——先 `chcp 65001`，或设置 `$OutputEncoding = [Console]::OutputEncoding = [Text.UTF8Encoding]::new()`。
+2. **BOM**：`~/.grape/config.json` 含 UTF-8 BOM 时 `JSON.parse` 会失败——用无 BOM 保存（VS Code「Save with Encoding → UTF-8」；PowerShell `Set-Content -Encoding utf8NoBOM`）。
+3. **setx 不传播**：`setx GRAPE_API_TOKEN ...` 只对**新**进程生效，当前宿主会话读不到——设置后重启 Agent 宿主（opencode / CodeArts / WorkBuddy）或重新登录终端。
+
 ## 开发与测试
 
 ```bash
 npm install
-npm test        # 114 个单测（fake-grape 替身，不依赖真实服务端）
+npm test        # 129 个单测（fake-grape 替身，不依赖真实服务端）
 npm run smoke   # 真实 stdio JSON-RPC 往返：initialize → tools/list → tools/call
 ```
 

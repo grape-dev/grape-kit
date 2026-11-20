@@ -199,3 +199,10 @@ test('M5 Windows 文档三条：编码 / BOM / setx（README + AGENTS）', () =>
     assert.match(text, /setx/, `${file} 应说明 setx 不传播需重启会话`)
   }
 })
+
+test('M5 MCP initialize instructions 同步接管边界（凭据/节点对准）', async () => {
+  const { INSTRUCTIONS } = await import('../src/server.mjs')
+  assert.match(INSTRUCTIONS, /tko_/)
+  assert.match(INSTRUCTIONS, /用户级凭据/)
+  assert.match(INSTRUCTIONS, /agent_mismatch/)
+})

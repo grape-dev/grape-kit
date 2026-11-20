@@ -146,11 +146,17 @@ Full release notes: [CHANGELOG.md](CHANGELOG.md) — 17 条发布记录（含 0.
 - **Scope is the first gate**: of the 219 contract commands, the 28 session-only ones (git-repo etc.) always 403 for external tokens — excluded outright; `tko_` takeover credentials are repo_session-only and revoked on completion
 - **Agent-native output**: tool responses are Markdown tables / node chains / event timelines; `wait_task` polls with stage summaries and timeout hints
 
+## Windows notes
+
+1. **Encoding**: grape CLI / MCP output is UTF-8; PowerShell decodes it as GBK by default and shows mojibake — run `chcp 65001` first, or set `$OutputEncoding = [Console]::OutputEncoding = [Text.UTF8Encoding]::new()`.
+2. **BOM**: a UTF-8 BOM in `~/.grape/config.json` makes `JSON.parse` fail — save without BOM (VS Code "Save with Encoding → UTF-8"; PowerShell `Set-Content -Encoding utf8NoBOM`).
+3. **setx does not propagate**: `setx GRAPE_API_TOKEN ...` only affects **new** processes; the current agent session will not see it — restart the host (opencode / CodeArts / WorkBuddy) or re-login the terminal after setting it.
+
 ## Development & testing
 
 ```bash
 npm install
-npm test        # 114 unit tests (fake-grape stand-in, no real server needed)
+npm test        # 129 unit tests (fake-grape stand-in, no real server needed)
 npm run smoke   # real stdio JSON-RPC round-trip: initialize → tools/list → tools/call
 ```
 
