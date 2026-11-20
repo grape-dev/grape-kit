@@ -25,7 +25,7 @@ function writeCache(data) {
 
 /** 升级提示文案：doctor 的「版本更新」行与 MCP stderr 共用，避免两份拷贝分叉 */
 export function formatUpdateNotice(localVersion, latest) {
-  return `有新版本 ${localVersion} → ${latest}（npm i -g @grape-dev/grape-kit 更新；GRAPE_KIT_SKIP_UPDATE_CHECK=1 或 GRAPE_KIT_NO_UPDATE_CHECK=1 关闭提醒）`
+  return `有新版本 ${localVersion} → ${latest}（npm i -g @grape-dev/grape-kit 更新，npx 用户下次拉取即最新；GRAPE_KIT_SKIP_UPDATE_CHECK=1 或 GRAPE_KIT_NO_UPDATE_CHECK=1 关闭提醒）`
 }
 
 /** 开关：任一开关名置 1 即关闭全部升级提示 */

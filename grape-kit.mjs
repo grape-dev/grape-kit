@@ -12,7 +12,7 @@
  *   node setup.mjs uninstall --target opencode
  *   node setup.mjs doctor [--probe]
  */
-import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync, readdirSync, statSync } from 'node:fs'
+import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync, readdirSync, statSync, rmdirSync } from 'node:fs'
 import { createInterface } from 'node:readline'
 import { homedir, tmpdir } from 'node:os'
 import { join, dirname, resolve } from 'node:path'
@@ -168,15 +168,33 @@ function installWorkbuddy() {
 
 function uninstallWorkbuddy() {
   const p = workbuddyPaths()
-  if (!existsSync(p.mcpJson)) { console.log('未找到 ~/.workbuddy/mcp.json，无需卸载'); return }
-  const originalText = readFileSync(p.mcpJson, 'utf8')
-  let cfg
-  try { cfg = JSON.parse(originalText) } catch { console.log('mcp.json 解析失败，跳过'); return }
-  if (cfg.mcpServers && cfg.mcpServers['grape-kit']) {
-    delete cfg.mcpServers['grape-kit']
-    const backup = writeValidated(p.mcpJson, JSON.stringify(cfg, null, 2) + String.fromCharCode(10), originalText)
-    console.log(`已移除 mcpServers.grape-kit（备份: ${backup}）`)
-  } else console.log('未安装条目')
+  if (existsSync(p.mcpJson)) {
+    const originalText = readFileSync(p.mcpJson, 'utf8')
+    let cfg
+    try { cfg = JSON.parse(originalText) } catch { cfg = null }
+    if (cfg && cfg.mcpServers && cfg.mcpServers['grape-kit']) {
+      delete cfg.mcpServers['grape-kit']
+      const backup = writeValidated(p.mcpJson, JSON.stringify(cfg, null, 2) + String.fromCharCode(10), originalText)
+      console.log(`已移除 mcpServers.grape-kit（备份: ${backup}）`)
+    } else if (cfg) {
+      console.log('未安装条目')
+    }
+  } else {
+    console.log('未找到 ~/.workbuddy/mcp.json，无需卸载')
+  }
+  // skill 清理：删 grape-remote 目录 + receipt（.grape-kit-native.json）；skills 目录空则一并移除
+  const skillsRoot = join(dirname(p.mcpJson), 'skills')
+  const skillDir = join(skillsRoot, 'grape-remote')
+  if (existsSync(skillDir)) {
+    rmSync(skillDir, { recursive: true, force: true })
+    console.log(`skill 已删除: ${skillDir}`)
+  }
+  const receipt = join(skillsRoot, RECEIPT)
+  if (existsSync(receipt)) {
+    rmSync(receipt, { force: true })
+    console.log(`receipt 已删除: ${receipt}`)
+  }
+  try { rmdirSync(skillsRoot); console.log(`空目录已清理: ${skillsRoot}`) } catch { /* skills 目录非空（其他插件）则保留 */ }
 }
 
 /** 检出 workbuddy 条目（doctor 与汇总自检共用同一判定） */
