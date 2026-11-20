@@ -12,7 +12,7 @@
 
 <p align="center">
   <strong>Grape DevOps pipeline tools × mainstream coding agents</strong><br>
-  Trigger, observe and advance Grape multi-agent DevOps pipelines from terminal agents like opencode / hermes / codex,<br>
+  Trigger, observe and advance Grape multi-agent DevOps pipelines from agents like opencode / hermes / codex,<br>
   and atomically hand over cloud nodes to your local machine via <strong>takeover sessions</strong> — the chain never breaks, results return in structured form.<br>
   <a href="https://www.npmjs.com/package/@grape-dev/grape-kit">npm</a> · <a href="https://www.grapedev.cn/">Grape website</a> · <a href="https://gitcode.com/grape-dev/grape-kit">Source</a>
 </p>
@@ -22,7 +22,7 @@
 Grape-kit helps **mainstream coding agents** (opencode / codex / CodeArts / WorkBuddy / openclaw, etc.) use [Grape](https://gitcode.com/grape-dev/grape) safely and in a structured way — an AI-native DevOps platform with multi-agent pipelines (vod → issue → coding → qa → sre).
 
 ```
-agent host (MCP stdio: opencode / codex…; skill-guided bash: hermes…)
+agent (MCP stdio: opencode / codex…; skill-guided bash: hermes…)
   → grape-kit (36 tools · native HTTP · Markdown rendering · initialize-instruction bootstrap)
     → grape server (pipelines / events / takeover session API; CLI only as 401 fallback)
 ```
@@ -58,7 +58,7 @@ Full lifecycle sequence and architecture: [docs/20261114-takeover-architecture.m
 # Prerequisite: Node >= 20 (no Python needed — native HTTP since v0.3.0)
 export GRAPE_BASE_URL=https://www.grapedev.cn
 export GRAPE_API_TOKEN=grape_xxx      # Grape WebUI → Settings → API Key
-# Hosts that sanitize env (hermes etc.): file channel ~/.grape/config.json {"token":"grape_xxx","base_url":"..."}
+# Agents that sanitize env (hermes etc.): file channel ~/.grape/config.json {"token":"grape_xxx","base_url":"..."}
 
 # Install (writes the opencode mcp.grape entry + skill copy + receipt, idempotent with backup)
 npx -y @grape-dev/grape-kit install --target opencode
@@ -90,8 +90,8 @@ Full release notes: [CHANGELOG.md](CHANGELOG.md) — 16 条发布记录（含 0.
 | Version | Date | Highlights |
 |---|---|---|
 | 0.3.6 | 2026-11-19 | Pipeline rendering supports the segments event-stream shape (real API payloads; no more raw-JSON fallback); stall status surfaced in the verdict line ("⚠️ suspected stall for N minutes"); segments-shape regression case added (unit tests 114→115) |
-| 0.3.5 | 2026-11-19 | Host auto-detection from local traces (workbuddy/codearts/officeace); interactive host picker when none detected (no silent opencode fallback); clean-env auto-config + three-step onboarding output; host matrix docs (CodeArts section, openclaw/ClawHub channel) |
-| 0.3.4 | 2026-11-19 | codearts + officeace install targets (supported hosts 2→4); doctor version-update line (24h dedupe, five states); installer entry-engine structural scan hardening |
+| 0.3.5 | 2026-11-19 | Agent auto-detection from local traces (workbuddy/codearts/officeace); interactive agent picker when none detected (no silent opencode fallback); clean-env auto-config + three-step onboarding output; agent matrix docs (CodeArts section, openclaw/ClawHub channel) |
+| 0.3.4 | 2026-11-19 | codearts + officeace install targets (supported agents 2→4); doctor version-update line (24h dedupe, five states); installer entry-engine structural scan hardening |
 | 0.3.3 | 2026-11-18 | check_update startup reminder + CHANGELOG generator; 401 fallback hardened |
 | 0.3.2 | 2026-11-17 | Takeover session five tools (start/status/progress/finish/abort); #2517 client-side adaptation (abort redispatch failure alert + race warning rendering); SKILL.md dual-path semantics |
 | 0.3.1 | 2026-11-11 | cancel three-choice decision gate · resume fact re-verification · search contract convergence · structured hand-back template |
@@ -141,11 +141,11 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the contribution flow, [AGENTS.md](AG
 - [x] Org repo home (grape-dev/grape-kit)
 - [ ] Full CI gating (GitHub Actions-compatible workflow provided today; enable GitCode GoCI once generally available)
 - [x] More install targets: codearts / officeace (three integration types)
-- [ ] dsh hosts served by the dedicated [grape-dsh](https://gitcode.com/grape-dev/grape-dsh) plugin, no duplicate effort
+- [ ] dsh is served by the dedicated [grape-dsh](https://gitcode.com/grape-dev/grape-dsh) plugin, no duplicate effort
 
 ## Links
 
-- [Grape platform](https://www.grapedev.cn/) · [grape main repo](https://gitcode.com/grape-dev/grape) · [grape-cli](https://gitcode.com/grape-dev/grape-cli) · [grape-dsh (DSH host plugin)](https://gitcode.com/grape-dev/grape-dsh)
+- [Grape platform](https://www.grapedev.cn/) · [grape main repo](https://gitcode.com/grape-dev/grape) · [grape-cli](https://gitcode.com/grape-dev/grape-cli) · [grape-dsh (DSH adapter)](https://gitcode.com/grape-dev/grape-dsh)
 - Takeover architecture & verification report: [docs/20261114-takeover-architecture.md](docs/20261114-takeover-architecture.md)
 - Contributing: [CONTRIBUTING.md](CONTRIBUTING.md) · Security: [SECURITY.md](SECURITY.md) · Code of conduct: [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) · Support: [SUPPORT.md](SUPPORT.md) · Agent guide: [AGENTS.md](AGENTS.md)
 
