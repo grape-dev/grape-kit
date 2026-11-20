@@ -60,7 +60,7 @@ test('tools/call wait 工具带 polls 元信息与超时提示', async () => {
   })
   const res = await client.callTool({ name: 'grape_wait_task', arguments: { seq: 85 } })
   assert.match(res.content[0].text, /超时/)
-  assert.match(res.content[0].text, /running/)
+  assert.match(res.content[0].text, /\\[(RUN|running)\\]|执行中/)
   await client.close()
 })
 
@@ -158,7 +158,7 @@ test('native 401 且 CLI 可用时沿用 CLI 结果', async () => {
     })
     const res = await client.callTool({ name: 'grape_get_task_status', arguments: { seq: 5 } })
     assert.equal(res.isError, undefined)
-    assert.match(res.content[0].text, /running/)
+    assert.match(res.content[0].text, /RUN|running|执行中/)
     await client.close()
   })
 })

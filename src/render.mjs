@@ -146,10 +146,17 @@ export function renderPipeline(data) {
 
 export function renderTaskStatus(data) {
   if (!data || typeof data !== 'object') return fallbackJson(data)
+  const seq = data.seq ?? '-'
+  const st = String(data.status ?? '-').toLowerCase()
+  const agent = data.agent_type ?? data.agent ?? '-'
+  const done = ['completed', 'done', 'failed', 'cancelled'].includes(st)
   const lines = []
-  lines.push(`- seq: ${data.seq ?? '-'} · status: **${data.status ?? '-'}** · agent: ${data.agent_type ?? data.agent ?? '-'}`)
-  if (data.summary) lines.push(`- 摘要: ${String(data.summary).slice(0, 600)}`)
-  if (data.result) lines.push(`- 结果: ${String(data.result).slice(0, 1500)}`)
+  lines.push(`┌─ 任务 seq=${seq}`)
+  lines.push(`│  ${NODE_ICON[st] ?? '·'} ${agent.padEnd(8)} ${NODE_TAG[st] ?? data.status ?? '-'}`)
+  lines.push(`│  进度 [${'█'.repeat(done ? 10 : st === 'running' ? 5 : 1)}${'░'.repeat(done ? 0 : st === 'running' ? 5 : 9)}] ${done ? 100 : st === 'running' ? 50 : 10}%`)
+  lines.push(`└─ ${st === 'completed' ? '已完成' : st === 'failed' ? '❌ 失败——可 force 重派：让 agent 调 grape_trigger_pipeline(force) 或重试' : st === 'running' ? '执行中——稍后说「查 seq ' + seq + '」继续跟' : data.status ?? '-'}`)
+  if (data.summary) lines.push('', `摘要: ${String(data.summary).slice(0, 600)}`)
+  if (data.result) lines.push('', `结果: ${String(data.result).slice(0, 1200)}`)
   return lines.join('\n')
 }
 
@@ -192,8 +199,32 @@ export function renderSearch(data) {
 
 export function renderTrigger(data) {
   if (!data || typeof data !== 'object') return fallbackJson(data)
+  const seq = data.seq ?? data.event_seq ?? '?'
+  const agent = data.agent ?? '-'
+  const st = String(data.status ?? '-').toLowerCase()
   const lines = []
-  lines.push(`流水线已触发：**seq=${data.seq ?? data.event_seq ?? '?'}** · agent=${data.agent ?? '-'} · status=${data.status ?? '-'}`)
+  lines.push(`流水线已触发：**seq=${seq}** · agent=${agent} · ${NODE_ICON[st] ?? ''} ${data.status ?? '-'}`)
+  lines.push('')
+  lines.push(`进度 [${'█'.repeat(st === 'running' ? 1 : 2)}${'░'.repeat(9)}] 刚起步`)
+  lines.push('')
+  lines.push('```mermaid')
+  lines.push('flowchart LR')
+  lines.push(`    n0["${agent}"]:::run`)
+  for (const a of ['issue', 'coding', 'qa', 'sre']) {
+    if (a === agent) continue
+    lines.push(`    n${a}["${a}"]:::wait`)
+  }
+  // 按链序连线（agent 可能是链中任一节点）
+  const chain = ['vod', 'issue', 'coding', 'qa', 'sre'].filter((a, i) => i === 0 || a !== agent)
+  const nodes = [agent, ...['issue', 'coding', 'qa', 'sre'].filter((a) => a !== agent)]
+  let prev = null
+  for (const a of nodes) {
+    if (prev !== null) lines.push(`    ${prev} --> ${a === 'issue' && nodes.includes('issue') ? 'issue' : a}`)
+    prev = a === 'issue' ? 'issue' : a
+  }
+  lines.push('    classDef run fill:#d4a72c,color:#fff,stroke-width:3px')
+  lines.push('    classDef wait fill:#eaeef2,color:#888')
+  lines.push('```')
   lines.push('')
   lines.push('用 `grape_wait_task(seq)` 阻塞等待终态，或 `grape_get_task_status(seq)` 查询。')
   return lines.join('\n')
