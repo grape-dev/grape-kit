@@ -68,7 +68,20 @@ npx -y @grape-dev/grape-kit uninstall --target opencode   # 卸载（备份配�
 
 ### Codex
 
-在 `~/.codex/config.toml` 加 `[mcp_servers.grape]`（command/args/env），详见使用指南。
+Codex 暂无安装器 target——手动在 `~/.codex/config.toml` 配置 MCP server：
+
+```toml
+[mcp_servers.grape]
+command = "node"
+args = ["<路径>/grape-kit-mcp.mjs"]   # 例如从克隆仓库或已安装副本指向
+env = { GRAPE_BASE_URL = "https://www.grapedev.cn", GRAPE_API_TOKEN = "grape_xxx" }
+```
+
+**改完重启 Codex 会话**。用 MCP 工具列表验证（36 工具）。
+
+```bash
+# 更新/卸载：手动管理 config.toml 条目与 mjs 副本
+```
 
 ### CodeArts Agent（华为云码道）
 
