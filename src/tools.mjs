@@ -603,6 +603,7 @@ export const TOOLS = [
       '原子动作：云端任务让渡给本地、签发 tko_ 接管凭据（12h 可续 24h）、返回完整接管上下文与按 host_os 渲染的脚本。' +
       '之后本地继续该节点工作，用 grape_takeover_progress 回报进度，完成用 grape_takeover_finish 携结构化产物交回，' +
       '或用 grape_takeover_abort 让渡回流水线（当前节点重新派发，链不断）。' +
+      '⚠️ push 能力边界：tko_ 仅 repo_session 能力，**不含 git 凭据注入**；洁净机器的回推路径见返回体。' +
       '⚠️ 需要平台支持 takeover API（404/无该工具能力时回退 grape_takeover_context + cancel 老路径）。',
     schema: {
       type: 'object',
@@ -628,6 +629,10 @@ export const TOOLS = [
       if (json.token_expires_at) lines.push(`- 凭据到期 epoch: ${json.token_expires_at}`)
       const ws = b.workspace || {}
       if (ws.cwd_hint) lines.push(`- 本地工作目录: ${ws.cwd_hint}`)
+      lines.push('', '**push 能力边界（先读）**', '')
+      lines.push('- `tko_` 只覆盖 repo_session：可继续该节点工作、回报进度、`request-finish`；**不含 git 凭据注入**，不能直接 push。')
+      lines.push('- 本机已有用户级凭据（`grape git` 注入 / 自有 PAT / SSH key）→ 正常 commit & push；洁净机器必须先由用户配置其中一种。')
+      lines.push('- 洁净机器回推路径：① 用户在本机配置用户级 PAT 或 SSH key；② `grape git push origin <branch>`（凭据注入通道）；③ 或让用户在其已有凭据的机器上推送同一提交。不要假设 tko_ 能 push。')
       const instr = b.instructions || {}
       if (instr.prompt) lines.push('', '**接管任务 Prompt（尾部）**', '', String(instr.prompt).slice(-3000))
       if (Array.isArray(json.warnings) && json.warnings.length) {
