@@ -13,7 +13,7 @@
 <p align="center">
   <strong>Grape DevOps pipeline tools × mainstream agents</strong><br>
   Trigger, observe and advance Grape multi-agent DevOps pipelines from agents like opencode / codex / CodeArts,<br>
-  and atomically hand over cloud nodes to your local machine via <strong>takeover sessions</strong> — the chain never breaks, results return in structured form.<br>
+  and atomically hand over cloud nodes to your agent via <strong>cloud-local collaboration</strong> — takeover sessions pull cloud nodes into your agent, results return to the platform in structured form, and the pipeline chain never breaks.<br>
   <a href="https://www.npmjs.com/package/@grape-dev/grape-kit">npm</a> · <a href="https://www.grapedev.cn/">Grape website</a> · <a href="https://gitcode.com/grape-dev/grape-kit">Source</a>
 </p>
 
@@ -57,7 +57,7 @@ Full lifecycle sequence and architecture: [docs/20261114-takeover-architecture.m
 ```bash
 # Prerequisite: Node >= 20 (no Python needed — native HTTP since v0.3.0)
 export GRAPE_BASE_URL=https://www.grapedev.cn
-export GRAPE_API_TOKEN=grape_xxx      # Grape WebUI → Settings → API Key
+export GRAPE_API_TOKEN=grape_xxx      # API Key: https://www.grapedev.cn/app/#account/profile
 # Agents that sanitize env: file channel ~/.grape/config.json {"token":"grape_xxx","base_url":"..."}
 
 # Install (writes the opencode mcp.grape entry + skill copy + receipt, idempotent with backup)
