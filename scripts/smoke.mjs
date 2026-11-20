@@ -25,8 +25,10 @@ const proc = spawn(process.execPath, [SERVER], {
     GRAPE_CLI_BIN: fakeBin,
     GRAPE_BASE_URL: 'http://smoke.test',
     // v0.3.0 双通道 smoke：native 无凭据 → 401 → 回退 CLI（fake）成功
-    // 置空 native token：显式传一个非法 token 但同时给 GRAPE_API_TOKEN_ONCE 空串？
-    // 做法最简单：env 里不放 GRAPE_API_TOKEN，native 必 401，CLI fake 通道兜底。
+    // 做法：env 里不放 GRAPE_API_TOKEN，且 GRAPE_AUTH_FILE 指向不存在路径——
+    // 隔离宿主机 ~/.grape/config.json 文件通道（0.3.8 起为正式凭据来源，
+    // 不隔离会让 native 直连真实服务端），native 必 401，CLI fake 通道兜底。
+    GRAPE_AUTH_FILE: join(dir, 'no-such-auth.json'),
     ...(process.env.GRAPE_API_TOKEN ? {} : {}),
   },
 })

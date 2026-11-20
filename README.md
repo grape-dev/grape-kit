@@ -124,10 +124,11 @@ Then just talk to your agent:
 
 ## Version history
 
-Full release notes: [CHANGELOG.md](CHANGELOG.md) — 17 条发布记录（含 0.0.0-stage 占位包）
+Full release notes: [CHANGELOG.md](CHANGELOG.md) — 18 条发布记录（含 0.0.0-stage 占位包）
 
 | Version | Date | Highlights |
 |---|---|---|
+| 0.3.8 | 2026-11-20 | Three review tools (grape_review_pass / grape_review_reject / grape_confirm_done — tools 36→39); issues table gains a "Repository" column; doctor recognizes ~/.grape/config.json file-channel credentials (no more false FAIL) |
 | 0.3.7 | 2026-11-20 | Graphical rendering for trigger/task_status (node-chain diagram on trigger; status card + progress bar + next-step hints); README Quick Start rebuilt in devkit style (per-agent sections, Capabilities overview, lifecycle command group); uninstall receipt cleanup; Codex/hermes removed from surfaced targets |
 | 0.3.6 | 2026-11-19 | Pipeline rendering supports the segments event-stream shape (real API payloads; no more raw-JSON fallback); stall status surfaced in the verdict line ("⚠️ suspected stall for N minutes"); segments-shape regression case added (unit tests 114→115) |
 | 0.3.5 | 2026-11-19 | Agent auto-detection from local traces (workbuddy/codearts/officeace); interactive agent picker when none detected (no silent opencode fallback); clean-env auto-config + three-step onboarding output; agent matrix docs (CodeArts section, openclaw/ClawHub channel) |

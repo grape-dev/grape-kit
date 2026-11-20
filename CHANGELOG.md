@@ -4,6 +4,20 @@
 
 > 发布口径说明：npm 已发布版本不可回写——0.3.3 的 npm tarball 内 CHANGELOG 仅含本节（10 行）、README 尚无本节链接且把 0.3.2 记为 2026-11-14（commit 日）。因此「npm 页面与仓内 CHANGELOG 一致」自下一版发布起生效。
 
+## 0.3.8 (2026-11-20)
+
+### Added
+
+- 审核三工具（体验报告 P1：审核动作藏 OpenAPI，用户被迫直连 API）：`grape_review_pass`（pending_review 一键通过）、`grape_review_reject`（打回，意见必填、决策层确认）、`grape_confirm_done`（开发者确认收尾，等价 WebUI 确认 / CLI `confirm done`）；工具面 36→39，smoke/sweep/契约断言全量同步。
+
+### Changed
+
+- `renderIssues` 表新增「仓库」列（体验报告 P2：`list_my_issues` 不带仓库归属，多个在跑单需额外全局搜索才能定位）。
+
+### Fixed
+
+- `doctor` 识别 `~/.grape/config.json` 文件通道凭证（体验报告 P2：Windows 用户按文档配置文件通道仍被误报 FAIL，第一步就被吓住）。
+
 ## 0.3.7 (2026-11-20)
 
 ### Added

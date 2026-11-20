@@ -126,6 +126,7 @@ npx -y @grape-dev/grape-kit uninstall        # 卸载（宿主自动检测）
 
 | 版本 | 日期 | 要点 |
 |---|---|---|
+| 0.3.8 | 2026-11-20 | 审核三工具（grape_review_pass / grape_review_reject / grape_confirm_done，工具面 36→39）· issues 表新增「仓库」列 · doctor 识别 ~/.grape/config.json 文件通道凭证（不再误报 FAIL） |
 | 0.3.7 | 2026-11-20 | trigger/task_status 图形化渲染（触发即出节点链图 · 状态查询出卡片+进度条+下一步指引）· Quick Start 重构对齐 devkit 模式 + Capabilities 总览节 · 卸载清理 receipt · Codex/hermes 移出露出面 |
 | 0.3.6 | 2026-11-19 | 流水线渲染支持 segments 事件流形态（真实 API 返回，不再回退原始 JSON）· 停滞状态「⚠️ 疑似停滞 N 分钟」透出到判读行 · 新增 segments 形态回归用例（单测 114→115） |
 | 0.3.5 | 2026-11-19 | 宿主自动检测（按 workbuddy/codearts/officeace 痕迹）· 零宿主交互选择（不再静默兜底 opencode）· 干净环境自动建配置 + 三步上手引导 · 宿主矩阵补 codearts 专段与 ClawHub 渠道 |
@@ -136,7 +137,7 @@ npx -y @grape-dev/grape-kit uninstall        # 卸载（宿主自动检测）
 | 0.3.0 | 2026-11-11 | 传输层原生化：原生 HTTP 直连，grape CLI/Python 变可选（401 回退通道） |
 | 0.2.x | 2026-11-09 前 | 13→31 工具扩展 · worker_onboard · B1 接管闭环 |
 
-逐版本完整记录（发布日期、工具面变化、行为修复，覆盖 npm 全部 17 条发布记录——含 `0.0.0-stage` 占位包，0.2.3 从未发布）：[CHANGELOG.md](CHANGELOG.md)
+逐版本完整记录（发布日期、工具面变化、行为修复，覆盖 npm 全部 18 条发布记录——含 `0.0.0-stage` 占位包，0.2.3 从未发布）：[CHANGELOG.md](CHANGELOG.md)
 
 ## 设计原则
 
