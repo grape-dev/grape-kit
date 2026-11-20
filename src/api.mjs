@@ -14,12 +14,25 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 
 export class GrapeApiError extends Error {
-  constructor(message, { status = 0, hint = '' } = {}) {
+  constructor(message, { status = 0, hint = '', code = '' } = {}) {
     super(message)
     this.name = 'GrapeApiError'
     this.status = status
     this.hint = hint
+    this.code = code
   }
+}
+
+/**
+ * 宿主平台信息：让服务端按 host_os 渲染接管脚本资产。
+ * 平台 StartBody 已接 host_os/host_arch/host_shell（缺省 linux），不上报就永远拿 posix 脚本。
+ */
+export function hostInfo() {
+  const host_os = process.platform === 'win32' ? 'windows' : process.platform === 'darwin' ? 'darwin' : 'linux'
+  const host_shell = host_os === 'windows'
+    ? String(process.env.ComSpec || 'powershell').split('\\').pop()
+    : String(process.env.SHELL || '').split('/').pop() || 'sh'
+  return { host_os, host_arch: process.arch, host_shell }
 }
 
 export function resolveCredentials(env = process.env) {
@@ -35,7 +48,8 @@ export function resolveCredentials(env = process.env) {
   const authFile = env.GRAPE_AUTH_FILE || join(homedir(), '.grape', 'config.json')
   if (existsSync(authFile)) {
     try {
-      const cfg = JSON.parse(readFileSync(authFile, 'utf-8'))
+      // 剥 BOM：Windows 记事本保存会带 UTF-8 BOM，JSON.parse 直接抛错（P2 实修，不只写文档）
+      const cfg = JSON.parse(readFileSync(authFile, 'utf-8').replace(/^\uFEFF/, ''))
       if (cfg.token) {
         return { token: cfg.token, baseUrl: cfg.base_url || env.GRAPE_BASE_URL || 'https://www.grapedev.cn', source: `file:${authFile}` }
       }
@@ -47,20 +61,29 @@ export function resolveCredentials(env = process.env) {
 /**
  * 错误行动指引（按实际 baseUrl 生成，自部署实例不再被指向生产域名）。
  * @param {number} status
- * @param {{path?: string, detail?: string, baseUrl?: string}} [ctx]
+ * @param {{path?: string, detail?: string, baseUrl?: string, code?: string}} [ctx]
+ *   code：平台统一错误体的 {ok:false, code, message}——`agent_mismatch` 的 message 是中文散文，
+ *   不含 code 字样，只按 detail 匹配会漏（真实响应里 detail = "该任务属于 vod 节点，不是 coding"）。
  */
 export function hintFor(status, ctx = {}) {
   const base = String(ctx.baseUrl || 'https://www.grapedev.cn').replace(/\/$/, '')
-  if (status === 401) return `token 无效或过期：打开 ${base}/app/#account/profile 生成/重置 API Key（自部署实例即本地址），再更新 GRAPE_API_TOKEN 环境变量或 ~/.grape/config.json 的 token`
+  if (status === 401) {
+    return `token 无效或过期：打开 ${base}/app/#account/profile 生成/重置 API Key（自部署实例即本地址），再更新 GRAPE_API_TOKEN 环境变量或 ~/.grape/config.json 的 token。`
+      + '凭据优先级：GRAPE_API_TOKEN_ONCE > GRAPE_API_TOKEN > GRAPE_AUTH_FILE > ~/.grape/config.json；'
+      + '更新后需重启宿主会话（已运行的进程读不到新 env，Windows setx 同理）。'
+  }
   if (status === 403) {
     if (/\/finish\b|request-finish/.test(String(ctx.path || ''))) {
-      return 'finish 需用户级凭据（grape_）：接管凭据 tko_ 仅 repo_session 能力，不推进流水线。请由用户在其已授权会话中执行 finish，或改用用户级 GRAPE_API_TOKEN'
+      return 'finish 是用户的授权点：需用户级凭据（grape_），接管凭据 tko_ 仅 repo_session、不推进流水线，调用必被 403 拒绝——这是角色分工，不是权限缺失，不要重试。'
+        + '标准路径：request-finish（agent）→ 用户在对话中授权 → 由持有用户级 token 的会话执行 finish。'
     }
     return '可能是 session_only 端点（外部用户 token 不可用，属预期边界）或权限不足'
   }
-  if (status === 409 && /agent_mismatch/i.test(String(ctx.detail || ''))) {
-    return '接管只能对准当前活跃节点：目标节点已不是当前活跃阶段（agent_mismatch）。先 grape_get_pipeline_info / grape_takeover_status 确认当前活跃节点，在其运行期间再接管；若目标还在等待，请轮询（建议 30-60s 一次）后再试，不要连打开 start。'
+  const isMismatch = String(ctx.code || '') === 'agent_mismatch' || /agent_mismatch/i.test(String(ctx.detail || ''))
+  if (status === 409 && isMismatch) {
+    return '接管只能对准当前活跃节点：目标节点已不是当前活跃阶段（409 agent_mismatch）。先 grape_get_pipeline_info / grape_takeover_status 确认当前活跃节点；目标尚未激活时按 60-120s 轮询后再试，不要连打开 start。'
   }
+  if (status === 409 && String(ctx.code || '') === 'taken_by_other') return '另一个接管请求正在处理该任务：等 10-30s 重试，或用 grape_takeover_status 取回自己已开的会话。'
   return ''
 }
 
@@ -105,10 +128,13 @@ export async function apiRequest(method, path, opts = {}) {
   let json
   try { json = text ? JSON.parse(text) : null } catch { json = undefined }
   if (!resp.ok) {
-    const detail = json && (json.detail?.message || json.detail || json.message) ? String(json.detail?.message ?? json.detail ?? json.message).slice(0, 300) : text.slice(0, 300)
+    // 平台 takeover 错误体：{ok:false, code, message}（route 层 _err），code 才是可判别的排障键
+    const code = json && typeof json.code === 'string' ? json.code : ''
+    const detail = json && (json.detail?.message || json.detail || json.message || json.code) ? String(json.detail?.message ?? json.detail ?? json.message ?? json.code).slice(0, 300) : text.slice(0, 300)
     throw new GrapeApiError(`grape API ${resp.status}: ${detail}`, {
       status: resp.status,
-      hint: hintFor(resp.status, { path, detail, baseUrl }),
+      code,
+      hint: hintFor(resp.status, { path, detail, baseUrl, code }),
     })
   }
   return json
@@ -166,7 +192,7 @@ export const api = {
 
   // 端云协同 · takeover 会话（weekly-11+，PR #1268 一等接管资源）
   takeoverStart: (owner, repo, issueNumber, agentType) =>
-    apiRequest('POST', '/api/takeover/sessions', { body: { owner, repo, issue_number: String(issueNumber), ...(agentType ? { agent_type: agentType } : {}), platform: 'grape-kit' } }),
+    apiRequest('POST', '/api/takeover/sessions', { body: { owner, repo, issue_number: String(issueNumber), ...(agentType ? { agent_type: agentType } : {}), platform: 'grape-kit', ...hostInfo() } }),
   takeoverList: (owner, repo, issueNumber, activeOnly = true) =>
     apiRequest('GET', '/api/takeover/sessions', { query: { repo_key: `gitcode:${owner}/${repo}`, ...(issueNumber ? { issue_number: String(issueNumber) } : {}), ...(activeOnly ? {} : { all: 1 }) } }),
   takeoverGet: (sessionId, renew = false) =>

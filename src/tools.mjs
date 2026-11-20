@@ -33,7 +33,8 @@ function renderBundleScripts(scripts, cwd) {
   else if (Array.isArray(scripts)) {
     for (const s of scripts) {
       if (typeof s === 'string') pushText('', s)
-      else pushText(s.name || s.os || s.platform || '', s.content || s.script || s.text || '')
+      // 平台资产形态 {name, filename, ext, mode, exec, content}：文件名比 name 更能指导落地
+      else pushText(s.filename || s.name || s.os || s.platform || '', s.content || s.script || s.text || '')
     }
   } else if (typeof scripts === 'object') {
     for (const [k, v] of Object.entries(scripts)) {
@@ -669,7 +670,7 @@ export const TOOLS = [
       lines.push('- `tko_` 只覆盖 repo_session：可继续该节点工作、回报进度、`request-finish`；**不含 git 凭据注入**，不能直接 push。')
       lines.push('- 本机已有用户级凭据（`grape git` 注入 / 自有 PAT / SSH key）→ 正常 commit & push；洁净机器必须先由用户配置其中一种。')
       lines.push('- 洁净机器回推路径：① 用户在本机配置用户级 PAT 或 SSH key；② `grape git push origin <branch>`（凭据注入通道）；③ 或让用户在其已有凭据的机器上推送同一提交。不要假设 tko_ 能 push。')
-      const bundleScripts = renderBundleScripts(b.scripts, cwd)
+      const bundleScripts = renderBundleScripts(b.assets?.scripts ?? b.scripts, cwd)
       if (bundleScripts) {
         lines.push('', '**接管脚本（平台渲染，路径占位符已本地替换为实际路径）**', '', '```bash', ...bundleScripts, '```')
       }

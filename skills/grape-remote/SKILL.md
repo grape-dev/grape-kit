@@ -39,9 +39,9 @@ description: |
 4. 中途放弃：`grape_takeover_abort(session_id, redispatch=true)` —— 当前节点重新派发回云端引擎，已完成的节点保留。
 5. 断连恢复：`grape_takeover_status(owner, repo, number)` 找回 session_id；单条查询带 `renew=true` 续期凭据。
 
-**节点对准约束**：`grape_takeover_start` 只能接管**当前活跃节点**；提前接管下一节点会返回 409 `agent_mismatch`。先 `grape_get_pipeline_info` 确认当前 running/takeover 节点；目标尚未活跃时按 30–60s 轮询，不要连打开 start。
+**节点对准约束**：`grape_takeover_start` 只能接管**当前活跃节点**；提前接管下一节点会返回 409 `agent_mismatch`。先 `grape_get_pipeline_info` 确认当前 running/takeover 节点；目标尚未活跃时按 60-120s 轮询，不要连打开 start。
 
-**脚本**：`grape_takeover_start` 会渲染平台 bundle 脚本（`{{CWD}}` 已替换为实际路径；Windows 路径同样适用），并给出随包分发的 Node 版 `scripts/takeover/{report,request-finish,finish}.mjs`。token 只从环境变量读取，不要写进 argv。
+**脚本**：`grape_takeover_start` 会上报宿主 `host_os/host_arch/host_shell`，服务端据此渲染脚本资产（Windows 得 `.ps1`、Linux/macOS 得 `.sh`）；工具输出里 `{{CWD}}` 已替换为实际路径，可直接落地。平台未返回脚本资产时用随包分发的 Node 版 `skills/grape-remote/scripts/takeover/{report,request-finish,finish}.mjs`（Node ≥20，跨平台，token 只从 env 读取，不要写进 argv）。
 
 ### 路径二：cancel+context 旧路径（平台无 takeover API 时的回退）
 
