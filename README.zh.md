@@ -31,7 +31,9 @@ agent 宿主（MCP stdio：opencode / CodeArts / WorkBuddy…；其他 MCP 能�
 
 - **流水线遥控**：触发（唯一 A2A 入口）· 等待任务 · 任务状态 · 取消/恢复（带决策门）
 - **需求与事件**：列表/详情/事件流/我的需求 · 建单 · 结构化交回模板
-- **端云协同**（v0.3.2+ 核心）：**接管会话**把云端节点（如 coding）原子让渡到你的 Agent——签发 `tko_` 凭据（12h）并返回完整上下文（prompt/env/workspace/skill/history）；Agent 在本地干活、上报进度，经你确认后携结构化产物交回平台，流水线链路保持完整。平台要求 weekly-11+；旧平台自动回退只读上下文。完整时序：[docs/20261114-takeover-architecture.md](docs/20261114-takeover-architecture.md)
+- **端云协同**（v0.3.2+ 核心）：**接管会话**把云端节点（如 coding）原子让渡到你的 Agent——签发 `tko_` 凭据（12h）并返回完整上下文（prompt/env/workspace/skill/history）；Agent 在本地干活、上报进度，按两阶段交回：`request-finish` 只报告完成，**在对话中经你确认**后再 `finish` 正式交回（结构化产物，链路保持完整）。
+  - **凭据语义**：`tko_` 仅 repo_session 能力（继续节点工作 / 回报进度，**不含 git 凭据注入**）——`request-finish` 用 tko_ 即可，但**最终 `finish` 必须用用户级凭据（`grape_`）**，tko_ 调 finish 会 403 属预期边界。平台不提供 UI 确认按钮，确认只发生在你与 Agent 的对话里。
+  - 平台要求 weekly-11+；旧平台自动回退只读上下文。完整时序：[docs/20261114-takeover-architecture.md](docs/20261114-takeover-architecture.md)
 - **场景与仓库**：场景列表 · 应用场景 · 托管仓库 · 同步仓库 · 项目模板 · 项目信息
 - **搜索、知识与技能**：全局搜索 · 技能 ×3 · 知识库 ×2 · 看板
 - **Worker 接入**：把本机注册为 grape 执行引擎（`grape_worker_onboard`）
@@ -118,7 +120,7 @@ npx -y @grape-dev/grape-kit uninstall        # 卸载（宿主自动检测）
 > 我有哪些单子在跑流水线？
 > 帮 acme/demo 仓库的 #12 触发流水线，等到终态
 > #12 的 coding 在跑——抢到本机来干，链不断                       ← takeover_start
-> 干完了——上报平台，等我确认再正式交回                          ← progress + request-finish
+> 干完了——上报平台，等我确认再正式交回                          ← progress + request-finish + finish（finish 需用户级凭据）
 > 这个节点干不了——还给云端重跑，链不断                          ← takeover_abort
 ```
 

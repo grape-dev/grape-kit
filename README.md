@@ -31,7 +31,9 @@ agent (MCP stdio: opencode / CodeArts / WorkBuddy…; other MCP-capable agents w
 
 - **Pipeline control**: trigger (the only A2A entry) · wait_task · task status · cancel/resume with decision gates
 - **Issues & events**: list/detail/events/my-issues · create · structured hand-back templates
-- **Cloud-local collaboration** (v0.3.2+ core): **takeover sessions** atomically hand cloud nodes (e.g. coding) over to your agent — a `tko_` credential (12h) plus the full context bundle (prompt/env/workspace/skill/history) come back; your agent works locally, reports progress, and hands back with a structured conclusion after your confirmation — the pipeline chain never breaks. Platform requirement: weekly-11+; older platforms fall back to the legacy read-only context automatically. Full sequence: [docs/20261114-takeover-architecture.md](docs/20261114-takeover-architecture.md)
+- **Cloud-local collaboration** (v0.3.2+ core): **takeover sessions** atomically hand cloud nodes (e.g. coding) over to your agent — a `tko_` credential (12h) plus the full context bundle (prompt/env/workspace/skill/history) come back; your agent works locally and reports progress. Hand-back is two-phase: `request-finish` only reports completion, and after you confirm **in the conversation** the `finish` call hands back the structured result (the pipeline chain never breaks).
+  - **Credential semantics**: `tko_` is repo_session-only (keep working the node / report progress, **no git credential injection**). `request-finish` works with `tko_`, but the final `finish` **requires a user-level credential (`grape_`)**; calling `finish` with `tko_` returns 403 by design. There is no UI confirm button — confirmation happens only in your chat with the agent.
+  - Platform requirement: weekly-11+; older platforms fall back to the legacy read-only context automatically. Full sequence: [docs/20261114-takeover-architecture.md](docs/20261114-takeover-architecture.md)
 - **Scenes & repos**: list_scenes · apply_scene · host_repo · sync_repos · managed/member repos · project templates · project-info
 - **Search, knowledge & skills**: search (all/event/repo/agent) · skills ×3 · knowledge ×2 · dashboard
 - **Worker onboarding**: register this machine as a grape execution engine (`grape_worker_onboard`)
@@ -118,7 +120,7 @@ Then just talk to your agent:
 > Which of my grape issues have pipelines running?
 > Trigger the pipeline for issue #12 of acme/demo, then wait for a terminal state
 > #12's coding node is running — take it over on this machine, keep the chain   ← takeover_start
-> Done — report to the platform, wait for my confirmation before formal hand-back  ← progress + request-finish
+> Done — report to the platform, wait for my confirmation before formal hand-back  ← progress + request-finish + finish (finish needs a user-level credential)
 > Can't finish this node — give it back to the cloud, keep the chain            ← takeover_abort
 ```
 
