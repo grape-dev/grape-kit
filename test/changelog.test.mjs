@@ -128,8 +128,8 @@ test('每个版本节含发布日期与至少一条 Added/Changed/Fixed 条目',
 
 test('README 版本历史节链接 CHANGELOG.md、含 0.3.3/0.3.5/0.3.6 行且计数与 npm 发布记录一致', () => {
   const md = readme()
-  const section = mdSection(md, '版本历史')
-  assert.ok(section, 'README 应保留版本历史节')
+  const section = mdSection(md, '版本历史') || mdSection(md, 'Version history')
+  assert.ok(section, 'README 应保留版本历史节（英文版为 Version history）')
   assert.match(section, /\[[^\]]*CHANGELOG[^\]]*\]\(\.?\/?CHANGELOG\.md\)/, '版本历史节应含指向 CHANGELOG.md 的相对链接')
 
   const row036 = section.split('\n').find((l) => /^\| 0\.3\.6 \|/.test(l))

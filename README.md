@@ -130,21 +130,6 @@ node scripts/live-smoke.mjs
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the contribution flow, [AGENTS.md](AGENTS.md) if you are an AI coding agent working on this repo.
 
-## 版本历史
-
-| 版本 | 日期 | 要点 |
-|---|---|---|
-| 0.3.6 | 2026-11-19 | 流水线渲染支持 segments 事件流形态（真实 API 返回，不再回退原始 JSON）· 停滞状态「⚠️ 疑似停滞 N 分钟」透出到判读行 · 新增 segments 形态回归用例（单测 114→115） |
-| 0.3.5 | 2026-11-19 | 宿主自动检测 · 零宿主交互选择 · 干净环境自动建配置 + 三步上手引导 · 宿主矩阵补 codearts 专段与 ClawHub 渠道 |
-| 0.3.4 | 2026-11-19 | codearts/officeace 两宿主安装（受支持宿主 2→4）· doctor 版本更新行（24h 去重、五态）· 条目引擎结构扫描加固 |
-| 0.3.3 | 2026-11-18 | check_update 启动版本提醒 · CHANGELOG 生成器 · 401 回退回抛原始 native 提示 |
-| 0.3.2 | 2026-11-17 | takeover 会话原语五工具（start/status/progress/finish/abort）；#2517 端侧适配（abort 重派失败告警 + 竞态警告渲染）；SKILL.md 双路径语义 |
-| 0.3.1 | 2026-11-11 | cancel 三选决策门 · resume 事实复核 · search 契约收敛 · 结构化交回模板 |
-| 0.3.0 | 2026-11-11 | 传输层原生化：原生 HTTP 直连，grape CLI/Python 变可选（401 回退通道） |
-| 0.2.x | 2026-11-09 前 | 13→31 工具扩展 · worker_onboard · B1 接管闭环 |
-
-逐版本完整记录（发布日期、工具面变化、行为修复，覆盖 npm 全部 16 条发布记录——含 `0.0.0-stage` 占位包，0.2.3 从未发布）：[CHANGELOG.md](CHANGELOG.md)
-
 ## Roadmap
 
 - [x] Org repo home (grape-dev/grape-kit)
