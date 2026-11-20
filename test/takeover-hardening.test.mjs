@@ -37,3 +37,20 @@ test('M1 403 文案：finish 路径提示需用户级凭据', async () => {
   assert.match(hint, /用户级凭据/, 'finish 403 应说明需用户级凭据')
   assert.match(hint, /tko_/, '应说明 tko_ 的能力边界')
 })
+
+/* ── M2（P0-1）：takeover_start 必须显式披露 push 能力边界 ── */
+
+test('M2 takeover_start 描述与渲染披露 git 凭据边界', async () => {
+  const { findTool } = await import('../src/tools.mjs')
+  const t = findTool('grape_takeover_start')
+  assert.match(t.description, /git 凭据/, '工具描述应写明 tko_ 不含 git 凭据注入')
+  assert.match(t.description, /tko_/)
+  const out = t.render({
+    takeover_id: 'tkos_abc123',
+    bundle: { env: { GRAPE_SESSION_TOKEN: 'tko_fake_for_test' }, workspace: { cwd_hint: '/work/x' } },
+  })
+  assert.match(out, /push 能力边界/, '渲染应单列 push 能力边界')
+  assert.match(out, /不含 git 凭据注入/, '应写明不含 git 凭据注入')
+  assert.match(out, /洁净机器/, '应给出洁净机器回推路径')
+  assert.ok(!out.includes('tko_fake_for_test'), '完整 token 不得出现在渲染结果')
+})
