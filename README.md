@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <strong>Grape DevOps pipeline tools × headless coding agents</strong><br>
+  <strong>Grape DevOps pipeline tools × mainstream coding agents</strong><br>
   Trigger, observe and advance Grape multi-agent DevOps pipelines from terminal agents like opencode / hermes / codex,<br>
   and atomically hand over cloud nodes to your local machine via <strong>takeover sessions</strong> — the chain never breaks, results return in structured form.<br>
   <a href="https://www.npmjs.com/package/@grape-dev/grape-kit">npm</a> · <a href="https://www.grapedev.cn/">Grape website</a> · <a href="https://gitcode.com/grape-dev/grape-kit">Source</a>
@@ -19,7 +19,7 @@
 
 ---
 
-Grape-kit helps **coding agents without a Web UI** (opencode / hermes / codex, etc.) use [Grape](https://gitcode.com/grape-dev/grape) safely and in a structured way — an AI-native DevOps platform with multi-agent pipelines (vod → issue → coding → qa → sre).
+Grape-kit helps **mainstream coding agents** (opencode / codex / CodeArts / WorkBuddy / openclaw, etc.) use [Grape](https://gitcode.com/grape-dev/grape) safely and in a structured way — an AI-native DevOps platform with multi-agent pipelines (vod → issue → coding → qa → sre).
 
 ```
 agent host (MCP stdio: opencode / codex…; skill-guided bash: hermes…)
@@ -102,7 +102,7 @@ Full release notes: [CHANGELOG.md](CHANGELOG.md) — 16 条发布记录（含 0.
 
 - **Trigger, observe, advance, take over — nothing more**: A2A orchestration is server-driven; the plugin never interferes with node hand-offs; takeovers use session primitives for atomic hand-over and hand-back
 - **Scope is the first gate**: of the 219 contract commands, the 28 session-only ones (git-repo etc.) always 403 for external tokens — excluded outright; `tko_` takeover credentials are repo_session-only and revoked on completion
-- **UI-less compensation**: tool responses are Markdown tables / node chains / event timelines; `wait_task` polls with stage summaries and timeout hints
+- **Agent-native output**: tool responses are Markdown tables / node chains / event timelines; `wait_task` polls with stage summaries and timeout hints
 
 ## Development & testing
 
