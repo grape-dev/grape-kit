@@ -19,6 +19,12 @@ const str = (desc) => ({ type: 'string', description: desc })
 const num = (desc) => ({ type: 'number', description: desc })
 const bool = (desc) => ({ type: 'boolean', description: desc })
 
+const WARNING_HINTS = {
+  remote_may_still_run: '远程分支可能已被云端 worker 推送并开过 MR：先查远端分支与 issue/MR，避免破坏性强推（分支/MR 冲突必须先裁决）。',
+  node_already_advanced: '链已交棒至下一节点：本次接管与下一节点并行，交回前先看 issue 事件，避免重复实现。',
+}
+const warningHint = (w) => WARNING_HINTS[String(w).split(':')[0].trim()] || ''
+
 const OWNER_REPO_NUM = {
   owner: str('仓库归属（owner）'),
   repo: str('仓库名（repo）'),
@@ -635,9 +641,19 @@ export const TOOLS = [
       lines.push('- 洁净机器回推路径：① 用户在本机配置用户级 PAT 或 SSH key；② `grape git push origin <branch>`（凭据注入通道）；③ 或让用户在其已有凭据的机器上推送同一提交。不要假设 tko_ 能 push。')
       const instr = b.instructions || {}
       if (instr.prompt) lines.push('', '**接管任务 Prompt（尾部）**', '', String(instr.prompt).slice(-3000))
-      if (Array.isArray(json.warnings) && json.warnings.length) {
-        lines.push('', `**警告（${json.warnings.length}）**:`)
-        for (const w of json.warnings.slice(0, 5)) lines.push(`- ${String(w).slice(0, 150)}`)
+      const warnings = Array.isArray(json.warnings) ? json.warnings : []
+      if (warnings.length) {
+        // 前置检查清单：全量透出（不取前 5、不截断）——警告是用户动手前的裁决输入，不是装饰
+        lines.push('', `**前置检查清单（平台警告 ${warnings.length} 条，逐条裁决后再动手）**`, '')
+        warnings.forEach((w, i) => {
+          const text = String(w)
+          lines.push(`- [ ] \`${i + 1}\` ${text}`)
+          const hint = warningHint(text)
+          if (hint) lines.push(`      裁决：${hint}`)
+        })
+        if (warnings.some((w) => /remote_may_still_run/i.test(String(w)))) {
+          lines.push('', '**分叉裁决 playbook**：目标分支可能已被云端 worker 推送并开过 MR。动手前先 `git ls-remote origin <branch>` 并查 issue 事件/MR 列表，确认远端已有提交后按「复用远端分支（推荐）/ rebase 后强推（需用户确认）/ 另起分支」三选一裁决。完整裁决表见 `docs/20261114-takeover-architecture.md#分叉裁决-playbook`。')
+        }
       }
       lines.push('', '_下一步：本地继续该节点工作 → grape_takeover_progress 回报 → grape_takeover_finish 交回（勿再调用 grape_cancel_issue）。_')
       return lines.join('\n')

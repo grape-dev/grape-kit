@@ -27,6 +27,8 @@ description: |
 
 平台具备 takeover API（`POST /api/takeover/sessions` 返回 200 即支持）时，接管走会话原语，**链不断**：
 
+> **动手前先读「前置检查清单」**：`grape_takeover_start` 的 warnings 全量呈现（含 `remote_may_still_run`）。远端分支可能已有云端提交/已开 MR，按「复用远端分支（推荐）→ rebase 后强推（需用户确认）→ 另起分支」三选一裁决，禁止裸 `--force`。完整 playbook：[docs/20261114-takeover-architecture.md](../docs/20261114-takeover-architecture.md)。
+
 1. `grape_takeover_start(owner, repo, number[, agent_type])` —— 原子让渡：云端任务停、本地接手、签发 tko_ 凭据（12h）、返回完整上下文与服务端渲染脚本。**不要**再调用 `grape_cancel_issue`。
    - tko_ 只有 repo_session 能力：可继续节点工作、回报进度，**不含 git 凭据注入**；洁净机器回推需自备用户级 PAT / `grape git` 凭据（详见 `grape_takeover_start` 返回的「push 能力边界」）。
 2. 本地继续该节点工作；关键动作后 `grape_takeover_progress(session_id, summary)` 回报（云端面板可见）。
