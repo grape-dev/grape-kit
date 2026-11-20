@@ -1,9 +1,12 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs'
+import { createRequire } from 'node:module'
+import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+const require = createRequire(import.meta.url)
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const read = (p) => readFileSync(join(ROOT, p), 'utf8')
 
@@ -132,5 +135,67 @@ test('M4 Node 版接管脚本可执行（--help 自述用法）', async () => {
     const r = spawnSync(process.execPath, [p, '--help'], { encoding: 'utf8', timeout: 10_000 })
     assert.equal(r.status, 0, `${name}.mjs --help 应成功：${r.stderr}`)
     assert.match(r.stdout, /用法|usage/i, `${name}.mjs 应输出用法`)
+  }
+})
+
+/* ── M5（P1-6 / P2）：doctor 凭据来源、401 动态 baseUrl、Windows 文档 ── */
+
+test('M5 resolveCredentials 标注当前生效凭据来源', async () => {
+  const { resolveCredentials } = await import('../src/api.mjs')
+  const ISO = { GRAPE_AUTH_FILE: '/nonexistent/gk-test-auth.json' }
+  assert.equal(resolveCredentials({ ...ISO, GRAPE_API_TOKEN: 'grape_fake' }).source, 'env:GRAPE_API_TOKEN')
+  assert.equal(resolveCredentials({ ...ISO, GRAPE_API_TOKEN_ONCE: 'grape_once_fake' }).source, 'env:GRAPE_API_TOKEN_ONCE')
+  const dir = mkdtempSync(join(tmpdir(), 'gk-src-'))
+  try {
+    const cfg = join(dir, 'config.json')
+    writeFileSync(cfg, '{"token":"grape_from_file","base_url":"https://file.example"}')
+    const byFile = resolveCredentials({ GRAPE_AUTH_FILE: cfg })
+    assert.equal(byFile.source, `file:${cfg}`)
+    assert.equal(byFile.baseUrl, 'https://file.example')
+    assert.equal(resolveCredentials(ISO).source, '')
+  } finally { rmSync(dir, { recursive: true, force: true }) }
+})
+
+test('M5 401 提示按实际 GRAPE_BASE_URL 生成', async () => {
+  const { hintFor } = await import('../src/api.mjs')
+  const hint = hintFor(401, { baseUrl: 'https://grape.internal.example/' })
+  assert.match(hint, /https:\/\/grape\.internal\.example\/app\/#account\/profile/, '应指向实际实例地址')
+  assert.ok(!hint.includes('www.grapedev.cn'), '自部署实例不应被指向生产域名')
+})
+
+test('M5 doctor 输出当前生效凭据来源（env / 文件 / 未配置）', () => {
+  const { spawnSync } = require('node:child_process')
+  const h = mkdtempSync(join(tmpdir(), 'gk-doc-'))
+  try {
+    const base = { HOME: h, GRAPE_KIT_SKIP_UPDATE_CHECK: '1', GRAPE_BASE_URL: 'https://self.example' }
+    const byEnv = spawnSync(process.execPath, [join(ROOT, 'grape-kit.mjs'), 'doctor'], {
+      encoding: 'utf8', env: { ...base, GRAPE_API_TOKEN: 'grape_fake_for_test' },
+    })
+    assert.equal(byEnv.status, 0, byEnv.stderr)
+    assert.match(byEnv.stdout, /当前生效凭据来源/)
+    assert.match(byEnv.stdout, /环境变量 GRAPE_API_TOKEN/)
+
+    const cfg = join(h, 'auth.json')
+    writeFileSync(cfg, '{"token":"grape_from_file","base_url":"https://file.example"}')
+    const byFile = spawnSync(process.execPath, [join(ROOT, 'grape-kit.mjs'), 'doctor'], {
+      encoding: 'utf8', env: { ...base, GRAPE_AUTH_FILE: cfg },
+    })
+    assert.match(byFile.stdout, /当前生效凭据来源/, '文件通道同样要给出来源')
+    assert.match(byFile.stdout, new RegExp(cfg.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), '应显示生效的配置文件路径')
+
+    const none = spawnSync(process.execPath, [join(ROOT, 'grape-kit.mjs'), 'doctor'], {
+      encoding: 'utf8', env: { ...base, GRAPE_AUTH_FILE: join(h, 'missing.json') },
+    })
+    assert.match(none.stdout, /当前生效凭据来源/)
+    assert.match(none.stdout, /未配置/)
+  } finally { rmSync(h, { recursive: true, force: true }) }
+})
+
+test('M5 Windows 文档三条：编码 / BOM / setx（README + AGENTS）', () => {
+  for (const file of ['README.zh.md', 'README.md', 'AGENTS.md']) {
+    const text = read(file)
+    assert.match(text, /GBK/, `${file} 应说明 GBK 解码乱码`)
+    assert.match(text, /BOM/, `${file} 应说明 config.json BOM`)
+    assert.match(text, /setx/, `${file} 应说明 setx 不传播需重启会话`)
   }
 })
