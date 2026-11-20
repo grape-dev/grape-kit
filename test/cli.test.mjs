@@ -64,7 +64,9 @@ test('waitTask 轮询到终态返回', async () => {
   try {
     const bin = fakeBin(dir)
     const seq = 8000 + Math.floor(Math.random() * 1000) // 随机 seq 避免计数器文件跨次运行污染
-    const r = await waitTask(seq, { timeoutSec: 5, intervalSec: 0.05, opts: { bin, env: env() } })
+    // scope=本测试进程 pid：计数文件跨进程隔离，杜绝撞历史运行残留导致的偶发污染
+    const scopedEnv = { ...env(), GRAPE_FAKE_SCOPE: String(process.pid) }
+    const r = await waitTask(seq, { timeoutSec: 5, intervalSec: 0.05, opts: { bin, env: scopedEnv } })
     assert.equal(r.json.seq, seq)
     assert.equal(r.json.status, 'completed')
     assert.ok(r.polls >= 2)
