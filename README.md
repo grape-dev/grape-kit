@@ -12,7 +12,7 @@
 
 <p align="center">
   <strong>Grape DevOps pipeline tools × mainstream agents</strong><br>
-  Trigger, observe and advance Grape multi-agent DevOps pipelines from agents like opencode / hermes / codex,<br>
+  Trigger, observe and advance Grape multi-agent DevOps pipelines from agents like opencode / codex / CodeArts,<br>
   and atomically hand over cloud nodes to your local machine via <strong>takeover sessions</strong> — the chain never breaks, results return in structured form.<br>
   <a href="https://www.npmjs.com/package/@grape-dev/grape-kit">npm</a> · <a href="https://www.grapedev.cn/">Grape website</a> · <a href="https://gitcode.com/grape-dev/grape-kit">Source</a>
 </p>
@@ -22,7 +22,7 @@
 Grape-kit helps **mainstream agents** (opencode / codex / CodeArts / WorkBuddy / openclaw, etc.) use [Grape](https://gitcode.com/grape-dev/grape) safely and in a structured way — an AI-native DevOps platform with multi-agent pipelines (vod → issue → coding → qa → sre).
 
 ```
-agent (MCP stdio: opencode / codex…; skill-guided bash: hermes…)
+agent (MCP stdio: opencode / codex / CodeArts / WorkBuddy…)
   → grape-kit (36 tools · native HTTP · Markdown rendering · initialize-instruction bootstrap)
     → grape server (pipelines / events / takeover session API; CLI only as 401 fallback)
 ```
@@ -58,7 +58,7 @@ Full lifecycle sequence and architecture: [docs/20261114-takeover-architecture.m
 # Prerequisite: Node >= 20 (no Python needed — native HTTP since v0.3.0)
 export GRAPE_BASE_URL=https://www.grapedev.cn
 export GRAPE_API_TOKEN=grape_xxx      # Grape WebUI → Settings → API Key
-# Agents that sanitize env (hermes etc.): file channel ~/.grape/config.json {"token":"grape_xxx","base_url":"..."}
+# Agents that sanitize env: file channel ~/.grape/config.json {"token":"grape_xxx","base_url":"..."}
 
 # Install (writes the opencode mcp.grape entry + skill copy + receipt, idempotent with backup)
 npx -y @grape-dev/grape-kit install --target opencode
@@ -76,7 +76,6 @@ Then just talk to your agent:
 > Can't finish this node — give it back to the cloud, keep the chain            ← takeover_abort
 ```
 
-**hermes** (no MCP client): copy `skills/grape-remote/` into its skill directory; the agent calls the `grape` CLI via bash.
 **codex**: add `[mcp_servers.grape]` (command/args/env) to `~/.codex/config.toml` — see the usage guide.
 **CodeArts Agent** (华为云码道): `npx -y @grape-dev/grape-kit install --target codearts` — writes the `mcpServers` entry into `~/.codeartsdoer/codearts_cli.jsonc` (global) or `<project>/.codeartsdoer/codearts_cli.jsonc` (project-level). After install, restart the entry in CodeArts: 设置 → MCP工具 → 已安装 → grape-kit → 「重启」. Credentials via environment variables only.
 **openclaw (ClawHub)**: install from the marketplace — `openclaw plugins install clawhub:grape-kit@latest` (bundle-plugin; the `clawhub:` prefix is the source, matching devkit's listing form). Verify with the plugin's MCP tools list (36 tools). Marketplace page: https://clawhub.ai/grape-dev/plugins/grape-kit
