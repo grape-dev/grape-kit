@@ -5,7 +5,7 @@
 <p align="center">
   <a href="https://www.npmjs.com/package/@grape-dev/grape-kit"><img src="https://img.shields.io/npm/v/@grape-dev/grape-kit" alt="npm version"></a>
   <a href="https://www.npmjs.com/package/@grape-dev/grape-kit"><img src="https://img.shields.io/npm/dm/@grape-dev/grape-kit" alt="npm downloads"></a>
-  <a href="https://gitcode.com/grape-dev/grape-kit/blob/dev/LICENSE"><img src="https://img.shields.io/npm/l/@grape-dev/grape-kit" alt="License: MIT"></a>
+  <a href="https://gitcode.com/grape-dev/grape-kit/blob/main/LICENSE"><img src="https://img.shields.io/npm/l/@grape-dev/grape-kit" alt="License: MIT"></a>
   <img src="https://img.shields.io/node/v/@grape-dev/grape-kit" alt="node">
   <a href="https://www.grapedev.cn/"><img src="https://img.shields.io/badge/grape-www.grapedev.cn-2563eb" alt="grape"></a>
 </p>
@@ -23,11 +23,11 @@
 
 ```
 agent 宿主（MCP stdio：opencode / CodeArts / WorkBuddy…；其他 MCP 能力宿主可手动接线）
-  → grape-kit（36 工具 · 原生 HTTP 直连 · Markdown 渲染 · initialize instructions 自举）
+  → grape-kit（39 工具 · 原生 HTTP 直连 · Markdown 渲染 · initialize instructions 自举）
     → grape 服务端（流水线 / events / takeover 会话 API；CLI 仅 401 回退用）
 ```
 
-## 能力总览（36 工具）
+## 能力总览（39 工具）
 
 - **流水线遥控**：触发（唯一 A2A 入口）· 等待任务 · 任务状态 · 取消/恢复（带决策门）
 - **需求与事件**：列表/详情/事件流/我的需求 · 建单 · 结构化交回模板
@@ -102,7 +102,7 @@ npx -y @grape-dev/grape-kit uninstall --target workbuddy   # 移除条目+skill+
 openclaw plugins install clawhub:grape-kit@latest
 ```
 
-`clawhub:` 为来源前缀（与 devkit 上架同款）。装后用插件 MCP 工具列表验证（36 工具）。市场页：https://clawhub.ai/grape-dev/plugins/grape-kit
+`clawhub:` 为来源前缀（与 devkit 上架同款）。装后用插件 MCP 工具列表验证（39 工具）。市场页：https://clawhub.ai/grape-dev/plugins/grape-kit
 
 ### 版本查询与更新（全宿主通用）
 

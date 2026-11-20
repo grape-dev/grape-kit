@@ -4,12 +4,22 @@ on:
   push:
     branches: [main, dev]
   pull_request:
-    branches: [dev]
+    branches: [main, dev]
+
+# 公开仓库：默认最小权限，任何步骤都不需要写权限（fork PR 亦安全）
+permissions:
+  contents: read
+
+# 同一分支连续推送时取消上一轮，省资源、避免旧结果误导
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         node-version: [20, 22]
     steps:
@@ -17,6 +27,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node-version }}
-      - run: npm install
+          cache: npm
+      - run: npm ci
       - run: npm test
       - run: npm run smoke
