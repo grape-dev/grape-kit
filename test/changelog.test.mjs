@@ -162,6 +162,23 @@ test('README 版本历史节链接 CHANGELOG.md、含 0.3.3/0.3.6/0.3.7/0.3.8 �
   assert.ok(!/12 个已发布版本|12 条发布记录/.test(section), '不得再写「12 个已发布版本」')
 })
 
+test('0.3.9 发版候选：package.json、CHANGELOG 首节与 README 双语行三处一致', () => {
+  const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'))
+  assert.equal(pkg.version, '0.3.9', 'package.json 应 bump 到 0.3.9（承运 #12 端云接管全链路硬化）')
+  const all = sections(changelog())
+  assert.equal(all[0].version, '0.3.9', 'CHANGELOG 首节应为 0.3.9 候选节')
+  assert.match(all[0].date, /^\d{4}-\d{2}-\d{2}$/, '0.3.9 候选节应带日期')
+  assert.match(all[0].body, /端云接管|takeover/, '0.3.9 节应含 #12 端云接管硬化条目')
+  for (const f of ['README.md', 'README.zh.md']) {
+    const md = readFileSync(join(ROOT, f), 'utf8')
+    const section = mdSection(md, '版本历史') || mdSection(md, 'Version history')
+    assert.ok(section, `${f} 应保留版本历史节`)
+    const row = section.split('\n').find((l) => /^\| 0\.3\.9 \|/.test(l))
+    assert.ok(row, `${f} 版本历史表应含 0.3.9 行`)
+    assert.match(row, /\| 2026-11-20 \|/, `${f} 0.3.9 行日期应为候选发布日 2026-11-20`)
+  }
+})
+
 test('package.json files 含 CHANGELOG.md（随 npm tarball 发布）', () => {
   const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'))
   assert.ok(Array.isArray(pkg.files), 'package.json 应有 files 白名单')
