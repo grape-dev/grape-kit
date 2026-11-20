@@ -12,17 +12,17 @@
 
 <p align="center">
   <strong>Grape DevOps 流水线工具 × 主流 Agent</strong><br>
-  在 opencode / hermes / codex 等终端 agent 里触发、观察、推进 Grape 多 agent DevOps 流水线，<br>
+  在 opencode / CodeArts / WorkBuddy 等 Agent 里触发、观察、推进 Grape 多 agent DevOps 流水线，<br>
   并以<strong>接管会话（takeover）原语</strong>把云端节点原子让渡到本地——链不断、成果结构化交回。<br>
   <a href="https://www.npmjs.com/package/@grape-dev/grape-kit">npm</a> · <a href="https://www.grapedev.cn/">Grape 官网</a> · <a href="https://gitcode.com/grape-dev/grape-kit">源码仓库</a>
 </p>
 
 ---
 
-帮助各类 **Agent**（opencode / hermes / codex 等）安全、结构化地使用 [Grape](https://gitcode.com/grape-dev/grape) —— 多 agent 协作的 AI Native DevOps 平台（vod → issue → coding → qa → sre）。
+帮助各类 **Agent**（opencode / CodeArts / WorkBuddy 等）安全、结构化地使用 [Grape](https://gitcode.com/grape-dev/grape) —— 多 agent 协作的 AI Native DevOps 平台（vod → issue → coding → qa → sre）。
 
 ```
-agent 宿主（MCP stdio：opencode / codex…；skill 引导 bash：hermes…）
+agent 宿主（MCP stdio：opencode / CodeArts / WorkBuddy…；其他 MCP 能力宿主可手动接线）
   → grape-kit（36 工具 · 原生 HTTP 直连 · Markdown 渲染 · initialize instructions 自举）
     → grape 服务端（流水线 / events / takeover 会话 API；CLI 仅 401 回退用）
 ```
@@ -49,7 +49,7 @@ agent 宿主（MCP stdio：opencode / codex…；skill 引导 bash：hermes…�
 ```bash
 export GRAPE_BASE_URL=https://www.grapedev.cn
 export GRAPE_API_TOKEN=grape_xxx      # API Key：https://www.grapedev.cn/app/#account/profile
-# 会清洗 env 的宿主（hermes 等）：写文件通道 ~/.grape/config.json {"token":"grape_xxx","base_url":"..."}
+# 环境变量被清洗的宿主：写文件通道 ~/.grape/config.json {"token":"grape_xxx","base_url":"..."}
 ```
 
 ### OpenCode
@@ -64,23 +64,6 @@ npx -y @grape-dev/grape-kit install --target opencode
 npx -y @grape-dev/grape-kit doctor --target opencode --probe   # 逐项自检
 npm install -g @grape-dev/grape-kit             # 更新（更新后重启会话）
 npx -y @grape-dev/grape-kit uninstall --target opencode   # 卸载（备份配置）
-```
-
-### Codex
-
-Codex 暂无安装器 target——手动在 `~/.codex/config.toml` 配置 MCP server：
-
-```toml
-[mcp_servers.grape]
-command = "node"
-args = ["<路径>/grape-kit-mcp.mjs"]   # 例如从克隆仓库或已安装副本指向
-env = { GRAPE_BASE_URL = "https://www.grapedev.cn", GRAPE_API_TOKEN = "grape_xxx" }
-```
-
-**改完重启 Codex 会话**。用 MCP 工具列表验证（36 工具）。
-
-```bash
-# 更新/卸载：手动管理 config.toml 条目与 mjs 副本
 ```
 
 ### CodeArts Agent（华为云码道）

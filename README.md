@@ -12,17 +12,17 @@
 
 <p align="center">
   <strong>Grape DevOps pipeline tools × mainstream agents</strong><br>
-  Trigger, observe and advance Grape multi-agent DevOps pipelines from agents like opencode / codex / CodeArts,<br>
+  Trigger, observe and advance Grape multi-agent DevOps pipelines from agents like opencode / CodeArts / WorkBuddy,<br>
   and atomically hand over cloud nodes to your agent via <strong>cloud-local collaboration</strong> — takeover sessions pull cloud nodes into your agent, results return to the platform in structured form, and the pipeline chain never breaks.<br>
   <a href="https://www.npmjs.com/package/@grape-dev/grape-kit">npm</a> · <a href="https://www.grapedev.cn/">Grape website</a> · <a href="https://gitcode.com/grape-dev/grape-kit">Source</a>
 </p>
 
 ---
 
-Grape-kit helps **mainstream agents** (opencode / codex / CodeArts / WorkBuddy / openclaw, etc.) use [Grape](https://gitcode.com/grape-dev/grape) safely and in a structured way — an AI-native DevOps platform with multi-agent pipelines (vod → issue → coding → qa → sre).
+Grape-kit helps **mainstream agents** (opencode / CodeArts / WorkBuddy / openclaw, etc.) use [Grape](https://gitcode.com/grape-dev/grape) safely and in a structured way — an AI-native DevOps platform with multi-agent pipelines (vod → issue → coding → qa → sre).
 
 ```
-agent (MCP stdio: opencode / codex / CodeArts / WorkBuddy…)
+agent (MCP stdio: opencode / CodeArts / WorkBuddy…; other MCP-capable agents wire up manually)
   → grape-kit (36 tools · native HTTP · Markdown rendering · initialize-instruction bootstrap)
     → grape server (pipelines / events / takeover session API; CLI only as 401 fallback)
 ```
@@ -49,7 +49,7 @@ Prerequisites: **Node >= 20** (no Python needed — native HTTP since v0.3.0). C
 ```bash
 export GRAPE_BASE_URL=https://www.grapedev.cn
 export GRAPE_API_TOKEN=grape_xxx      # API Key: https://www.grapedev.cn/app/#account/profile
-# Agents that sanitize env: file channel ~/.grape/config.json {"token":"grape_xxx","base_url":"..."}
+# Agents that sanitize env vars: file channel ~/.grape/config.json {"token":"grape_xxx","base_url":"..."}
 ```
 
 ### OpenCode
@@ -64,23 +64,6 @@ npx -y @grape-dev/grape-kit install --target opencode
 npx -y @grape-dev/grape-kit doctor --target opencode --probe
 npm install -g @grape-dev/grape-kit             # update (then restart the session)
 npx -y @grape-dev/grape-kit uninstall --target opencode
-```
-
-### Codex
-
-Codex has no installer target yet — wire it up manually by adding the MCP server to `~/.codex/config.toml`:
-
-```toml
-[mcp_servers.grape]
-command = "node"
-args = ["<path-to>/grape-kit-mcp.mjs"]   # e.g. from a cloned repo, or an installed copy
-env = { GRAPE_BASE_URL = "https://www.grapedev.cn", GRAPE_API_TOKEN = "grape_xxx" }
-```
-
-**Restart the Codex session** after editing. Verify with the MCP tools list (36 tools).
-
-```bash
-# update / uninstall: manage the config.toml entry and the mjs copy manually
 ```
 
 ### CodeArts Agent (华为云码道)
