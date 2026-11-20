@@ -687,6 +687,11 @@ export const TOOLS = [
       const instr = b.instructions || {}
       if (instr.prompt) lines.push('', '**接管任务 Prompt（尾部）**', '', String(instr.prompt).slice(-3000))
       const warnings = Array.isArray(json.warnings) ? json.warnings : []
+      // 分支/MR 冲突前置项：不依赖上游字段——无论有无 warnings 都先让接手者裁决远端状态
+      lines.push('', '**分支/MR 前置检查**', '')
+      lines.push('- [ ] `git ls-remote origin <branch>` 确认目标分支远端已有提交（云端 worker 可能已推送）')
+      lines.push('- [ ] 查 issue 事件 / MR 列表，确认是否已有 MR 及其状态')
+      lines.push(`- 裁决：${warnings.some((w) => /remote_may_still_run/i.test(String(w))) ? '⚠️ 平台已警告 remote_may_still_run，' : ''}复用远端分支（推荐）/ rebase 后强推（需用户确认）/ 另起分支；禁止裸 \`--force\`。完整分叉裁决 playbook 见 \`docs/20261114-takeover-architecture.md#分叉裁决-playbook\``)
       if (warnings.length) {
         // 前置检查清单：全量透出（不取前 5、不截断）——警告是用户动手前的裁决输入，不是装饰
         lines.push('', `**前置检查清单（平台警告 ${warnings.length} 条，逐条裁决后再动手）**`, '')
@@ -696,9 +701,6 @@ export const TOOLS = [
           const hint = warningHint(text)
           if (hint) lines.push(`      裁决：${hint}`)
         })
-        if (warnings.some((w) => /remote_may_still_run/i.test(String(w)))) {
-          lines.push('', '**分叉裁决 playbook**：目标分支可能已被云端 worker 推送并开过 MR。动手前先 `git ls-remote origin <branch>` 并查 issue 事件/MR 列表，确认远端已有提交后按「复用远端分支（推荐）/ rebase 后强推（需用户确认）/ 另起分支」三选一裁决。完整裁决表见 `docs/20261114-takeover-architecture.md#分叉裁决-playbook`。')
-        }
       }
       lines.push('', '_下一步：本地继续该节点工作 → grape_takeover_progress 回报 → grape_takeover_finish 交回（勿再调用 grape_cancel_issue）。_')
       return lines.join('\n')

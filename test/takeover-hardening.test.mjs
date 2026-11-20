@@ -206,3 +206,12 @@ test('M5 MCP initialize instructions 同步接管边界（凭据/节点对准）
   assert.match(INSTRUCTIONS, /用户级凭据/)
   assert.match(INSTRUCTIONS, /agent_mismatch/)
 })
+
+test('M3 takeover_start 始终给出分支/MR 前置检查项（无 warnings 时也在）', async () => {
+  const { findTool } = await import('../src/tools.mjs')
+  const out = findTool('grape_takeover_start').render({ takeover_id: 'tkos_x', bundle: {} })
+  assert.match(out, /分支\/MR 前置检查/, '无 warnings 也应给出分支/MR 前置检查')
+  assert.match(out, /ls-remote/, '应给出远端分支检查命令')
+  assert.match(out, /已有 MR|MR 列表/, '应要求确认已有 MR')
+  assert.match(out, /禁止裸 `--force`|禁止裸 --force/, '应禁止裸强推')
+})
