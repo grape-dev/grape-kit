@@ -19,6 +19,7 @@ import { join, dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
 import { checkUpdateStatus, formatUpdateNotice } from './src/update-check.mjs'
+import { resolveCredentials } from './src/api.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const DEFAULT_SCRIPT = resolve(HERE, 'grape-kit-mcp.mjs')
@@ -61,6 +62,16 @@ const cliCheck = () => {
   // v0.3.0 起原生 HTTP 直连，CLI 仅 401 回退通道——缺失降级为提示而非 FAIL
   return [`grape CLI（${bin}，可选回退通道）`, which.status === 0 ? `ok（${String(which.stdout).trim()}）` : '未安装（可选：pip install git+https://gitcode.com/grape-dev/grape-cli.git）']
 }
+/** 当前生效凭据来源：env > 一次性 env > 文件通道；用户看不到优先级结果，doctor 必须显式给出 */
+function credentialSourceCheck() {
+  const c = resolveCredentials(process.env)
+  const label =
+    c.source === 'env:GRAPE_API_TOKEN' ? '环境变量 GRAPE_API_TOKEN'
+      : c.source === 'env:GRAPE_API_TOKEN_ONCE' ? '一次性 env GRAPE_API_TOKEN_ONCE'
+        : String(c.source).startsWith('file:') ? `文件 ${String(c.source).slice('file:'.length)}`
+          : ''
+  return ['当前生效凭据来源', c.token ? `ok（${label}；base_url=${c.baseUrl}，不回显 token）` : '未配置（FAIL）：看上一行修复动作']
+}
 const envChecks = () => [
   ['GRAPE_BASE_URL', process.env.GRAPE_BASE_URL ? `ok（${process.env.GRAPE_BASE_URL}）` : '未设置（FAIL）：export GRAPE_BASE_URL=https://www.grapedev.cn'],
   ['GRAPE_API_TOKEN', process.env.GRAPE_API_TOKEN
@@ -68,6 +79,7 @@ const envChecks = () => [
     : existsSync(join(homedir(), '.grape', 'config.json'))
       ? (() => { try { const c = JSON.parse(readFileSync(join(homedir(), '.grape', 'config.json'), 'utf8')); return c.token ? 'ok（文件通道 ~/.grape/config.json）' : '未设置（FAIL）' } catch { return '未设置（FAIL）：~/.grape/config.json 解析失败' } })()
       : '未设置（FAIL）：打开 https://www.grapedev.cn/app/#account/profile 生成用户级 API Key（自部署实例用「你的地址/app/#account/profile」），用环境变量或 ~/.grape/config.json 提供'],
+  credentialSourceCheck(),
 ]
 const baseChecks = () => [nodeCheck(), ...envChecks()]
 /** 单宿主详情与裸 doctor 汇总共用的检查序列（CLI 位于 node 之后），避免位置切片耦合 */

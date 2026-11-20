@@ -27,11 +27,21 @@ description: |
 
 平台具备 takeover API（`POST /api/takeover/sessions` 返回 200 即支持）时，接管走会话原语，**链不断**：
 
+> **动手前先读「前置检查清单」**：`grape_takeover_start` 的 warnings 全量呈现（含 `remote_may_still_run`）。远端分支可能已有云端提交/已开 MR，按「复用远端分支（推荐）→ rebase 后强推（需用户确认）→ 另起分支」三选一裁决，禁止裸 `--force`。完整 playbook：[docs/20261114-takeover-architecture.md](../docs/20261114-takeover-architecture.md)。
+
 1. `grape_takeover_start(owner, repo, number[, agent_type])` —— 原子让渡：云端任务停、本地接手、签发 tko_ 凭据（12h）、返回完整上下文与服务端渲染脚本。**不要**再调用 `grape_cancel_issue`。
+   - tko_ 只有 repo_session 能力：可继续节点工作、回报进度，**不含 git 凭据注入**；洁净机器回推需自备用户级 PAT / `grape git` 凭据（详见 `grape_takeover_start` 返回的「push 能力边界」）。
 2. 本地继续该节点工作；关键动作后 `grape_takeover_progress(session_id, summary)` 回报（云端面板可见）。
-3. 完成后两阶段交回：先 `grape_takeover_finish(request_only=true, …)` 报告完成 → **用户确认** → 再 `grape_takeover_finish(…)` 正式交回（结构化产物，coding→qa 自动接力）。
+3. 完成后两阶段交回（**第二阶段 finish 必须用用户级凭据**）：
+   - **① request-finish**：`grape_takeover_finish(request_only=true, …)` 只报告完成与结构化产物，用 tko_ 接管凭据即可。
+   - **② 用户授权**：把结论 + 证据原样呈现给用户，在**对话中**取得明确确认。平台不提供任何 UI 确认按钮，不要指路 WebUI/前端页面。
+   - **③ finish**：用户确认后，由**用户级凭据（`grape_`）**的会话调用 `grape_takeover_finish(request_only=false, …)` 正式交回（结构化产物，coding→qa 自动接力）。tko_ 仅 repo_session 能力、不推进流水线，用它调 finish 会 403——这是凭据语义边界，不是权限不足。
 4. 中途放弃：`grape_takeover_abort(session_id, redispatch=true)` —— 当前节点重新派发回云端引擎，已完成的节点保留。
 5. 断连恢复：`grape_takeover_status(owner, repo, number)` 找回 session_id；单条查询带 `renew=true` 续期凭据。
+
+**节点对准约束**：`grape_takeover_start` 只能接管**当前活跃节点**；提前接管下一节点会返回 409 `agent_mismatch`。先 `grape_get_pipeline_info` 确认当前 running/takeover 节点；目标尚未活跃时按 60-120s 轮询，不要连打开 start。
+
+**脚本**：`grape_takeover_start` 会上报宿主 `host_os/host_arch/host_shell`，服务端据此渲染脚本资产（Windows 得 `.ps1`、Linux/macOS 得 `.sh`）；工具输出里 `{{CWD}}` 已替换为实际路径，可直接落地。平台未返回脚本资产时用随包分发的 Node 版 `skills/grape-remote/scripts/takeover/{report,request-finish,finish}.mjs`（Node ≥20，跨平台，token 只从 env 读取，不要写进 argv）。
 
 ### 路径二：cancel+context 旧路径（平台无 takeover API 时的回退）
 

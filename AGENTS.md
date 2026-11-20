@@ -17,6 +17,12 @@
 - **不得提交任何真实凭据**：token 一律走环境变量（`GRAPE_API_TOKEN`），测试用 fake 值
 - 真实服务端只读冒烟（`scripts/live-smoke.mjs`）需自备环境变量；会变更状态的 sweep 必须在自有测试载体上跑并显式传参
 
+## Windows 宿主注意
+
+1. **编码**：CLI/工具输出为 UTF-8，PowerShell 默认按 GBK 解码会乱码——`chcp 65001`，或把 `$OutputEncoding` / `[Console]::OutputEncoding` 设为 UTF-8。
+2. **BOM**：`~/.grape/config.json` 带 UTF-8 BOM 时 `JSON.parse` 失败——用无 BOM 保存（`Set-Content -Encoding utf8NoBOM`）。
+3. **setx 不传播**：`setx GRAPE_API_TOKEN ...` 只对新进程生效；当前宿主会话读不到，设置后必须重启 Agent 宿主（opencode / CodeArts / WorkBuddy）或重新登录终端。
+
 ## 结构速览
 
 - `src/`：核心实现（api / tools / server / render / cli / update-check）

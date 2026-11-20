@@ -13,11 +13,46 @@
  */
 import * as R from './render.mjs'
 import { hostname } from 'node:os'
+import { fileURLToPath } from 'node:url'
 import { api } from './api.mjs'
+
+/** kit 安装根（发布包含 skills/，Node 版接管脚本随 skill 副本分发） */
+const KIT_ROOT = fileURLToPath(new URL('..', import.meta.url)).replace(/[\\/]+$/, '')
+const fillCwd = (text, cwd) => String(text ?? '').replaceAll('{{CWD}}', cwd)
+/** 服务端渲染脚本（未来 host_os 字段）兼容：字符串 / 数组 / 对象三种形态，统一替换 {{CWD}} */
+function renderBundleScripts(scripts, cwd) {
+  if (!scripts) return null
+  const out = []
+  const pushText = (label, text) => {
+    const filled = fillCwd(text, cwd)
+    if (!filled) return
+    if (label) out.push(`# ${label}`)
+    out.push(...String(filled).split('\n'))
+  }
+  if (typeof scripts === 'string') pushText('', scripts)
+  else if (Array.isArray(scripts)) {
+    for (const s of scripts) {
+      if (typeof s === 'string') pushText('', s)
+      // 平台资产形态 {name, filename, ext, mode, exec, content}：文件名比 name 更能指导落地
+      else pushText(s.filename || s.name || s.os || s.platform || '', s.content || s.script || s.text || '')
+    }
+  } else if (typeof scripts === 'object') {
+    for (const [k, v] of Object.entries(scripts)) {
+      pushText(k, typeof v === 'string' ? v : (v?.content || v?.script || v?.text || ''))
+    }
+  }
+  return out.length ? out : null
+}
 
 const str = (desc) => ({ type: 'string', description: desc })
 const num = (desc) => ({ type: 'number', description: desc })
 const bool = (desc) => ({ type: 'boolean', description: desc })
+
+const WARNING_HINTS = {
+  remote_may_still_run: '远程分支可能已被云端 worker 推送并开过 MR：先查远端分支与 issue/MR，避免破坏性强推（分支/MR 冲突必须先裁决）。',
+  node_already_advanced: '链已交棒至下一节点：本次接管与下一节点并行，交回前先看 issue 事件，避免重复实现。',
+}
+const warningHint = (w) => WARNING_HINTS[String(w).split(':')[0].trim()] || ''
 
 const OWNER_REPO_NUM = {
   owner: str('仓库归属（owner）'),
@@ -603,6 +638,7 @@ export const TOOLS = [
       '原子动作：云端任务让渡给本地、签发 tko_ 接管凭据（12h 可续 24h）、返回完整接管上下文与按 host_os 渲染的脚本。' +
       '之后本地继续该节点工作，用 grape_takeover_progress 回报进度，完成用 grape_takeover_finish 携结构化产物交回，' +
       '或用 grape_takeover_abort 让渡回流水线（当前节点重新派发，链不断）。' +
+      '⚠️ push 能力边界：tko_ 仅 repo_session 能力，**不含 git 凭据注入**；洁净机器的回推路径见返回体。' +
       '⚠️ 需要平台支持 takeover API（404/无该工具能力时回退 grape_takeover_context + cancel 老路径）。',
     schema: {
       type: 'object',
@@ -627,12 +663,45 @@ export const TOOLS = [
       if (b.task && b.task.id) lines.push(`- 让渡的云端任务: ${b.task.id}（已停止）`)
       if (json.token_expires_at) lines.push(`- 凭据到期 epoch: ${json.token_expires_at}`)
       const ws = b.workspace || {}
+      const cwd = String(ws.cwd_hint || process.cwd())
       if (ws.cwd_hint) lines.push(`- 本地工作目录: ${ws.cwd_hint}`)
+      if (env.GRAPE_AUTH_FILE) lines.push(`- 凭据文件（路径占位符已渲染）: ${fillCwd(env.GRAPE_AUTH_FILE, cwd)}`)
+      lines.push('', '**push 能力边界（先读）**', '')
+      lines.push('- `tko_` 只覆盖 repo_session：可继续该节点工作、回报进度、`request-finish`；**不含 git 凭据注入**，不能直接 push。')
+      lines.push('- 本机已有用户级凭据（`grape git` 注入 / 自有 PAT / SSH key）→ 正常 commit & push；洁净机器必须先由用户配置其中一种。')
+      lines.push('- 洁净机器回推路径：① 用户在本机配置用户级 PAT 或 SSH key；② `grape git push origin <branch>`（凭据注入通道）；③ 或让用户在其已有凭据的机器上推送同一提交。不要假设 tko_ 能 push。')
+      const bundleScripts = renderBundleScripts(b.assets?.scripts ?? b.scripts, cwd)
+      if (bundleScripts) {
+        lines.push('', '**接管脚本（平台渲染，路径占位符已本地替换为实际路径）**', '', '```bash', ...bundleScripts, '```')
+      }
+      if (sid) {
+        const scriptDir = `${KIT_ROOT}/skills/grape-remote/scripts/takeover`
+        lines.push('', '**内置 Node 接管脚本（Node ≥20，Windows/Linux 通用；token 从 env 读取，不进 argv）**', '', '```bash')
+        lines.push('# 回报进度（tko_ 即可）')
+        lines.push(`node "${scriptDir}/report.mjs" --session ${sid} --summary "完成 <动作>，测试通过"`)
+        lines.push('# 报告完成（request-finish，tko_ 即可；之后等用户对话确认）')
+        lines.push(`node "${scriptDir}/request-finish.mjs" --session ${sid} --summary "<结论>" --evidence "npm test 全绿"`)
+        lines.push('# 正式交回（仅用户确认后；必须用用户级凭据 grape_，tko_ 会 403）')
+        lines.push(`node "${scriptDir}/finish.mjs" --session ${sid} --summary "<结论>" --evidence "npm test 全绿" --next-step "交给 QA"`)
+        lines.push('```')
+      }
       const instr = b.instructions || {}
       if (instr.prompt) lines.push('', '**接管任务 Prompt（尾部）**', '', String(instr.prompt).slice(-3000))
-      if (Array.isArray(json.warnings) && json.warnings.length) {
-        lines.push('', `**警告（${json.warnings.length}）**:`)
-        for (const w of json.warnings.slice(0, 5)) lines.push(`- ${String(w).slice(0, 150)}`)
+      const warnings = Array.isArray(json.warnings) ? json.warnings : []
+      // 分支/MR 冲突前置项：不依赖上游字段——无论有无 warnings 都先让接手者裁决远端状态
+      lines.push('', '**分支/MR 前置检查**', '')
+      lines.push('- [ ] `git ls-remote origin <branch>` 确认目标分支远端已有提交（云端 worker 可能已推送）')
+      lines.push('- [ ] 查 issue 事件 / MR 列表，确认是否已有 MR 及其状态')
+      lines.push(`- 裁决：${warnings.some((w) => /remote_may_still_run/i.test(String(w))) ? '⚠️ 平台已警告 remote_may_still_run，' : ''}复用远端分支（推荐）/ rebase 后强推（需用户确认）/ 另起分支；禁止裸 \`--force\`。完整分叉裁决 playbook 见 \`docs/20261114-takeover-architecture.md#分叉裁决-playbook\``)
+      if (warnings.length) {
+        // 前置检查清单：全量透出（不取前 5、不截断）——警告是用户动手前的裁决输入，不是装饰
+        lines.push('', `**前置检查清单（平台警告 ${warnings.length} 条，逐条裁决后再动手）**`, '')
+        warnings.forEach((w, i) => {
+          const text = String(w)
+          lines.push(`- [ ] \`${i + 1}\` ${text}`)
+          const hint = warningHint(text)
+          if (hint) lines.push(`      裁决：${hint}`)
+        })
       }
       lines.push('', '_下一步：本地继续该节点工作 → grape_takeover_progress 回报 → grape_takeover_finish 交回（勿再调用 grape_cancel_issue）。_')
       return lines.join('\n')

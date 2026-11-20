@@ -24,7 +24,8 @@ export const INSTRUCTIONS = `Grape DevOps 流水线遥控（多 agent：vod→is
 3. 触发后用 grape_wait_task 等终态（默认 300s 上限）；长任务改用 grape_get_task_status 复查。
 4. token 作用域：当前走用户级 GRAPE_API_TOKEN；git-repo 类会话命令不可用（403 属预期）。
 5. grape_get_issue_events 是云端打回/评论的事件回环入口：PR 被 QA 打回时从这里发现。
-6. 命令面不止这些工具时，优先用已注册工具；未经确认不要构造任何删除/终止类操作。`
+6. 命令面不止这些工具时，优先用已注册工具；未经确认不要构造任何删除/终止类操作。
+7. 接管（takeover）：tko_ 仅 repo_session、不含 git 凭据注入；finish 必须用用户级凭据且仅在用户对话确认后执行；takeover_start 只能对准当前活跃节点，409 agent_mismatch 时按 60-120s 轮询再试。`
 
 /**
  * 创建 server 实例（依赖注入便于测试）。

@@ -18,7 +18,8 @@ const out = (o) => process.stdout.write(JSON.stringify(o) + '\n')
 
 // wait 轮询测试：同 seq 第二次查询返回终态（计数器落临时文件）
 function pollStatus(seq) {
-  const key = `/tmp/opencode/fake-grape-${seq}.count`
+  const scope = process.env.GRAPE_FAKE_SCOPE || "noscope"
+  const key = `/tmp/opencode/fake-grape-${scope}-${seq}.count`
   let n = 0
   try { n = Number(readFileSync(key, 'utf8')) || 0 } catch {}
   mkdirSync('/tmp/opencode', { recursive: true })
