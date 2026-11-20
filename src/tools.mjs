@@ -266,6 +266,48 @@ export const TOOLS = [
     render: R.renderPipeline,
   },
 
+  {
+    name: 'grape_review_pass',
+    description: '审核通过：对处于 pending_review 的 issue 点审通过（节点放行、流水线继续）。若当前身份权限不足会如实返回 403 与指引。',
+    schema: { type: 'object', properties: { owner: str('仓库 owner'), repo: str('仓库名'), number: num('issue 编号'), comment: str('审批意见（可选）') }, required: ['owner', 'repo', 'number'] },
+    async native(a) {
+      return api.apiRequest('POST', `/api/issues/${a.owner}/${a.repo}/${a.number}/review-pass`, { body: { ...(a.comment ? { comment: a.comment } : {}) } })
+    },
+    render(json) {
+      return json && typeof json === 'object' && !json.detail
+        ? `审核通过 ✓（#${json.issue_number ?? ''}）——流水线将放行继续`
+        : R.fallbackJson(json)
+    },
+  },
+  {
+    name: 'grape_review_reject',
+    description: '审核打回：对 pending_review 的 issue 打回并附意见（打回后按平台规则重派整改）。⚠️ 用户决策层动作：打回前向用户确认。',
+    schema: { type: 'object', properties: { owner: str('仓库 owner'), repo: str('仓库名'), number: num('issue 编号'), comment: str('打回意见（必填，说明原因）') }, required: ['owner', 'repo', 'number', 'comment'] },
+    async native(a) {
+      return api.apiRequest('POST', `/api/issues/${a.owner}/${a.repo}/${a.number}/review-reject`, { body: { comment: a.comment } })
+    },
+    render(json) {
+      return json && typeof json === 'object' && !json.detail
+        ? `已打回（附意见）——流水线将按平台规则重派整改`
+        : R.fallbackJson(json)
+    },
+  },
+  {
+    name: 'grape_confirm_done',
+    description: '确认完成（开发者确认通道）：issue 实际已完成但单据未落终态时，以开发者身份确认收尾（效果等同 WebUI 确认完成/CLI issues confirm done）。⚠️ 用户决策层动作：确认前向用户核实成果真实存在。',
+    schema: { type: 'object', properties: { owner: str('仓库 owner'), repo: str('仓库名'), number: num('issue 编号'), confirmation: str('完成确认说明（必填）') }, required: ['owner', 'repo', 'number', 'confirmation'] },
+    async native(a) {
+      const list = await api.listIssues(a.owner, a.repo)
+      const row = (list.issues || []).find((i) => Number(i.issue_number) === Number(a.number))
+      if (!row) throw new Error(`未找到 #${a.number}`)
+      return api.apiRequest('POST', `/api/issues/${row.id}/confirm-done`, { body: { confirmation: a.confirmation } })
+    },
+    render(json) {
+      return json && typeof json === 'object' && !json.detail
+        ? `已确认完成 ✓ 单据收尾`
+        : R.fallbackJson(json)
+    },
+  },
   ...['cancel', 'resume', 'start'].map((action) => ({
     name: `grape_${action}_issue`,
     description:

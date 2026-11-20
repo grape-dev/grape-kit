@@ -33,10 +33,10 @@ test('initialize 返回 instructions（零调用自举）', async () => {
   await client.close()
 })
 
-test('tools/list 返回 36 个精选工具', async () => {
+test('tools/list 返回 39 个精选工具', async () => {
   const client = await pair()
   const { tools } = await client.listTools()
-  assert.equal(tools.length, 36)
+  assert.equal(tools.length, 39)
   assert.ok(tools.some((t) => t.name === 'grape_wait_task'))
   await client.close()
 })
@@ -50,7 +50,7 @@ test('tools/call 走注入的 runGrape 并渲染 Markdown', async () => {
   })
   const res = await client.callTool({ name: 'grape_list_issues', arguments: { owner: 'acme', repo: 'demo' } })
   assert.equal(res.isError, undefined)
-  assert.match(res.content[0].text, /\| 23 \| 实现登录功能/)
+  assert.match(res.content[0].text, /\| 23 \|.*实现登录功能/)
   await client.close()
 })
 

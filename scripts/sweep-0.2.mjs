@@ -65,7 +65,7 @@ const listCount = await new Promise((res) => {
   pending.set(listId, (msg) => res(msg.result.tools.length))
   proc.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: listId, method: 'tools/list' }) + '\n')
 })
-results.push(['tools/list 数量', listCount === 36 ? 'PASS' : 'FAIL', `${listCount} tools`])
+results.push(['tools/list 数量', listCount === 39 ? 'PASS' : 'FAIL', `${listCount} tools`])
 proc.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n')
 
 // 2 只读组

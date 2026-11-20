@@ -3,14 +3,14 @@ import assert from 'node:assert/strict'
 import { TOOLS, toolDefs, findTool } from '../src/tools.mjs'
 import * as R from '../src/render.mjs'
 
-test('工具面共 36 个且命名规范', () => {
-  assert.equal(TOOLS.length, 36)
+test('工具面共 39 个且命名规范', () => {
+  assert.equal(TOOLS.length, 39)
   for (const t of TOOLS) {
     assert.match(t.name, /^grape_[a-z_]+$/)
     assert.ok(t.description.length >= 12, `${t.name} 描述过短`)
     assert.equal(t.schema.type, 'object')
   }
-  assert.equal(toolDefs().length, 36)
+  assert.equal(toolDefs().length, 39)
   assert.ok(findTool('grape_trigger_pipeline'))
   assert.equal(findTool('nope'), null)
 })
@@ -47,7 +47,7 @@ test('wait_task 声明 waitBased', () => {
 
 test('render: issues 表格 / pipeline 节点链 / 打回事件', () => {
   const issues = R.renderIssues([{ number: 23, title: '实现登录', state: 'open', pipeline_status: 'coding' }])
-  assert.match(issues, /\| # \| 标题 \| 状态 \| 进度 \| 节点 \|/, 'issues 表含新进度/节点列')
+  assert.match(issues, /\| # \| 仓库 \| 标题 \| 状态 \| 进度 \| 节点 \|/, 'issues 表含仓库/进度/节点列')
   assert.match(issues, /\| 23 \|/, '行数据仍在')
   assert.match(issues, /●/, '进度点阵渲染')
   const pipe = R.renderPipeline({ scene: 'default', nodes: [

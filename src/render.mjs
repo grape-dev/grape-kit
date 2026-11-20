@@ -49,6 +49,7 @@ export function renderIssues(data) {
   if (!rows) return fallbackJson(data)
   return mdTable(rows.slice(0, 30), [
     { h: '#', v: (r) => r.number ?? r.issue_number ?? '' },
+    { h: '仓库', v: (r) => (r.repo_key ? String(r.repo_key).replace(/^gitcode:/, '').split('/')[1] ?? String(r.repo_key).replace(/^gitcode:/, '') : (r.repo ?? '')) },
     { h: '标题', v: (r) => (r.title ?? '').slice(0, 40) },
     { h: '状态', v: (r) => { const st = String(r.state ?? r.status ?? ''); const em = NODE_ICON[st.toLowerCase()] ?? (st === 'processing' ? '⚙️' : st === 'active' ? '🟢' : st === 'done' || st === 'completed' ? '✅' : st === 'cancelled' ? '🚫' : ''); return (em ? em + ' ' : '') + st } },
     { h: '进度', v: (r) => stageBar(r.stage ?? r.pipeline_status) },
