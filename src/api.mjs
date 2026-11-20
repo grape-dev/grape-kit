@@ -58,6 +58,9 @@ export function hintFor(status, ctx = {}) {
     }
     return '可能是 session_only 端点（外部用户 token 不可用，属预期边界）或权限不足'
   }
+  if (status === 409 && /agent_mismatch/i.test(String(ctx.detail || ''))) {
+    return '接管只能对准当前活跃节点：目标节点已不是当前活跃阶段（agent_mismatch）。先 grape_get_pipeline_info / grape_takeover_status 确认当前活跃节点，在其运行期间再接管；若目标还在等待，请轮询（建议 30-60s 一次）后再试，不要连打开 start。'
+  }
   return ''
 }
 
