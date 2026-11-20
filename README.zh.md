@@ -156,7 +156,7 @@ npx -y @grape-dev/grape-kit uninstall        # 卸载（宿主自动检测）
 
 ```bash
 npm install
-npm test        # 129 个单测（fake-grape 替身，不依赖真实服务端）
+npm test        # 131 个单测（fake-grape 替身，不依赖真实服务端）
 npm run smoke   # 真实 stdio JSON-RPC 往返：initialize → tools/list → tools/call
 ```
 
