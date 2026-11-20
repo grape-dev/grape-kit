@@ -93,7 +93,10 @@ test('CHANGELOG 版本节与 npm 已发布记录完全一致（倒序，无 0.2.
     PUBLISHED.map(([v]) => v),
     '已发布版本集合与顺序应与 npm 记录一致（倒序）',
   )
-  assert.equal(all[0].version, PUBLISHED[0][0], '最新发布版本节应排在首位')
+  assert.ok(
+    all[0].version === PUBLISHED[0][0] || /^0\.\d+\.\d+$/.test(all[0].version),
+    '首节应为最新发布版本，或形如 0.x.y 的待发布候选节',
+  )
   assert.ok(!all.some((s) => s.version === '0.2.3'), '0.2.3 未在 npm 发布，不得补造')
   // 非 npm 版本节只允许是尚未发布的 dev 候选版本，且必须排在全部已发布节之前
   const firstPublished = all.findIndex((s) => PUBLISHED.some(([v]) => v === s.version))
@@ -211,12 +214,12 @@ function runGenerator(dir, prev) {
 }
 
 test('gen-changelog 把新版本节插在标题与说明之后，历史节逐字保留', () => {
-  const dir = tempRepo('0.3.8')
+  const dir = tempRepo('0.3.9')
   try {
     const before = readFileSync(join(dir, 'CHANGELOG.md'), 'utf8')
     const after = runGenerator(dir, 'HEAD~1')
     assert.equal(preambleOf(after), preambleOf(before), '标题与说明应保持原位（新节不得压到标题之上）')
-    assert.match(historyOf(after), /^## 0\.3\.8 \(\d{4}-\d{2}-\d{2}\)/, '新版本节应为首个版本节')
+    assert.match(historyOf(after), /^## 0\.3\.9 \(\d{4}-\d{2}-\d{2}\)/, '新版本节应为首个版本节')
     assert.ok(after.endsWith(historyOf(before)), '历史版本节应逐字保留')
     assert.match(after, /^# Changelog$/m, '文件仍应以 Keep a Changelog 标题开头')
   } finally {

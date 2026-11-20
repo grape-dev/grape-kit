@@ -130,6 +130,7 @@ Full release notes: [CHANGELOG.md](CHANGELOG.md) — 18 条发布记录（含 0.
 
 | Version | Date | Highlights |
 |---|---|---|
+| 0.3.9 | 2026-11-20 | Takeover full-chain hardening (#12): takeover_start push-capability boundary + clean-machine push path, fork/MR adjudication playbook, full warnings surfaced; cross-platform Node takeover scripts (report/request-finish/finish); bundle scripts with local {{CWD}} rendering; doctor credential-source line; 401 hint uses actual GRAPE_BASE_URL; finish two-phase credential semantics unified; Windows coding/BOM/setx notes (unit tests 136) |
 | 0.3.8 | 2026-11-20 | Three review tools (grape_review_pass / grape_review_reject / grape_confirm_done — tools 36→39); issues table gains a "Repository" column; doctor recognizes ~/.grape/config.json file-channel credentials (no more false FAIL) |
 | 0.3.7 | 2026-11-20 | Graphical rendering for trigger/task_status (node-chain diagram on trigger; status card + progress bar + next-step hints); README Quick Start rebuilt in devkit style (per-agent sections, Capabilities overview, lifecycle command group); uninstall receipt cleanup; Codex/hermes removed from surfaced targets |
 | 0.3.6 | 2026-11-19 | Pipeline rendering supports the segments event-stream shape (real API payloads; no more raw-JSON fallback); stall status surfaced in the verdict line ("⚠️ suspected stall for N minutes"); segments-shape regression case added (unit tests 114→115) |

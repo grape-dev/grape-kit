@@ -4,6 +4,25 @@
 
 > 发布口径说明：npm 已发布版本不可回写——0.3.3 的 npm tarball 内 CHANGELOG 仅含本节（10 行）、README 尚无本节链接且把 0.3.2 记为 2026-11-14（commit 日）。因此「npm 页面与仓内 CHANGELOG 一致」自下一版发布起生效。
 
+## 0.3.9 (2026-11-20)
+
+> 本节为待发布候选（承运 #12 端云接管全链路硬化，dev 已合入、npm 尚未发布）；发布后以 `npm view @grape-dev/grape-kit time` 复核日期。
+
+### Added
+
+- 端云接管全链路硬化（#12 实测反馈：1 个闭环断点 + 6 项摩擦）：`takeover_start` 输出「push 能力边界」与洁净机器回推路径、分支/MR 冲突前置检查项 + 分叉裁决 playbook、warnings 全量透出；新增 Node ≥20 跨平台接管三脚本（`skills/grape-remote/scripts/takeover/`：report / request-finish / finish，Windows/Linux 通用，token 只走 env）；`doctor` 新增「当前生效凭据来源」诊断行；401 提示按实际 `GRAPE_BASE_URL` 动态生成；README×2 / AGENTS 补 Windows 编码 / BOM / setx 三条注意事项。
+- 单测面 131 → 136（新增 `takeover-hardening` 16 例 + `takeover-contract` 平台真实契约 5 例），smoke 39 工具全绿。
+
+### Changed
+
+- finish 两阶段凭据语义四处口径统一（SKILL / README×2 / 架构文档 / 403 文案）：`request-finish` 用接管 `tko_`、最终 `finish` 需用户级凭据，删除「前端确认按钮」指路。
+- `takeoverStart` 上报 `host_os` / `host_arch` / `host_shell`，服务端可据此渲染 `.ps1` 脚本；409 `agent_mismatch` 友好提示 + 60–120s 轮询建议（按平台错误 `code` 判别，detail 兜底）。
+
+### Fixed
+
+- bundle 脚本读取改认平台真实字段 `assets.scripts`（旧 `scripts` 形态保留兼容），`{{CWD}}` 占位符本地渲染为实际路径。
+- 文件通道凭证剥 UTF-8 BOM；`waitTask` 用例计数文件按测试进程隔离，根治撞历史残留导致的偶发失败。
+
 ## 0.3.8 (2026-11-20)
 
 ### Added

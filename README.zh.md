@@ -128,6 +128,7 @@ npx -y @grape-dev/grape-kit uninstall        # 卸载（宿主自动检测）
 
 | 版本 | 日期 | 要点 |
 |---|---|---|
+| 0.3.9 | 2026-11-20 | 端云接管全链路硬化（#12）：takeover_start push 能力边界 + 洁净机器回推路径 · 分支/MR 分叉裁决 playbook · warnings 全量透出 · Node 跨平台接管三脚本（report/request-finish/finish）· bundle 脚本 + {{CWD}} 本地渲染 · doctor 凭据来源行 · 401 提示按实际 GRAPE_BASE_URL · finish 两阶段凭据语义统一 · Windows 编码/BOM/setx 三条（单测 136） |
 | 0.3.8 | 2026-11-20 | 审核三工具（grape_review_pass / grape_review_reject / grape_confirm_done，工具面 36→39）· issues 表新增「仓库」列 · doctor 识别 ~/.grape/config.json 文件通道凭证（不再误报 FAIL） |
 | 0.3.7 | 2026-11-20 | trigger/task_status 图形化渲染（触发即出节点链图 · 状态查询出卡片+进度条+下一步指引）· Quick Start 重构对齐 devkit 模式 + Capabilities 总览节 · 卸载清理 receipt · Codex/hermes 移出露出面 |
 | 0.3.6 | 2026-11-19 | 流水线渲染支持 segments 事件流形态（真实 API 返回，不再回退原始 JSON）· 停滞状态「⚠️ 疑似停滞 N 分钟」透出到判读行 · 新增 segments 形态回归用例（单测 114→115） |
