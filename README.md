@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <strong>Grape DevOps pipeline tools × mainstream coding agents</strong><br>
+  <strong>Grape DevOps pipeline tools × mainstream agents</strong><br>
   Trigger, observe and advance Grape multi-agent DevOps pipelines from agents like opencode / hermes / codex,<br>
   and atomically hand over cloud nodes to your local machine via <strong>takeover sessions</strong> — the chain never breaks, results return in structured form.<br>
   <a href="https://www.npmjs.com/package/@grape-dev/grape-kit">npm</a> · <a href="https://www.grapedev.cn/">Grape website</a> · <a href="https://gitcode.com/grape-dev/grape-kit">Source</a>
@@ -19,7 +19,7 @@
 
 ---
 
-Grape-kit helps **mainstream coding agents** (opencode / codex / CodeArts / WorkBuddy / openclaw, etc.) use [Grape](https://gitcode.com/grape-dev/grape) safely and in a structured way — an AI-native DevOps platform with multi-agent pipelines (vod → issue → coding → qa → sre).
+Grape-kit helps **mainstream agents** (opencode / codex / CodeArts / WorkBuddy / openclaw, etc.) use [Grape](https://gitcode.com/grape-dev/grape) safely and in a structured way — an AI-native DevOps platform with multi-agent pipelines (vod → issue → coding → qa → sre).
 
 ```
 agent (MCP stdio: opencode / codex…; skill-guided bash: hermes…)
