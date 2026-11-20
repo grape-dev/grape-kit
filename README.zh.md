@@ -27,30 +27,14 @@ agent 宿主（MCP stdio：opencode / codex…；skill 引导 bash：hermes…�
     → grape 服务端（流水线 / events / takeover 会话 API；CLI 仅 401 回退用）
 ```
 
-## 端云协同（v0.3.2+ 核心：接管会话原语）
+## 能力总览（36 工具）
 
-> 平台要求 weekly-11+（takeover API）。旧平台自动回退老路径并提示。
-
-| 工具 | 作用 |
-|------|------|
-| `grape_takeover_start` | **原子接管**：云端任务让渡（链不断）、签发 `tko_` 凭据（12h→24h）、返回完整接管上下文（prompt/env/workspace/skill/history） |
-| `grape_takeover_progress` | 接管期间回报进度（云端面板可见，可 attach 本地会话） |
-| `grape_takeover_status` | 会话查询/列表；`renew` 顺带续期凭据 |
-| `grape_takeover_finish` | **两阶段交回**：先 `request_only=true` 报告完成 → 用户确认 → 正式 finish（结构化结论落事件流，coding→qa 自动接力） |
-| `grape_takeover_abort` | 让渡回流水线：当前节点重派云端（`redispatch=false` 只停不重派），链不中断 |
-| `grape_takeover_context` | 旧路径（无 takeover API 平台的回退）：只读接管上下文 |
-
-全生命周期时序与架构图：[docs/20261114-takeover-architecture.md](docs/20261114-takeover-architecture.md)
-
-## 其余工具面（30 个）
-
-- **触发/等待**：`grape_trigger_pipeline`（A2A 唯一入口）· `grape_wait_task` · `grape_get_task_status`
-- **issue/事件**：`list_issues` / `list_my_issues` / `get_issue_detail` / `get_pipeline_info` / `get_issue_events` / `create_issue` / `cancel_issue`（三选决策门）· `resume_issue`（事实复核）
-- **场景/仓库**：`list_scenes` / `apply_scene`（用户决策层）· `host_repo` / `sync_repos` / `managed/member repos` / `project-info`
-- **搜索/知识**：`search`（all/event/repo/agent）· skills ×3 · knowledge ×2 · dashboard
-- **项目/端侧**：`create_project` · `list_project_templates` · `worker_onboard`（本机接入 worker 池）
-
-**边界**：不暴露 A2A 节点间交接；terminate / delete / credential 类高危与 session_only 命令（git-repo 等 28 个）不纳管；cancel / apply_scene / takeover_finish 强制「需用户确认」。
+- **流水线遥控**：触发（唯一 A2A 入口）· 等待任务 · 任务状态 · 取消/恢复（带决策门）
+- **需求与事件**：列表/详情/事件流/我的需求 · 建单 · 结构化交回模板
+- **端云协同**（v0.3.2+ 核心）：**接管会话**把云端节点（如 coding）原子让渡到你的 Agent——签发 `tko_` 凭据（12h）并返回完整上下文（prompt/env/workspace/skill/history）；Agent 在本地干活、上报进度，经你确认后携结构化产物交回平台，流水线链路保持完整。平台要求 weekly-11+；旧平台自动回退只读上下文。完整时序：[docs/20261114-takeover-architecture.md](docs/20261114-takeover-architecture.md)
+- **场景与仓库**：场景列表 · 应用场景 · 托管仓库 · 同步仓库 · 项目模板 · 项目信息
+- **搜索、知识与技能**：全局搜索 · 技能 ×3 · 知识库 ×2 · 看板
+- **Worker 接入**：把本机注册为 grape 执行引擎（`grape_worker_onboard`）
 
 ## 快速开始
 

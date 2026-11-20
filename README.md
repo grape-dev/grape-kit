@@ -27,30 +27,14 @@ agent (MCP stdio: opencode / codex / CodeArts / WorkBuddy…)
     → grape server (pipelines / events / takeover session API; CLI only as 401 fallback)
 ```
 
-## Cloud-Local Collaboration (v0.3.2+ core: takeover sessions)
+## Capabilities (36 tools)
 
-> Platform requirement: weekly-11+ (takeover API). Older platforms fall back to the legacy path automatically.
-
-| Tool | Purpose |
-|------|---------|
-| `grape_takeover_start` | **Atomic takeover**: the cloud task is handed over (chain intact), a `tko_` credential is issued (12h→24h), full takeover context returned (prompt/env/workspace/skill/history) |
-| `grape_takeover_progress` | Report progress during takeover (visible on the cloud panel, can attach a local session) |
-| `grape_takeover_status` | Query/list sessions; `renew` also extends the credential |
-| `grape_takeover_finish` | **Two-phase hand-back**: first `request_only=true` to report completion → user confirms → formal finish (structured conclusion lands in the event stream, coding→qa relays automatically) |
-| `grape_takeover_abort` | Yield the node back to the pipeline: redispatch to cloud (`redispatch=false` stops without redispatch), chain stays intact |
-| `grape_takeover_context` | Legacy path (fallback for platforms without the takeover API): read-only takeover context |
-
-Full lifecycle sequence and architecture: [docs/20261114-takeover-architecture.md](docs/20261114-takeover-architecture.md)
-
-## The other 30 tools
-
-- **Trigger/wait**: `grape_trigger_pipeline` (the only A2A entry) · `grape_wait_task` · `grape_get_task_status`
-- **Issue/events**: `list_issues` / `list_my_issues` / `get_issue_detail` / `get_pipeline_info` / `get_issue_events` / `create_issue` / `cancel_issue` (three-choice decision gate) · `resume_issue` (fact re-verification)
-- **Scenes/repos**: `list_scenes` / `apply_scene` (user decision layer) · `host_repo` / `sync_repos` / `managed/member repos` / `project-info`
-- **Search/knowledge**: `search` (all/event/repo/agent) · skills ×3 · knowledge ×2 · dashboard
-- **Project/local**: `create_project` · `list_project_templates` · `worker_onboard` (join this machine to the worker pool)
-
-**Boundaries**: A2A node hand-offs are never exposed; high-risk terminate / delete / credential commands and session-only commands (git-repo, 28 others) are out of scope; cancel / apply_scene / takeover_finish enforce an explicit user-confirmation gate.
+- **Pipeline control**: trigger (the only A2A entry) · wait_task · task status · cancel/resume with decision gates
+- **Issues & events**: list/detail/events/my-issues · create · structured hand-back templates
+- **Cloud-local collaboration** (v0.3.2+ core): **takeover sessions** atomically hand cloud nodes (e.g. coding) over to your agent — a `tko_` credential (12h) plus the full context bundle (prompt/env/workspace/skill/history) come back; your agent works locally, reports progress, and hands back with a structured conclusion after your confirmation — the pipeline chain never breaks. Platform requirement: weekly-11+; older platforms fall back to the legacy read-only context automatically. Full sequence: [docs/20261114-takeover-architecture.md](docs/20261114-takeover-architecture.md)
+- **Scenes & repos**: list_scenes · apply_scene · host_repo · sync_repos · managed/member repos · project templates · project-info
+- **Search, knowledge & skills**: search (all/event/repo/agent) · skills ×3 · knowledge ×2 · dashboard
+- **Worker onboarding**: register this machine as a grape execution engine (`grape_worker_onboard`)
 
 ## Quick Start
 
