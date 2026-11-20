@@ -52,45 +52,95 @@ agent 宿主（MCP stdio：opencode / codex…；skill 引导 bash：hermes…�
 
 **边界**：不暴露 A2A 节点间交接；terminate / delete / credential 类高危与 session_only 命令（git-repo 等 28 个）不纳管；cancel / apply_scene / takeover_finish 强制「需用户确认」。
 
-## 快速开始（opencode）
+## 快速开始
+
+> 省略 `--target` 时安装器自动检测本机宿主：
+>
+> - **未检测到**：交互终端弹出宿主选择菜单；非交互环境报错并列出受支持宿主。
+> - **检测到一个**：直接装它。
+> - **检测到多个**：全部安装（等价 `--target all`）；要装单个用 `--target <宿主>`。
+
+前提：**Node ≥ 20**（无需 Python——v0.3.0 起原生 HTTP 直连）。凭据走环境变量：
 
 ```bash
-# 前提：Node >= 20（无需 Python——v0.3.0 起原生 HTTP 直连）
 export GRAPE_BASE_URL=https://www.grapedev.cn
-export GRAPE_API_TOKEN=grape_xxx      # Grape WebUI → 设置 → API Key
-# hermes 等会清洗 env 的宿主：写文件通道 ~/.grape/config.json {"token":"grape_xxx","base_url":"..."}
+export GRAPE_API_TOKEN=grape_xxx      # API Key：https://www.grapedev.cn/app/#account/profile
+# 会清洗 env 的宿主（hermes 等）：写文件通道 ~/.grape/config.json {"token":"grape_xxx","base_url":"..."}
+```
 
-# 装配（写 opencode mcp.grape 条目 + skill 副本 + receipt，带备份幂等）
+### OpenCode
+
+```bash
 npx -y @grape-dev/grape-kit install --target opencode
-npx -y @grape-dev/grape-kit doctor --probe   # node / 服务端连通性 / 工具面逐项自检
+```
 
-# 生命周期管理（--target 可省略，按宿主痕迹自动选择）
+**装完重启会话**后生效。
+
+```bash
+npx -y @grape-dev/grape-kit doctor --target opencode --probe   # 逐项自检
+npm install -g @grape-dev/grape-kit             # 更新（更新后重启会话）
+npx -y @grape-dev/grape-kit uninstall --target opencode   # 卸载（备份配置）
+```
+
+### Codex
+
+在 `~/.codex/config.toml` 加 `[mcp_servers.grape]`（command/args/env），详见使用指南。
+
+### CodeArts Agent（华为云码道）
+
+```bash
+npx -y @grape-dev/grape-kit install --target codearts
+```
+
+写入 `~/.codeartsdoer/codearts_cli.jsonc`（全局）或 `<项目>/.codeartsdoer/codearts_cli.jsonc`（项目级）。装完需在 CodeArts：设置 → MCP工具 → 已安装 → grape-kit 点「重启」。
+
+```bash
+npx -y @grape-dev/grape-kit doctor --target codearts --probe
+npx -y @grape-dev/grape-kit update --target codearts
+npx -y @grape-dev/grape-kit uninstall --target codearts
+```
+
+### WorkBuddy
+
+```bash
+npx -y @grape-dev/grape-kit install --target workbuddy
+```
+
+写入 `~/.workbuddy/mcp.json`（`mcpServers.grape-kit`，走 npx 免全局安装）+ skill 落 `~/.workbuddy/skills/grape-remote/`。装完需在 WorkBuddy 手动「信任」一次。凭据走环境变量，**不要**写进 mcp.json。
+
+```bash
+npx -y @grape-dev/grape-kit doctor --target workbuddy --probe
+npx -y @grape-dev/grape-kit update --target workbuddy
+npx -y @grape-dev/grape-kit uninstall --target workbuddy   # 移除条目+skill+receipt（配置自动备份；「信任」记录属宿主侧数据另行移除）
+```
+
+### openclaw（ClawHub 市场）
+
+```bash
+openclaw plugins install clawhub:grape-kit@latest
+```
+
+`clawhub:` 为来源前缀（与 devkit 上架同款）。装后用插件 MCP 工具列表验证（36 工具）。市场页：https://clawhub.ai/grape-dev/plugins/grape-kit
+
+### 版本查询与更新（全宿主通用）
+
+```bash
 npx -y @grape-dev/grape-kit --version        # 版本查询
 npm install -g @grape-dev/grape-kit          # 更新（更新后重启 Agent 会话）
-npx -y @grape-dev/grape-kit uninstall --target opencode   # 卸载（自动备份配置，清理条目 + skill + receipt）
-
-# 启动时自动检查 npm 新版本（24h 去重，GRAPE_KIT_SKIP_UPDATE_CHECK=1 关闭）；国内镜像同步滞后 1-3 天，最新版用 --registry https://registry.npmjs.org/
-# 重启 opencode 会话后生效
+npx -y @grape-dev/grape-kit uninstall        # 卸载（宿主自动检测）
 ```
 
-安装后在对话里直接说：
+启动时自动检查 npm 新版本（24h 去重，`GRAPE_KIT_SKIP_UPDATE_CHECK=1` 关闭）；国内镜像同步滞后 1-3 天，最新版用 `--registry https://registry.npmjs.org/`。
+
+然后直接对 Agent 说：
 
 ```
-> 帮我看看我的 grape issue 里有哪些在跑流水线
-> 触发 acme/demo 仓库 issue #12 的流水线，然后等到终态
-> #12 的 coding 在跑，让本机接手这个节点，别断链        ← takeover_start
-> 改完了，跟平台报一声，等我确认再正式交回              ← progress + request-finish
-> 这节点我做不了，还回云端让别人做，链别断              ← takeover_abort
+> 我有哪些单子在跑流水线？
+> 帮 acme/demo 仓库的 #12 触发流水线，等到终态
+> #12 的 coding 在跑——抢到本机来干，链不断                       ← takeover_start
+> 干完了——上报平台，等我确认再正式交回                          ← progress + request-finish
+> 这个节点干不了——还给云端重跑，链不断                          ← takeover_abort
 ```
-
-**hermes**（无 MCP client）：复制 `skills/grape-remote/` 到其 skill 目录，agent 以 bash 调 `grape` CLI 即可。
-**codex**：`~/.codex/config.toml` 加 `[mcp_servers.grape]`（command/args/env），示例见使用指南。
-**CodeArts Agent（华为云码道）**：`npx -y @grape-dev/grape-kit install --target codearts` —— 写入 `~/.codeartsdoer/codearts_cli.jsonc`（全局）或 `<项目>/.codeartsdoer/codearts_cli.jsonc`（项目级）的 mcpServers 条目；装完需在 CodeArts 设置 → MCP工具 → 已安装 → grape-kit 点「重启」方才生效。凭据只走环境变量。
-更新/卸载：`npx -y @grape-dev/grape-kit update --target codearts` · `npx -y @grape-dev/grape-kit uninstall --target codearts`
-**openclaw（ClawHub 市场）**：市场直装 —— `openclaw plugins install clawhub:grape-kit@latest`（bundle-plugin 形态；`clawhub:` 为来源前缀，与 devkit 上架同款）。装后用插件 MCP 工具列表验证（36 工具）。市场页：https://clawhub.ai/grape-dev/plugins/grape-kit
-
-**WorkBuddy**：`npx -y @grape-dev/grape-kit install --target workbuddy` —— 写入 `~/.workbuddy/mcp.json`（`mcpServers.grape-kit`，走 npx 免全局安装）+ skill 落 `~/.workbuddy/skills/grape-remote/`；自检 `doctor --target workbuddy --probe`。装完需在 WorkBuddy 中手动「信任」连接器（一次性）；凭据走环境变量，**不要**写进 mcp.json。
-卸载：`npx -y @grape-dev/grape-kit uninstall --target workbuddy`（移除条目 + skill + receipt，配置自动备份；WorkBuddy 内的手动「信任」记录属宿主侧数据，需另行移除）。
 
 ## 版本历史
 

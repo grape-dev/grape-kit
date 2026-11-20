@@ -52,27 +52,85 @@ Full lifecycle sequence and architecture: [docs/20261114-takeover-architecture.m
 
 **Boundaries**: A2A node hand-offs are never exposed; high-risk terminate / delete / credential commands and session-only commands (git-repo, 28 others) are out of scope; cancel / apply_scene / takeover_finish enforce an explicit user-confirmation gate.
 
-## Quick start (opencode)
+## Quick Start
+
+> If `--target` is omitted, the installer auto-detects agents on your machine:
+>
+> - **None detected**: interactive terminals show an agent picker; non-interactive shells error out with the supported target list.
+> - **One detected**: installs directly to it.
+> - **Multiple detected**: installs to all detected agents (`--target all` equivalent); pass `--target <agent>` to pick one.
+
+Prerequisites: **Node >= 20** (no Python needed — native HTTP since v0.3.0). Credentials go through environment variables:
 
 ```bash
-# Prerequisite: Node >= 20 (no Python needed — native HTTP since v0.3.0)
 export GRAPE_BASE_URL=https://www.grapedev.cn
 export GRAPE_API_TOKEN=grape_xxx      # API Key: https://www.grapedev.cn/app/#account/profile
 # Agents that sanitize env: file channel ~/.grape/config.json {"token":"grape_xxx","base_url":"..."}
-
-# Install (writes the opencode mcp.grape entry + skill copy + receipt, idempotent with backup)
-npx -y @grape-dev/grape-kit install --target opencode
-npx -y @grape-dev/grape-kit doctor --probe   # node / server connectivity / per-tool self-check
-
-# Lifecycle (all targets work the same way; target auto-detected when omitted)
-npx -y @grape-dev/grape-kit --version        # version check
-npm install -g @grape-dev/grape-kit          # update (then restart the agent session)
-npx -y @grape-dev/grape-kit uninstall --target opencode   # uninstall (backs up config; cleans entry + skill)
-
-# Restart your opencode session to take effect
 ```
 
-A startup version check compares against the npm registry and reminds you once when a newer release exists (24h dedupe; disable with `GRAPE_KIT_SKIP_UPDATE_CHECK=1`). Users on mirror registries (npmmirror etc.) may see a 1-3 day sync delay — use `--registry https://registry.npmjs.org/` for the latest.
+### OpenCode
+
+```bash
+npx -y @grape-dev/grape-kit install --target opencode
+```
+
+**Restart the session** after installation.
+
+```bash
+npx -y @grape-dev/grape-kit doctor --target opencode --probe
+npm install -g @grape-dev/grape-kit             # update (then restart the session)
+npx -y @grape-dev/grape-kit uninstall --target opencode
+```
+
+### Codex
+
+Add `[mcp_servers.grape]` (command/args/env) to `~/.codex/config.toml`, or run `install --target codex` — see the usage guide.
+
+### CodeArts Agent (华为云码道)
+
+```bash
+npx -y @grape-dev/grape-kit install --target codearts
+```
+
+Writes the `mcpServers` entry into `~/.codeartsdoer/codearts_cli.jsonc` (global) or `<project>/.codeartsdoer/codearts_cli.jsonc` (project-level). After install, restart the entry in CodeArts: 设置 → MCP工具 → 已安装 → grape-kit → 「重启」.
+
+```bash
+npx -y @grape-dev/grape-kit doctor --target codearts --probe
+npx -y @grape-dev/grape-kit update --target codearts
+npx -y @grape-dev/grape-kit uninstall --target codearts
+```
+
+### WorkBuddy
+
+```bash
+npx -y @grape-dev/grape-kit install --target workbuddy
+```
+
+Writes `~/.workbuddy/mcp.json` (`mcpServers.grape-kit`, via npx — no global install) + skill to `~/.workbuddy/skills/grape-remote/`. **Trust the connector once in WorkBuddy** after install. Credentials go through environment variables — **never** write them into mcp.json.
+
+```bash
+npx -y @grape-dev/grape-kit doctor --target workbuddy --probe
+npx -y @grape-dev/grape-kit update --target workbuddy
+npx -y @grape-dev/grape-kit uninstall --target workbuddy   # removes entry + skill + receipt (config backed up); the manual "trust" record is host-side data
+```
+
+### openclaw (ClawHub marketplace)
+
+```bash
+openclaw plugins install clawhub:grape-kit@latest
+```
+
+The `clawhub:` prefix is the source (matching devkit's listing form). Verify with the plugin's MCP tools list (36 tools). Marketplace page: https://clawhub.ai/grape-dev/plugins/grape-kit
+
+### Version check & update (all targets)
+
+```bash
+npx -y @grape-dev/grape-kit --version        # version check
+npm install -g @grape-dev/grape-kit          # update (then restart the agent session)
+npx -y @grape-dev/grape-kit uninstall        # uninstall, target auto-detected
+```
+
+A startup version check compares against the npm registry and reminds you once when a newer release exists (24h dedupe; disable with `GRAPE_KIT_SKIP_UPDATE_CHECK=1`). Mirror registries (npmmirror etc.) may lag 1-3 days — use `--registry https://registry.npmjs.org/` for the latest.
 
 Then just talk to your agent:
 
@@ -83,14 +141,6 @@ Then just talk to your agent:
 > Done — report to the platform, wait for my confirmation before formal hand-back  ← progress + request-finish
 > Can't finish this node — give it back to the cloud, keep the chain            ← takeover_abort
 ```
-
-**codex**: add `[mcp_servers.grape]` (command/args/env) to `~/.codex/config.toml` — see the usage guide.
-**CodeArts Agent** (华为云码道): `npx -y @grape-dev/grape-kit install --target codearts` — writes the `mcpServers` entry into `~/.codeartsdoer/codearts_cli.jsonc` (global) or `<project>/.codeartsdoer/codearts_cli.jsonc` (project-level). After install, restart the entry in CodeArts: 设置 → MCP工具 → 已安装 → grape-kit → 「重启」. Credentials via environment variables only.
-Update / uninstall: `npx -y @grape-dev/grape-kit update --target codearts` · `npx -y @grape-dev/grape-kit uninstall --target codearts`
-**openclaw (ClawHub)**: install from the marketplace — `openclaw plugins install clawhub:grape-kit@latest` (bundle-plugin; the `clawhub:` prefix is the source, matching devkit's listing form). Verify with the plugin's MCP tools list (36 tools). Marketplace page: https://clawhub.ai/grape-dev/plugins/grape-kit
-
-**WorkBuddy**: `npx -y @grape-dev/grape-kit install --target workbuddy` — writes `~/.workbuddy/mcp.json` (`mcpServers.grape-kit`, via npx, no global install) + skill to `~/.workbuddy/skills/grape-remote/`; self-check with `doctor --target workbuddy --probe`. Trust the connector once in WorkBuddy; credentials go through environment variables — **never** write them into mcp.json.
-Uninstall: `npx -y @grape-dev/grape-kit uninstall --target workbuddy` (removes the entry + skill + receipt, config backed up; the manual "trust" record in WorkBuddy is host-side data and needs separate removal).
 
 ## Version history
 
