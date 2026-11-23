@@ -661,6 +661,12 @@ test('#19 文档措辞与实现一致：判据 next_seq / 兜底回填 next_seq 
   assert.match(doc, /`next_seq`[^\n]*派发指针|派发指针[^\n]*`next_seq`/, 'docs 3.2 应写明以 next_seq 为派发指针判据')
   assert.match(doc, /回填[^\n]*`next_seq`/, 'docs 3.2 应写明兜底路径只回填 next_seq')
   assert.match(doc, /takeover_progress|task_messages/, 'docs 3.2 应写明待派发标记的落盘/查询通道')
+  // 派生判据口径必须与 takeover_status 实现同源：派发指针是 next_seq，handoff_seq 不作已派发证据
+  assert.match(doc, /finished \+ next_agent \+ 派发指针 next_seq=0/, 'docs 3.2 的派生判据须以派发指针 next_seq=0 为准')
+  assert.doesNotMatch(doc, /finished \+ next_agent \+ handoff_seq=0` 即派发指针缺失/, 'docs 3.2 不得再把 handoff_seq=0 当派发指针缺失依据')
+  const changelog = readFileSync(new URL('../CHANGELOG.md', import.meta.url), 'utf8')
+  assert.match(changelog, /finished \+ next_agent \+ 派发指针 next_seq=0/, 'CHANGELOG 的派生判据须以派发指针 next_seq=0 为准')
+  assert.doesNotMatch(changelog, /finished \+ next_agent \+ handoff_seq=0` 即派发指针缺失/, 'CHANGELOG 不得再把 handoff_seq=0 当派发指针缺失依据')
   const skill = readFileSync(new URL('../skills/grape-remote/SKILL.md', import.meta.url), 'utf8')
   assert.match(skill, /next_seq/, 'skill 副本应说明派发指针是 next_seq')
 })
