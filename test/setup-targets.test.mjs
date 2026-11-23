@@ -1,7 +1,7 @@
 import { test, after } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { mkdtempSync, readFileSync, writeFileSync, existsSync, rmSync, mkdirSync, readdirSync } from 'node:fs'
+import { mkdtempSync, readFileSync, writeFileSync, existsSync, rmSync, mkdirSync, readdirSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 
@@ -663,7 +663,14 @@ test('QA#PR13硬违规1 自定义路径要求全部条目为 grape 产物：凭�
   const r = run(['uninstall', '--target', 'opencode', '--clean-global'], h, { GRAPE_HOME: mixed })
   assert.notEqual(r.status, 0, '含非 grape 条目的自定义路径必须拒删')
   assert.match(r.stderr, /拒绝/)
+  assert.match(r.stderr, /非 grape 产物条目/, '拒绝原因必须点名「存在非 grape 条目」（可判别该规则确实生效）')
   assert.ok(existsSync(join(mixed, 'notes.md')), '非 grape 文件不得被连带删除')
+  // 控制组：移走用户文件后同一目录必须按证据清理——证明拒删来自「非 grape 条目」而非别的规则
+  rmSync(join(mixed, 'notes.md'))
+  const ok = run(['uninstall', '--target', 'opencode', '--clean-global'], h, { GRAPE_HOME: mixed })
+  assert.equal(ok.status, 0, ok.stderr)
+  assert.match(ok.stdout, /警告/, '全为 grape 产物的自定义路径应仅警告后清理')
+  assert.ok(!existsSync(mixed), '控制组：全 grape 产物目录应被清理')
 })
 
 /* ── QA 复审（合入后 dev 基线）硬违规 3：护栏不可被路径形态绕过 ── */
@@ -698,13 +705,20 @@ test('QA#硬违规3 护栏对 .. 穿越归一化：GRAPE_HOME=$HOME/.grape/.. �
   assert.ok(existsSync(join(h, '.grape', 'config.json')), '.grape 也不得被连带清空')
 })
 
-test('QA#硬违规3 护栏拒绝 GRAPE_HOME 指向 HOME 的祖先目录（含根/临时目录层级）', skipOnWin, () => {
-  const h = home()
+test('QA#硬违规3 护栏拒绝 GRAPE_HOME 指向 HOME 的祖先目录，且拒绝原因归因到路径规则', skipOnWin, () => {
+  const root = home()
+  const h = join(root, 'home')          // HOME 嵌在 root 下：root 是 HOME 的祖先
+  mkdirSync(h, { recursive: true })
   const s = seedResidue(h)
-  const r = run(['uninstall', '--target', 'opencode', '--clean-global'], h, { GRAPE_HOME: dirname(h) })
-  assert.notEqual(r.status, 0, 'HOME 的父目录（tmpdir 层级）必须拒删')
+  const r = run(['uninstall', '--target', 'opencode', '--clean-global'], h, { GRAPE_HOME: root })
+  assert.notEqual(r.status, 0, 'HOME 的祖先目录必须拒删')
   assert.match(r.stderr, /拒绝/)
+  // 可判别性：拒绝原因必须归因到「HOME 本身/祖先/根」路径规则，而不是退化成「证据不足」——
+  // 否则任意含用户数据的目录都能让这条用例变绿，测不出祖先规则是否真的生效
+  assert.match(r.stderr, /其祖先|主目录本身|根/, '拒绝原因必须点名路径规则')
+  assert.doesNotMatch(r.stderr, /无 grape 产物证据|非 grape 产物条目/, '祖先规则应先于证据规则命中')
   assert.ok(existsSync(s.grapeHome), '默认 ~/.grape 不得被连带删除')
+  assert.ok(existsSync(h), 'HOME 本身不得被删')
 })
 
 test('QA#判断项 空目录的自定义 GRAPE_HOME：无 grape 产物证据同样拒删', skipOnWin, () => {
@@ -726,15 +740,17 @@ test('QA#判断项 --dry-run 预览与执行共用护栏：GRAPE_HOME=HOME 时�
   assert.ok(existsSync(join(h, 'important.txt')))
 })
 
-test('QA#判断项 拒绝信息必须给出解析后的绝对路径（用户可核对真实删除目标）', skipOnWin, () => {
+test('QA#判断项 拒绝信息给出 realpath 归一化后的绝对路径（符号链接须解析到真实目录）', skipOnWin, () => {
   const h = home()
-  const deep = join(h, 'a', 'b', 'c')
-  mkdirSync(deep, { recursive: true })
-  writeFileSync(join(deep, 'photos.txt'), 'family')
-  const r = run(['uninstall', '--target', 'opencode', '--clean-global'], h, { GRAPE_HOME: join(h, 'a', 'b', 'c') })
+  const real = join(h, 'realdir')
+  mkdirSync(real, { recursive: true })
+  writeFileSync(join(real, 'photos.txt'), 'family')
+  const link = join(h, 'alias')
+  symlinkSync(real, link, 'dir')       // 只做字符串比较的实现会把 link 当独立目录，看不出它指向 real
+  const r = run(['uninstall', '--target', 'opencode', '--clean-global'], h, { GRAPE_HOME: link })
   assert.notEqual(r.status, 0)
-  assert.match(r.stderr, new RegExp(deep.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), '拒绝信息应含解析后的绝对路径')
-  assert.ok(existsSync(join(deep, 'photos.txt')))
+  assert.ok(r.stderr.includes(real), `拒绝信息应含 realpath 解析后的真实目录（而非仅用户输入的链接名），实际:\n${r.stderr}`)
+  assert.ok(existsSync(join(real, 'photos.txt')), '链接目标的用户文件不得被删')
 })
 
 /* ── QA 复审（PR #13）判断项：dry-run 与真实卸载必须共用同一步骤判定 ── */
@@ -866,7 +882,10 @@ test('QA#P1 uninstall --clean-global 不带 --target：有宿主痕迹时卸载�
   // 本批新增：rc 备份的凭据行必须掩码（旧实现只做删除、备份不含掩码标注）
   const fresh = backupsIn(h).find((f) => f.startsWith('.bashrc.bak-grapemcp-'))
   assert.ok(fresh, 'rc 改动应留备份')
-  assert.match(readFileSync(join(h, fresh), 'utf8'), /\[grape-kit --clean-global 已移除凭据行\]/, '备份应为凭据行掩码标注')
+  // 断言行为而非文案：备份保留凭据行位置（名称可见）但值不出现——换文案不该让用例变红
+  const bakText = readFileSync(join(h, fresh), 'utf8')
+  assert.match(bakText, /GRAPE_API_TOKEN/, '备份应保留凭据行位置标注（名称保留）')
+  assert.doesNotMatch(bakText, /grape_secret_env/, '备份不得含凭据明文')
 })
 
 /* ── QA 复审（PR #11）硬违规 2：rc 备份不得含明文凭据，残留检测必须覆盖备份 ── */
@@ -897,8 +916,9 @@ test('QA#硬违规2 含凭据的旧 .bak-grapemcp-* 备份：残留提示点名�
   // 本批新增：本次清理产生的 rc 备份必须是「非凭据原文 + 凭据行掩码」而非旧实现的无掩码剔除版
   const fresh = backupsIn(h).find((f) => f.startsWith('.bashrc.bak-grapemcp-') && f !== '.bashrc.bak-grapemcp-20200101000000')
   assert.ok(fresh, 'rc 改动应留新备份')
-  assert.match(readFileSync(join(h, fresh), 'utf8'), /\[grape-kit --clean-global 已移除凭据行\]/, '新备份应含凭据行掩码标注')
-  assert.doesNotMatch(readFileSync(join(h, fresh), 'utf8'), /grape_secret_env/, '新备份不得含凭据明文')
+  const freshText = readFileSync(join(h, fresh), 'utf8')
+  assert.match(freshText, /GRAPE_API_TOKEN/, '新备份应保留凭据行位置标注（名称保留）')
+  assert.doesNotMatch(freshText, /grape_secret_env/, '新备份不得含凭据明文')
   // 清零后再次默认 uninstall：必须报告真零残留（不得因检测盲区谎报）
   const after = run(['uninstall', '--target', 'opencode'], h, { GRAPE_API_TOKEN: '', GRAPE_BASE_URL: '' })
   assert.equal(after.status, 0, after.stderr)
@@ -1017,4 +1037,132 @@ test('QA#硬违规2 不带 --target 的 --clean-global --dry-run：检测到宿�
   assert.ok(JSON.parse(readFileSync(cfgPath, 'utf8')).mcp?.grape, 'dry-run 不得卸载宿主条目')
   assert.ok(existsSync(join(h, '.config', 'opencode', 'skills', 'grape-remote', 'SKILL.md')), 'dry-run 不得删除 skill')
   assert.equal(backupsIn(join(h, '.config', 'opencode')).length, backupsAfterInstall, 'dry-run 不得新增备份')
+})
+
+/* ── QA 复审（PR #13 第三批）：硬违规 1 —— GRAPE_AUTH_FILE 判据必须与护栏/文档同一「凭据形态」 ── */
+
+test('QA#PR13三审 硬违规1 GRAPE_AUTH_FILE 指向普通配置（任意 base_url）：不标凭据、不盲删、点名人工', { skip: isWin }, () => {
+  const h = home()
+  const plain = join(h, 'myapp-settings.json')
+  const body = { base_url: 'https://api.stripe.com', retries: 3 }
+  writeFileSync(plain, JSON.stringify(body))
+  // 默认 uninstall 的残留提示同样用这一判据：不得把普通配置标成「凭据文件」
+  const hint = run(['uninstall', '--target', 'opencode'], h, { GRAPE_AUTH_FILE: plain })
+  assert.equal(hint.status, 0, hint.stderr)
+  assert.match(hint.stdout, /非凭据形态/, '残留提示不得把普通配置报成凭据文件')
+  assert.ok(existsSync(plain), '残留提示是只读操作，不得删除目标')
+  const r = run(['uninstall', '--target', 'opencode', '--clean-global'], h, { GRAPE_AUTH_FILE: plain })
+  assert.equal(r.status, 0, r.stderr)
+  assert.ok(existsSync(plain), '非凭据形态目标不得被盲删（README/CHANGELOG 承诺）')
+  assert.deepEqual(JSON.parse(readFileSync(plain, 'utf8')), body, '目标文件内容必须原样无损')
+  assert.match(`${r.stdout}${r.stderr}`, /人工/, '必须点名要求人工处理')
+})
+
+test('QA#PR13三审 硬违规1 非 grape_ 前缀的 token 字段不构成凭据形态：GRAPE_AUTH_FILE 目标拒删', { skip: isWin }, () => {
+  const h = home()
+  const plain = join(h, 'generic-auth.json')
+  const body = { token: 'sk_live_abc123', retries: 1 }
+  writeFileSync(plain, JSON.stringify(body))
+  const r = run(['uninstall', '--target', 'opencode', '--clean-global'], h, { GRAPE_AUTH_FILE: plain })
+  assert.equal(r.status, 0, r.stderr)
+  assert.ok(existsSync(plain), '非 grape_ 前缀的 token 字符串不得被当成凭据')
+  assert.match(`${r.stdout}${r.stderr}`, /人工/, '应提示人工确认')
+})
+
+test('QA#PR13三审 硬违规1 两通道同一判据：同一内容放 GRAPE_HOME 拒删、放 GRAPE_AUTH_FILE 保人工', skipOnWin, () => {
+  const h = home()
+  const body = JSON.stringify({ base_url: 'https://api.stripe.com', retries: 3 })
+  // 通道 A：GRAPE_HOME 自定义目录（护栏证据判据）
+  const dir = join(h, 'tool')
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(join(dir, 'config.json'), body)
+  const homeChannel = run(['uninstall', '--target', 'opencode', '--clean-global'], h, { GRAPE_HOME: dir })
+  assert.notEqual(homeChannel.status, 0, 'GRAPE_HOME 通道：非凭据形态 config.json 不构成证据，必须拒删')
+  assert.match(homeChannel.stderr, /拒绝/)
+  assert.ok(existsSync(join(dir, 'config.json')), 'GRAPE_HOME 通道下用户配置不得被删')
+  // 通道 B：GRAPE_AUTH_FILE（授权删除判据）——同一内容必须得到同一结论
+  const file = join(h, 'tool-settings.json')
+  writeFileSync(file, body)
+  const authChannel = run(['uninstall', '--target', 'opencode', '--clean-global'], h, { GRAPE_AUTH_FILE: file })
+  assert.equal(authChannel.status, 0, authChannel.stderr)
+  assert.ok(existsSync(file), '同一判据下 GRAPE_AUTH_FILE 也不得删（两通道判据一致）')
+  assert.match(`${authChannel.stdout}${authChannel.stderr}`, /人工/)
+})
+
+test('QA#PR13三审 判断项6 护栏拒绝给出原因/判定依据/放行办法，且区分「无证据」与「含非 grape 条目」', skipOnWin, () => {
+  const h = home()
+  const mixed = join(h, 'mixeddir')
+  mkdirSync(mixed, { recursive: true })
+  writeFileSync(join(mixed, 'config.json'), JSON.stringify({ token: 'grape_ok' }))
+  writeFileSync(join(mixed, 'notes.md'), 'keep')
+  const r = run(['uninstall', '--target', 'opencode', '--clean-global'], h, { GRAPE_HOME: mixed })
+  assert.notEqual(r.status, 0)
+  assert.match(r.stderr, /非 grape 产物条目/, '含用户文件时必须点名该原因（不得与「无证据」并成一句）')
+  assert.match(r.stderr, /判定依据/, '拒绝必须给出判据（用户才能判断是不是误报）')
+  assert.match(r.stderr, /放行办法/, '拒绝必须给出放行办法')
+  const empty = join(h, 'emptydir')
+  mkdirSync(empty, { recursive: true })
+  const e = run(['uninstall', '--target', 'opencode', '--clean-global'], h, { GRAPE_HOME: empty })
+  assert.notEqual(e.status, 0)
+  assert.match(e.stderr, /目录为空|无 grape 产物证据/, '空目录的原因必须是无证据')
+  assert.doesNotMatch(e.stderr, /非 grape 产物条目/, '空目录不得报「存在非 grape 条目」')
+  assert.match(e.stderr, /判定依据/)
+  assert.match(e.stderr, /放行办法/)
+})
+
+/* ── QA 复审（PR #13 第三批）：判断项 1 —— 损坏配置提示按宿主能力拼接 ── */
+
+test('QA#PR13三审 判断项1 损坏配置提示按宿主能力拼接：codearts 无 skill 处理就不承诺「skill 仍会清理」', skipOnWin, () => {
+  const h = home()
+  const caCfg = join(h, '.codeartsdoer', 'codearts_cli.jsonc')
+  mkdirSync(dirname(caCfg), { recursive: true })
+  writeFileSync(caCfg, '{ "mcp": { broken')
+  const dry = run(['uninstall', '--target', 'codearts', '--dry-run'], h)
+  assert.equal(dry.status, 0, dry.stderr)
+  assert.match(dry.stdout, /配置损坏/, 'codearts 损坏配置必须报「配置损坏」')
+  assert.doesNotMatch(dry.stdout, /skill/, 'codearts 不处理 skill 副本，提示不得提 skill')
+  const real = run(['uninstall', '--target', 'codearts'], h)
+  assert.equal(real.status, 0, real.stderr)
+  assert.match(real.stdout, /配置损坏/)
+  assert.doesNotMatch(real.stdout, /skill/, 'codearts 真实卸载同样不得承诺 skill 清理（实测无动作=误导）')
+  assert.match(readFileSync(caCfg, 'utf8'), /\{ "mcp": \{ broken/, '损坏配置不得被删改')
+  // 控制组：opencode 确有 skill 副本处理，提示必须保留这一句（否则用户以为已清干净）
+  assert.equal(run(['install', '--target', 'opencode'], h).status, 0)
+  const ocCfg = join(h, '.config', 'opencode', 'opencode.jsonc')
+  writeFileSync(ocCfg, '{ "mcp": { broken')
+  const oc = run(['uninstall', '--target', 'opencode'], h)
+  assert.equal(oc.status, 0, oc.stderr)
+  assert.match(oc.stdout, /skill/, 'opencode 会清理自有 skill，提示应保留该说明')
+})
+
+/* ── QA 复审（PR #13 第三批）：判断项 3 —— rc 清理覆盖 declare -x / .bash_profile / fish set -x ── */
+
+test('QA#PR13三审 判断项3 rc 清理覆盖 declare -x / .bash_profile / fish set -x，且不谎报「未发现导出行」', { skip: isWin }, () => {
+  const h = home()
+  writeFileSync(join(h, '.bashrc'), 'export PATH=$PATH:/bin\ndeclare -x GRAPE_API_TOKEN="grape_declared"\n')
+  writeFileSync(join(h, '.bash_profile'), 'export GRAPE_BASE_URL=https://profile.example\n')
+  const fishCfg = join(h, '.config', 'fish', 'config.fish')
+  mkdirSync(dirname(fishCfg), { recursive: true })
+  writeFileSync(fishCfg, 'set -x GRAPE_API_TOKEN grape_fish\nset -gx EDITOR vim\n')
+  const r = run(['uninstall', '--target', 'opencode', '--clean-global'], h, { GRAPE_API_TOKEN: '', GRAPE_BASE_URL: '' })
+  assert.equal(r.status, 0, r.stderr)
+  assert.doesNotMatch(readFileSync(join(h, '.bashrc'), 'utf8'), /GRAPE_API_TOKEN/, 'declare -x 形态必须清理')
+  assert.match(readFileSync(join(h, '.bashrc'), 'utf8'), /export PATH=/, 'rc 无关行必须保留')
+  assert.doesNotMatch(readFileSync(join(h, '.bash_profile'), 'utf8'), /GRAPE_BASE_URL/, '.bash_profile 的 export 必须清理')
+  assert.doesNotMatch(readFileSync(fishCfg, 'utf8'), /GRAPE_API_TOKEN/, 'fish set -x 形态必须清理')
+  assert.match(readFileSync(fishCfg, 'utf8'), /set -gx EDITOR vim/, 'fish 无关行必须保留')
+  assert.match(r.stdout, /bashrc/, '实际清理了就必须报告，不得打印「未发现导出行（跳过）」')
+  // 任何备份都不得把凭据换个文件名留盘
+  const walk = (dir) => readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+    const p = join(dir, e.name)
+    return e.isDirectory() ? walk(p) : [p]
+  })
+  for (const f of walk(h).filter((p) => p.includes('.bak-grapemcp-'))) {
+    const text = readFileSync(f, 'utf8')
+    assert.doesNotMatch(text, /grape_declared|grape_fish|GRAPE_API_TOKEN\s*=|GRAPE_BASE_URL\s*=/, `备份不得含凭据明文: ${f}\n${text}`)
+  }
+  // 二次 uninstall：所有形态都已清理，残留提示必须是真零残留
+  const again = run(['uninstall', '--target', 'opencode'], h, { GRAPE_API_TOKEN: '', GRAPE_BASE_URL: '' })
+  assert.equal(again.status, 0, again.stderr)
+  assert.match(`${again.stdout}${again.stderr}`, /未检测到[^\n]*残留/, `二次运行应为真零残留，实际:\n${again.stdout}`)
 })
