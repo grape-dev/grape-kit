@@ -1483,6 +1483,15 @@ if (cmd === 'intro') {
     }
     runCleanGlobal()
   } else {
+    // QA 复审（合入后基线）AC1：uninstall 零宿主痕迹时不得只有「未检测到宿主」就 exit——
+    // Spec 要求默认 uninstall 结束时输出残留项 + 清理命令（提示是只读操作，零痕迹也不得缺席）。
+    if (!targetExplicit && cmd === 'uninstall' && !detectHosts().length) {
+      console.error('未检测到任何已安装的宿主 agent。')
+      console.error('支持的宿主: opencode / workbuddy / codearts / officeace')
+      console.error('请用 --target <宿主> 指定后重跑（或先安装对应宿主 agent）。')
+      printResidualHint()
+      process.exit(1)
+    }
     if (!targetExplicit && cmd !== 'doctor') target = await resolveTargetAuto()
     const t = resolveTarget()
     if (t === 'all') {
