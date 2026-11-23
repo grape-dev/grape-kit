@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import { mkdtempSync, readFileSync, writeFileSync, existsSync, rmSync, mkdirSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, dirname } from 'node:path'
 
 const SETUP = new URL('../grape-kit.mjs', import.meta.url).pathname
 
@@ -610,11 +610,93 @@ test('Issue #20 clean-global 护栏：自定义路径含 grape 产物特征继�
   const h = home()
   const custom = join(h, 'grape-alt')
   mkdirSync(custom, { recursive: true })
-  writeFileSync(join(custom, 'config.json'), JSON.stringify({ token: 'x' }))
+  writeFileSync(join(custom, 'config.json'), JSON.stringify({ token: 'grape_custom_alt' }))
   const r = run(['uninstall', '--target', 'opencode', '--clean-global'], h, { GRAPE_HOME: custom })
   assert.equal(r.status, 0, r.stderr)
   assert.match(r.stdout, /警告/)
   assert.ok(!existsSync(custom), '含产物特征的自定义路径应按配置清理')
+})
+
+test('Issue #20 clean-global 护栏：已知 grape 产物文件（update-check 缓存）也构成继续清理的证据', skipOnWin, () => {
+  const h = home()
+  const custom = join(h, 'grape-data')
+  mkdirSync(custom, { recursive: true })
+  writeFileSync(join(custom, 'grape-kit-update-check.json'), JSON.stringify({ checkedAt: 1, latest: '9.9.9' }))
+  const r = run(['uninstall', '--target', 'opencode', '--clean-global'], h, { GRAPE_HOME: custom })
+  assert.equal(r.status, 0, r.stderr)
+  assert.match(r.stdout, /警告/)
+  assert.ok(!existsSync(custom), '含已知产物文件的自定义路径应按配置清理')
+})
+
+/* ── QA 复审（合入后 dev 基线）硬违规 3：护栏不可被路径形态绕过 ── */
+
+test('QA#硬违规3 护栏不可被 $HOME/.config 绕过：通用文件名 config.json 不构成 grape 产物证据', skipOnWin, () => {
+  const h = home()
+  // QA 实测复现：GRAPE_HOME=$HOME/.config（其下有普通 config.json）→ 旧护栏按「特征文件名」误判，整删 .config
+  mkdirSync(join(h, '.config', 'someapp'), { recursive: true })
+  writeFileSync(join(h, '.config', 'config.json'), JSON.stringify({ someapp: true }))
+  writeFileSync(join(h, '.config', 'someapp', 'data.txt'), 'user data')
+  const r = run(['uninstall', '--target', 'opencode', '--clean-global'], h, { GRAPE_HOME: join(h, '.config') })
+  assert.notEqual(r.status, 0, '$HOME/.config 必须拒删（普通 config.json 不是 grape 产物证据）')
+  assert.match(r.stderr, /拒绝/)
+  assert.ok(existsSync(join(h, '.config', 'someapp', 'data.txt')), '.config 下用户数据必须无损')
+  assert.ok(existsSync(join(h, '.config', 'config.json')), '普通 config.json 必须保留')
+})
+
+test('QA#硬违规3 护栏对 .. 穿越归一化：GRAPE_HOME=$HOME/.grape/.. 拒绝清空 HOME', skipOnWin, () => {
+  const h = home()
+  // QA 实测复现：env 值是裸字符串（未经 join 归一化），含 .. 的路径解析后等于 HOME 本身，
+  // 旧护栏只做字符串比对 → 判定「自定义路径」；HOME 根下的普通 config.json 又误构成「特征」→ 清空 HOME
+  mkdirSync(join(h, '.grape'), { recursive: true })
+  writeFileSync(join(h, '.grape', 'config.json'), JSON.stringify({ token: 'grape_x' }))
+  writeFileSync(join(h, 'config.json'), JSON.stringify({ otherapp: true }))
+  writeFileSync(join(h, 'important.txt'), 'must survive')
+  // 故意不 join：让 GRAPE_HOME 字面量带 ..（node join 会归一化掉，env 不会）
+  const rawWithDotDot = `${join(h, '.grape')}/..`
+  const r = run(['uninstall', '--target', 'opencode', '--clean-global'], h, { GRAPE_HOME: rawWithDotDot })
+  assert.notEqual(r.status, 0, '归一化后等于 HOME 必须拒删')
+  assert.match(r.stderr, /拒绝/)
+  assert.ok(existsSync(join(h, 'important.txt')), 'HOME 内容必须无损')
+  assert.ok(existsSync(join(h, '.grape', 'config.json')), '.grape 也不得被连带清空')
+})
+
+test('QA#硬违规3 护栏拒绝 GRAPE_HOME 指向 HOME 的祖先目录（含根/临时目录层级）', skipOnWin, () => {
+  const h = home()
+  const s = seedResidue(h)
+  const r = run(['uninstall', '--target', 'opencode', '--clean-global'], h, { GRAPE_HOME: dirname(h) })
+  assert.notEqual(r.status, 0, 'HOME 的父目录（tmpdir 层级）必须拒删')
+  assert.match(r.stderr, /拒绝/)
+  assert.ok(existsSync(s.grapeHome), '默认 ~/.grape 不得被连带删除')
+})
+
+test('QA#判断项 空目录的自定义 GRAPE_HOME：无 grape 产物证据同样拒删', skipOnWin, () => {
+  const h = home()
+  const empty = join(h, 'maybe-user-dir')
+  mkdirSync(empty, { recursive: true })
+  const r = run(['uninstall', '--target', 'opencode', '--clean-global'], h, { GRAPE_HOME: empty })
+  assert.notEqual(r.status, 0, '空目录无 grape 证据不得删除')
+  assert.match(r.stderr, /拒绝/)
+  assert.ok(existsSync(empty))
+})
+
+test('QA#判断项 --dry-run 预览与执行共用护栏：GRAPE_HOME=HOME 时预览即拒绝', skipOnWin, () => {
+  const h = home()
+  writeFileSync(join(h, 'important.txt'), 'keep')
+  const r = run(['uninstall', '--clean-global', '--dry-run'], h, { GRAPE_HOME: h })
+  assert.notEqual(r.status, 0, '预览不得对危险路径给出「将删除目录」清单')
+  assert.match(r.stderr, /拒绝/)
+  assert.ok(existsSync(join(h, 'important.txt')))
+})
+
+test('QA#判断项 拒绝信息必须给出解析后的绝对路径（用户可核对真实删除目标）', skipOnWin, () => {
+  const h = home()
+  const deep = join(h, 'a', 'b', 'c')
+  mkdirSync(deep, { recursive: true })
+  writeFileSync(join(deep, 'photos.txt'), 'family')
+  const r = run(['uninstall', '--target', 'opencode', '--clean-global'], h, { GRAPE_HOME: join(h, 'a', 'b', 'c') })
+  assert.notEqual(r.status, 0)
+  assert.match(r.stderr, new RegExp(deep.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), '拒绝信息应含解析后的绝对路径')
+  assert.ok(existsSync(join(deep, 'photos.txt')))
 })
 
 test('Issue #20 默认 uninstall 仅提示残留与清理命令，不执行删除', skipOnWin, () => {
