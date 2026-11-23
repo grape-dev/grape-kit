@@ -332,7 +332,7 @@ test('#19 handoff 为字符串：原样作为渲染标签', () => {
 /* ── 待派发标记：判据隔离 / 派发目标 / 兜底范围 / 可查询性 ──
  * 可查询性依据（平台 mgmt 路由源码实测）：POST progress 对已结束会话一律 409 not_active
  * （「接管会话已结束（finished）」），finish 在服务端同步关会话——交回后补写 progress 必然失败。
- * 因此待派发标记不再走 task_messages，改由会话记录（next_agent + handoff_seq=0）派生，
+ * 因此待派发标记不再走 task_messages，改由会话记录（next_agent + 派发指针 next_seq=0）派生，
  * grape_takeover_status 对 finished 会话仍可查（GET 无状态门），渲染给出目标/原因/补发指引。 */
 
 const sessOf = (over = {}) => ({
@@ -453,12 +453,12 @@ test('#19 平台拒绝向已结束会话写 progress（409 not_active）：待�
   } finally { stub.restore() }
 })
 
-test('#19 takeover_status 从会话记录派生待派发标记：finished+next_agent+handoff_seq=0 可查目标/原因/指引', () => {
+test('#19 takeover_status 从会话记录派生待派发标记：finished+next_agent+next_seq=0 可查目标/原因/指引', () => {
   const t = findTool('grape_takeover_status')
   const out = t.render({
     ok: true,
     session: {
-      id: 'tkos_19', status: 'finished', agent_type: 'coding', next_agent: 'qa', handoff_seq: 0,
+      id: 'tkos_19', status: 'finished', agent_type: 'coding', next_agent: 'qa', handoff_seq: 0, next_seq: 0,
       repo_key: 'gitcode:acme/demo', issue_id: '#62', task_id: 't_x',
       warnings_json: '["remote_may_still_run"]', skipped_dispatches: 0, summary: '已完成',
     },
@@ -467,18 +467,72 @@ test('#19 takeover_status 从会话记录派生待派发标记：finished+next_a
   assert.match(out, /qa/, '标记必须带目标节点')
   assert.match(out, /acme\/demo/, '标记必须带目标仓库')
   assert.match(out, /#62/, '标记必须带 issue')
-  assert.match(out, /handoff_seq=0/, '必须披露派发指针缺失的依据')
+  assert.match(out, /next_seq=0/, '判据依据必须是派发指针 next_seq，不是 handoff_seq')
+  assert.match(out, /handoff_seq=0/, '交回事件序号也须如实披露')
   assert.match(out, /remote_may_still_run/, '会话警告作为待派发原因必须可查')
   assert.match(out, /grape_trigger_pipeline\(agent=qa\)/, '必须给可执行补发指引')
   assert.match(out, /grape_get_issue_events/, '补发前必须先核实事件，防止兜底已成功时重复派发')
+})
+
+test('#19 takeover_status：next_seq>0 判已派发，handoff_seq 不作派发证据', () => {
+  const t = findTool('grape_takeover_status')
+  const out = t.render({
+    ok: true,
+    session: {
+      id: 'tkos_19', status: 'finished', agent_type: 'coding', next_agent: 'qa',
+      next_seq: 42, handoff_seq: 37, repo_key: 'gitcode:acme/demo', issue_number: 62,
+    },
+  })
+  assert.doesNotMatch(out, /待派发/, '派发指针 next_seq=42 成立即已派发，不得再告待派发')
+  assert.match(out, /next_seq=42/, '已派发必须披露判据依据')
+})
+
+test('#19 takeover_status：handoff_seq>0 而 next_seq=0 降级为「交回事件已写、派发未证实」', () => {
+  const t = findTool('grape_takeover_status')
+  const out = t.render({
+    ok: true,
+    session: {
+      id: 'tkos_19', status: 'finished', agent_type: 'coding', next_agent: 'qa',
+      handoff_seq: 42, repo_key: 'gitcode:acme/demo', issue_number: 62,
+    },
+  })
+  assert.match(out, /待派发/, 'handoff_seq 仅为交回事件序号，不是派发证据，必须仍标待派发')
+  assert.match(out, /派发未证实/, '仅有交回事件序号时措辞降级为「派发未证实」')
+  assert.match(out, /handoff_seq=42/, '降级措辞必须点名交回事件序号')
+  assert.match(out, /核实/, '降级措辞必须要求核实下一节点事件')
+  assert.doesNotMatch(out, /已由平台派发|已派发（next_seq/, '不得把 handoff_seq 说成已派发')
+})
+
+test('#19 takeover_status：issue 展示取 issue_number，issue_id 标注内部主键', () => {
+  const t = findTool('grape_takeover_status')
+  const both = t.render({
+    ok: true,
+    session: {
+      id: 'tkos_19', status: 'finished', agent_type: 'coding', next_agent: 'qa', next_seq: 0, handoff_seq: 0,
+      repo_key: 'gitcode:acme/demo', issue_number: 19, issue_id: 18808,
+    },
+  })
+  assert.match(both, /issue: #19/, '单号 issue_number 优先展示')
+  assert.doesNotMatch(both, /18808/, '内部主键不得占据 issue 展示位')
+  const onlyId = t.render({
+    ok: true,
+    session: {
+      id: 'tkos_19', status: 'finished', agent_type: 'coding', next_agent: 'qa', next_seq: 0, handoff_seq: 0,
+      repo_key: 'gitcode:acme/demo', issue_id: 18808,
+    },
+  })
+  assert.match(onlyId, /内部主键/, '缺 issue_number 时 issue_id 必须标注为内部主键')
+  const list = t.render({ ok: true, sessions: [{ id: 'tkos_19', issue_number: 19, issue_id: 18808, agent_type: 'coding', status: 'active' }] })
+  assert.match(list, /#19/, '列表同样以 issue_number 为单号')
+  assert.doesNotMatch(list, /18808/, '列表不得把内部主键当单号展示')
 })
 
 test('#19 takeover_status：skipped_dispatches 与已派发会话不误告警', () => {
   const t = findTool('grape_takeover_status')
   const skipped = t.render({ ok: true, session: { id: 'tkos_19', status: 'finished', next_agent: 'qa', handoff_seq: 0, repo_key: 'gitcode:acme/demo', issue_id: '#62', skipped_dispatches: 2 } })
   assert.match(skipped, /skipped_dispatches=2/, '平台跳过派发的会话必须渲染为待派发')
-  const dispatched = t.render({ ok: true, session: { id: 'tkos_19', status: 'finished', next_agent: 'qa', handoff_seq: 37, repo_key: 'gitcode:acme/demo', issue_id: '#62' } })
-  assert.doesNotMatch(dispatched, /待派发/, '平台已写入派发指针（handoff_seq>0）不得再告待派发')
+  const dispatched = t.render({ ok: true, session: { id: 'tkos_19', status: 'finished', next_agent: 'qa', next_seq: 37, handoff_seq: 37, repo_key: 'gitcode:acme/demo', issue_id: '#62' } })
+  assert.doesNotMatch(dispatched, /待派发/, '派发指针 next_seq>0 不得再告待派发')
   const active = t.render({ ok: true, session: { id: 'tkos_19', status: 'active', next_agent: '', handoff_seq: 0 } })
   assert.doesNotMatch(active, /待派发/, '进行中会话不适用待派发标记')
 })
