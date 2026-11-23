@@ -54,6 +54,26 @@ const WARNING_HINTS = {
 }
 const warningHint = (w) => WARNING_HINTS[String(w).split(':')[0].trim()] || ''
 
+/**
+ * 审核类端点直调：apiRequest 是 src/api.mjs 的命名导出，必须直接调用
+ * （曾误写成 api.apiRequest → 三个工具 native 必崩）。403 属凭据通道边界，
+ * 补上可执行的修复动作，避免用户误以为权限缺失而反复重试。
+ */
+async function reviewPost(path, body) {
+  try {
+    return await apiRequest('POST', path, { body })
+  } catch (e) {
+    if (e instanceof GrapeApiError && e.status === 403) {
+      throw new GrapeApiError(e.message, {
+        status: 403,
+        code: e.code,
+        hint: '审核端点仅放行会话级 tk_ token；用户级 grape_ Key 会被 403 拒绝（属凭据通道边界，不是权限缺失）。请改用 Grape WebUI 审核，或由持有 tk_ 会话的宿主执行。',
+      })
+    }
+    throw e
+  }
+}
+
 const OWNER_REPO_NUM = {
   owner: str('仓库归属（owner）'),
   repo: str('仓库名（repo）'),
@@ -303,10 +323,10 @@ export const TOOLS = [
 
   {
     name: 'grape_review_pass',
-    description: '审核通过：对处于 pending_review 的 issue 点审通过（节点放行、流水线继续）。若当前身份权限不足会如实返回 403 与指引。',
+    description: '审核通过：对处于 pending_review 的 issue 点审通过（节点放行、流水线继续）。通道：/api/issues/{n}/review-pass 仅放行会话级 tk_ token，用户级 grape_ Key 会 403（请用 WebUI 或持有 tk_ 会话的宿主执行）。',
     schema: { type: 'object', properties: { owner: str('仓库 owner'), repo: str('仓库名'), number: num('issue 编号'), comment: str('审批意见（可选）') }, required: ['owner', 'repo', 'number'] },
     async native(a) {
-      return api.apiRequest('POST', `/api/issues/${a.owner}/${a.repo}/${a.number}/review-pass`, { body: { ...(a.comment ? { comment: a.comment } : {}) } })
+      return reviewPost(`/api/issues/${a.owner}/${a.repo}/${a.number}/review-pass`, { ...(a.comment ? { comment: a.comment } : {}) })
     },
     render(json) {
       return json && typeof json === 'object' && !json.detail
@@ -316,10 +336,10 @@ export const TOOLS = [
   },
   {
     name: 'grape_review_reject',
-    description: '审核打回：对 pending_review 的 issue 打回并附意见（打回后按平台规则重派整改）。⚠️ 用户决策层动作：打回前向用户确认。',
+    description: '审核打回：对 pending_review 的 issue 打回并附意见（打回后按平台规则重派整改）。通道：仅放行会话级 tk_ token，用户级 grape_ Key 会 403。⚠️ 用户决策层动作：打回前向用户确认。',
     schema: { type: 'object', properties: { owner: str('仓库 owner'), repo: str('仓库名'), number: num('issue 编号'), comment: str('打回意见（必填，说明原因）') }, required: ['owner', 'repo', 'number', 'comment'] },
     async native(a) {
-      return api.apiRequest('POST', `/api/issues/${a.owner}/${a.repo}/${a.number}/review-reject`, { body: { comment: a.comment } })
+      return reviewPost(`/api/issues/${a.owner}/${a.repo}/${a.number}/review-reject`, { comment: a.comment })
     },
     render(json) {
       return json && typeof json === 'object' && !json.detail
@@ -329,13 +349,13 @@ export const TOOLS = [
   },
   {
     name: 'grape_confirm_done',
-    description: '确认完成（开发者确认通道）：issue 实际已完成但单据未落终态时，以开发者身份确认收尾（效果等同 WebUI 确认完成/CLI issues confirm done）。⚠️ 用户决策层动作：确认前向用户核实成果真实存在。',
+    description: '确认完成（开发者确认通道）：issue 实际已完成但单据未落终态时，以开发者身份确认收尾（效果等同 WebUI 确认完成/CLI issues confirm done）。通道：confirm-done 仅放行会话级 tk_ token，用户级 grape_ Key 会 403。⚠️ 用户决策层动作：确认前向用户核实成果真实存在。',
     schema: { type: 'object', properties: { owner: str('仓库 owner'), repo: str('仓库名'), number: num('issue 编号'), confirmation: str('完成确认说明（必填）') }, required: ['owner', 'repo', 'number', 'confirmation'] },
     async native(a) {
       const list = await api.listIssues(a.owner, a.repo)
       const row = (list.issues || []).find((i) => Number(i.issue_number) === Number(a.number))
       if (!row) throw new Error(`未找到 #${a.number}`)
-      return api.apiRequest('POST', `/api/issues/${row.id}/confirm-done`, { body: { confirmation: a.confirmation } })
+      return reviewPost(`/api/issues/${row.id}/confirm-done`, { confirmation: a.confirmation })
     },
     render(json) {
       return json && typeof json === 'object' && !json.detail

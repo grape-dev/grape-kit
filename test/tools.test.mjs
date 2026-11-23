@@ -137,3 +137,62 @@ test('trigger 工具 schema 声明 agent 枚举并在 native 透传', async () =
   } finally { api.triggerPipeline = orig }
   assert.deepEqual(seen, ['acme', 'demo', 12, '续跑', 'qa'], 'native 必须把 agent 透传给 api.triggerPipeline')
 })
+
+/* ── Issue #17：审核三工具 native 直调（api.apiRequest 崩溃修复） ── */
+
+function withFakeFetch(handler, fn) {
+  const origFetch = globalThis.fetch
+  const saved = { tok: process.env.GRAPE_API_TOKEN, base: process.env.GRAPE_BASE_URL, auth: process.env.GRAPE_AUTH_FILE }
+  process.env.GRAPE_API_TOKEN = 'grape_fake'
+  process.env.GRAPE_BASE_URL = 'https://env.example'
+  delete process.env.GRAPE_AUTH_FILE
+  globalThis.fetch = handler
+  const restore = () => {
+    globalThis.fetch = origFetch
+    if (saved.tok === undefined) delete process.env.GRAPE_API_TOKEN; else process.env.GRAPE_API_TOKEN = saved.tok
+    if (saved.base === undefined) delete process.env.GRAPE_BASE_URL; else process.env.GRAPE_BASE_URL = saved.base
+    if (saved.auth === undefined) delete process.env.GRAPE_AUTH_FILE; else process.env.GRAPE_AUTH_FILE = saved.auth
+  }
+  return Promise.resolve(fn()).finally(restore)
+}
+
+test('审核三工具 native 不再崩溃，直调真实端点，描述标注会话级通道', async () => {
+  const calls = []
+  await withFakeFetch(async (url, opts) => {
+    const u = String(url)
+    calls.push({ url: u, method: opts.method, body: opts.body ? JSON.parse(opts.body) : null })
+    const payload = u.endsWith('/api/issues/acme/demo') && opts.method === 'GET'
+      ? { issues: [{ issue_number: 5, id: 77 }] }
+      : { ok: true, issue_number: 5 }
+    return new Response(JSON.stringify(payload), { status: 200, headers: { 'content-type': 'application/json' } })
+  }, async () => {
+    const cases = [
+      ['grape_review_pass', { owner: 'acme', repo: 'demo', number: 5, comment: '放行' }, /\/api\/issues\/acme\/demo\/5\/review-pass$/, { comment: '放行' }],
+      ['grape_review_reject', { owner: 'acme', repo: 'demo', number: 5, comment: '缺校验' }, /\/api\/issues\/acme\/demo\/5\/review-reject$/, { comment: '缺校验' }],
+      ['grape_confirm_done', { owner: 'acme', repo: 'demo', number: 5, confirmation: '已完成' }, /\/api\/issues\/77\/confirm-done$/, { confirmation: '已完成' }],
+    ]
+    for (const [name, args, pathRe, body] of cases) {
+      const t = findTool(name)
+      assert.match(t.description, /tk_|会话级/, `${name} 描述必须标注真实可用通道`)
+      calls.length = 0
+      await t.native(args)
+      const post = calls.find((c) => c.method === 'POST')
+      assert.ok(post, `${name} 应发出 POST`)
+      assert.match(post.url, pathRe, `${name} endpoint`)
+      assert.deepEqual(post.body, body, `${name} body`)
+    }
+  })
+})
+
+test('审核工具 403 抛出带修复动作的通道提示', async () => {
+  await withFakeFetch(
+    async () => new Response(JSON.stringify({ detail: 'forbidden' }), { status: 403, headers: { 'content-type': 'application/json' } }),
+    async () => {
+      const { GrapeApiError } = await import('../src/api.mjs')
+      await assert.rejects(
+        findTool('grape_review_pass').native({ owner: 'a', repo: 'b', number: 1 }),
+        (e) => e instanceof GrapeApiError && e.status === 403 && /tk_|会话级/.test(e.hint),
+      )
+    },
+  )
+})
