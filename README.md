@@ -19,10 +19,10 @@
 
 ---
 
-Grape-kit helps **mainstream agents** (opencode / CodeArts / WorkBuddy / openclaw, etc.) use [Grape](https://gitcode.com/grape-dev/grape) safely and in a structured way — an AI-native DevOps platform with multi-agent pipelines (vod → issue → coding → qa → sre).
+Grape-kit helps **mainstream agents** (opencode / CodeArts / WorkBuddy / dsh / openclaw, etc.) use [Grape](https://gitcode.com/grape-dev/grape) safely and in a structured way — an AI-native DevOps platform with multi-agent pipelines (vod → issue → coding → qa → sre).
 
 ```
-agent (MCP stdio: opencode / CodeArts / WorkBuddy…; other MCP-capable agents wire up manually)
+agent (MCP stdio: opencode / CodeArts / WorkBuddy / dsh…; other MCP-capable agents wire up manually)
   → grape-kit (39 tools · native HTTP · Markdown rendering · initialize-instruction bootstrap)
     → grape server (pipelines / events / takeover session API; CLI only as 401 fallback)
 ```
@@ -96,6 +96,29 @@ npx -y @grape-dev/grape-kit update --target workbuddy
 npx -y @grape-dev/grape-kit uninstall --target workbuddy   # removes entry + skill + receipt (config backed up)
 ```
 
+### DeepSeek Harness (dsh)
+
+```bash
+npx -y @grape-dev/grape-kit install --target dsh
+```
+
+Writes a **managed block** into `$DSH_HOME/profiles/web/cordis.patch.yml` (default `$DSH_HOME` = `~/.dsh`): an `insert` row with `id: grape-kit`, `name: '@deepseek-ai/dsh-mcp-client'`, `transport: stdio`, and a `node` command pointing at the local MCP entry (falls back to `npx` when the script cannot be resolved). The `grape-remote` skill is copied to `$DSH_HOME/skills/`. Only the lines between the managed markers are touched — your own patch rows stay byte-for-byte intact and every write is backed up first. **Restart the dsh session** afterwards to load the new patch.
+
+`@deepseek-ai/dsh-mcp-client` is a `web`-profile asset: the installer tries a best-effort install and never blocks on failure. If it cannot install it, run:
+
+```bash
+npx @deepseek-ai/dsh plugin --profile web add @deepseek-ai/dsh-mcp-client
+corepack enable pnpm   # first, if pnpm is missing
+```
+
+```bash
+npx -y @grape-dev/grape-kit doctor --target dsh --probe   # managed block / skill copy / dsh-mcp-client
+npx -y @grape-dev/grape-kit install --target dsh          # re-assembly after upgrade (idempotent)
+npx -y @grape-dev/grape-kit uninstall --target dsh        # removes the managed block + skill copy only
+```
+
+> dsh uses the **MCP minimal path** (all 39 tools reused unchanged). The full native Cordis plugin lives in [grape-dsh](https://gitcode.com/grape-dev/grape-dsh); the two coexist.
+
 ### openclaw (ClawHub marketplace)
 
 ```bash
@@ -168,7 +191,7 @@ Full release notes: [CHANGELOG.md](CHANGELOG.md) — 19 条发布记录（含 0.
 
 ```bash
 npm install
-npm test        # 156 unit tests (fake-grape stand-in, no real server needed)
+npm test        # 165 unit tests (fake-grape stand-in, no real server needed)
 npm run smoke   # real stdio JSON-RPC round-trip: initialize → tools/list → tools/call
 ```
 
@@ -186,7 +209,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the contribution flow, [AGENTS.md](AG
 - [x] Org repo home (grape-dev/grape-kit)
 - [ ] Full CI gating (GitHub Actions-compatible workflow provided today; enable GitCode GoCI once generally available)
 - [x] More install targets: codearts / officeace (three integration types)
-- [ ] dsh is served by the dedicated [grape-dsh](https://gitcode.com/grape-dev/grape-dsh) plugin, no duplicate effort
+- [x] dsh install target (MCP stdio managed patch); the full native Cordis plugin stays in [grape-dsh](https://gitcode.com/grape-dev/grape-dsh) — the two coexist
 
 ## Links
 
