@@ -289,6 +289,42 @@ test('Issue #20 auth init 拒绝非 grape_ 前缀 token 且不落盘', () => {
   assert.ok(!existsSync(join(grapeHome, 'config.json')), '拒绝时不得写入文件通道')
 })
 
+/* ── QA 复审（合入后 dev 基线）AC2/可疑3：auth init 冲突检测 + 非 TTY token 掩码 ── */
+
+test('QA#AC2 auth init 检测旧 env 凭据冲突：警告 env 覆盖文件通道并给出处置指引', () => {
+  const h = home()
+  const grapeHome = join(h, 'grapehome')
+  const r = run(['auth', 'init', '--token', 'grape_new_secret', '--base-url', 'https://new.example'], h,
+    { ...cleanCredEnv, GRAPE_HOME: grapeHome, GRAPE_API_TOKEN: 'grape_env_old' })
+  assert.equal(r.status, 0, r.stderr)
+  assert.match(r.stdout, /冲突|不一致/, '应提示双通道冲突')
+  assert.match(r.stdout, /env.*优先|优先级|被更高优先级/, '应说明 env 优先级高于文件通道')
+  assert.match(r.stdout, /--clean-global|删除.*环境变量|重启/, '应给出让文件通道生效的处置指引')
+  assert.doesNotMatch(r.stdout, /grape_env_old/, '不得回显旧 token')
+})
+
+test('QA#AC2 auth init 检测 runtime（GRAPE_API_TOKEN_ONCE）冲突：同样警告', () => {
+  const h = home()
+  const grapeHome = join(h, 'grapehome')
+  const r = run(['auth', 'init', '--token', 'grape_new_secret'], h,
+    { ...cleanCredEnv, GRAPE_HOME: grapeHome, GRAPE_API_TOKEN_ONCE: 'grape_runtime_old' })
+  assert.equal(r.status, 0, r.stderr)
+  assert.match(r.stdout, /冲突|不一致/, 'runtime 档命中同样要提示冲突')
+  assert.doesNotMatch(r.stdout, /grape_runtime_old/, '不得回显旧 token')
+})
+
+test('QA#可疑3 auth init 非 TTY 输出掩码 token：明文不落 CI 日志（文件通道已写入）', () => {
+  const h = home()
+  const grapeHome = join(h, 'grapehome')
+  const r = run(['auth', 'init', '--token', 'grape_fake_init', '--base-url', 'https://self.example'], h,
+    { ...cleanCredEnv, GRAPE_HOME: grapeHome })
+  assert.equal(r.status, 0, r.stderr)
+  assert.doesNotMatch(r.stdout, /grape_fake_init/, '非 TTY 不得把 token 明文打进 stdout')
+  assert.match(r.stdout, /export GRAPE_API_TOKEN=|setx GRAPE_API_TOKEN /, '仍给出 env 通道指引（掩码占位）')
+  // 文件通道照常写入（掩码只影响回显，不影响落盘目标）
+  assert.equal(JSON.parse(readFileSync(join(grapeHome, 'config.json'), 'utf8')).token, 'grape_fake_init')
+})
+
 /* ── QA 复审（PR #11）P1：auth init 写入目标必须与 resolveCredentials 解析目标一致 ── */
 
 test('QA#P1 auth init 尊重 GRAPE_AUTH_FILE：写入目标=解析目标，一次写入后文件通道即生效', () => {
