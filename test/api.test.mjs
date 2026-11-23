@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { resolveCredentials, apiRequest, GrapeApiError, waitTaskNative, api, getBaseUrl, grapeHome, readAuthChannel, AGENT_TYPES } from '../src/api.mjs'
+import { resolveCredentials, apiRequest, GrapeApiError, waitTaskNative, api, getBaseUrl, grapeHome, readAuthChannel, npxCacheRoot, AGENT_TYPES } from '../src/api.mjs'
 import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from 'node:fs'
 import { tmpdir, homedir } from 'node:os'
 import { join } from 'node:path'
@@ -170,6 +170,15 @@ test('QA#P2 grapeHome 单源导出：GRAPE_HOME 覆盖 + 默认 ~/.grape（全�
   assert.equal(grapeHome({ GRAPE_HOME: '  ' }), join(homedir(), '.grape'), '空白 GRAPE_HOME 视为未设置')
   assert.equal(grapeHome({ GRAPE_HOME: '/custom/grape' }), '/custom/grape')
   assert.equal(grapeHome({}), join(homedir(), '.grape'))
+})
+
+/* ── QA 复审（合入后 dev 基线）win32 盲区：_npx 缓存路径按平台分流（%LocalAppData%） ── */
+
+test('QA#win32 npxCacheRoot：Windows 走 %LocalAppData%\\npm-cache\\_npx（LOCALAPPDATA 缺省回落 homedir），POSIX 走 ~/.npm/_npx', () => {
+  assert.equal(npxCacheRoot({ LOCALAPPDATA: 'C:\\Users\\u\\AppData\\Local' }, 'win32'), join('C:\\Users\\u\\AppData\\Local', 'npm-cache', '_npx'), 'Windows npm 缓存实际在 %LocalAppData%\\npm-cache\\_npx')
+  assert.equal(npxCacheRoot({}, 'win32'), join(join(homedir(), 'AppData', 'Local'), 'npm-cache', '_npx'), 'LOCALAPPDATA 缺省回落 homedir/AppData/Local')
+  assert.equal(npxCacheRoot({}, 'linux'), join(homedir(), '.npm', '_npx'), 'POSIX 保持 ~/.npm/_npx')
+  assert.equal(npxCacheRoot({}, 'darwin'), join(homedir(), '.npm', '_npx'), 'macOS 与 POSIX 同路径')
 })
 
 test('QA#P2 readAuthChannel 单源解析：GRAPE_AUTH_FILE 优先 / BOM 剥除 / 解析失败只置标志不透传原文', () => {

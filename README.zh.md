@@ -162,7 +162,7 @@ npx -y @grape-dev/grape-kit intro     # 随时重看能力地图
 
 | 版本 | 日期 | 要点 |
 |---|---|---|
-| 0.3.10 | 2026-11-23 | 接管交回派发收口（#19）：派发指针只认 `next_seq`（`handoff_seq` 只是交回事件序号，不作派发证据）· 平台漏派时客户端兜底补发 coding→qa（与 trigger 同源 A2A 通道）并回填 `next_seq` · 受阻（`remote_may_still_run`／缺仓库-issue 标识／补发失败）落 `pending_dispatch` 待派发标记 + 可读告警，不再静默 grace；三处「未证实当成功」收口：交回未成功（`ok=false`／`changed=false`）不派发下一节点 · 白名单外节点名（如 `reviewer`）按「未知」上报不改写为 qa · 补发响应缺事件 `seq` 判未证实；#20 凭据/卸载批：`auth init` 唯一写入入口 · `uninstall --clean-global`（`--dry-run`、rc 备份不留凭据行、`_npx` 收窄到 grape-kit）· doctor 完整凭据优先级视图；单测 156→221 |
+| 0.3.10 | 2026-11-23 | 接管交回派发收口（#19）：派发指针只认 `next_seq`（`handoff_seq` 只是交回事件序号，不作派发证据）· 平台漏派时客户端兜底补发 coding→qa（与 trigger 同源 A2A 通道）并回填 `next_seq` · 受阻（`remote_may_still_run`／缺仓库-issue 标识／补发失败）落 `pending_dispatch` 待派发标记 + 可读告警，不再静默 grace；三处「未证实当成功」收口：交回未成功（`ok=false`／`changed=false`）不派发下一节点 · 白名单外节点名（如 `reviewer`）按「未知」上报不改写为 qa · 补发响应缺事件 `seq` 判未证实；#20 凭据/卸载批：`auth init` 唯一写入入口 · `uninstall --clean-global`（`--dry-run`、rc 备份不留凭据行、`_npx` 收窄到 grape-kit）· doctor 完整凭据优先级视图；单测 156→257 |
 | 0.3.9 | 2026-11-23 | 端云接管全链路硬化（#12）：takeover_start 分支/MR 前置检查 · warnings 全量透出 · Node 跨平台接管三脚本（report/request-finish/finish）· 409 agent_mismatch 友好提示 · bundle 脚本 {{CWD}} 渲染 · doctor 凭据来源行；#17 修复批：intro 子命令 + 能力地图（无凭据先给 3 步 API Key 指引）· trigger_pipeline agent 参数（可从指定节点续跑）· doctor base_url 双通道并标注生效来源 · 审核三工具 native 崩溃修复；单测 136→156 |
 | 0.3.8 | 2026-11-20 | 审核三工具（grape_review_pass / grape_review_reject / grape_confirm_done，工具面 36→39）· issues 表新增「仓库」列 · doctor 识别 ~/.grape/config.json 文件通道凭证（不再误报 FAIL） |
 | 0.3.7 | 2026-11-20 | trigger/task_status 图形化渲染（触发即出节点链图 · 状态查询出卡片+进度条+下一步指引）· Quick Start 重构对齐 devkit 模式 + Capabilities 总览节 · 卸载清理 receipt · Codex/hermes 移出露出面 |
@@ -193,7 +193,7 @@ npx -y @grape-dev/grape-kit intro     # 随时重看能力地图
 
 ```bash
 npm install
-npm test        # 221 个单测（fake-grape 替身，不依赖真实服务端）
+npm test        # 257 个单测（fake-grape 替身，不依赖真实服务端）
 npm run smoke   # 真实 stdio JSON-RPC 往返：initialize → tools/list → tools/call
 ```
 
