@@ -7,6 +7,15 @@ import { join } from 'node:path'
 
 const SETUP = new URL('../grape-kit.mjs', import.meta.url).pathname
 
+/* Windows 可移植性（QA 复审 P2.8）：
+ * - win32 的 os.homedir() 读 USERPROFILE 不读 HOME —— 本文件的 HOME=h 隔离对
+ *   走 homedir() 的破坏性清理（--clean-global：删 GRAPE_HOME/rc/_npx）全部失效，
+ *   在 Windows 开发机上跑会触达真实用户目录（且 rc 断言不成立：win32 走 reg delete）。
+ *   此类用例在 win32 整体 skip；win32 行为由 Windows 11 实机回归覆盖（PR 步骤）。
+ * - 走 GRAPE_HOME 环境变量的用例（auth init / doctor）实现层可移植，仅权限位断言分流。 */
+const isWin = process.platform === 'win32'
+const skipOnWin = { skip: isWin ? 'win32: HOME 隔离对 homedir() 无效，破坏性清理用例走实机回归' : false }
+
 /* 临时 HOME 统一登记，文件级 after 钩子收尾（用例中途失败也不残留临时目录） */
 const homes = []
 function home() {
@@ -557,7 +566,7 @@ function seedResidue(h) {
   return { grapeHome, npx, own, other }
 }
 
-test('Issue #20 uninstall --clean-global 零残留且不影响其他 npx 缓存', () => {
+test('Issue #20 uninstall --clean-global 零残留且不影响其他 npx 缓存', skipOnWin, () => {
   const h = home()
   const s = seedResidue(h)
   assert.equal(run(['install', '--target', 'opencode'], h).status, 0)
@@ -573,7 +582,7 @@ test('Issue #20 uninstall --clean-global 零残留且不影响其他 npx 缓存'
   assert.ok(existsSync(s.other), '其他包缓存必须保留')
 })
 
-test('Issue #20 默认 uninstall 仅提示残留与清理命令，不执行删除', () => {
+test('Issue #20 默认 uninstall 仅提示残留与清理命令，不执行删除', skipOnWin, () => {
   const h = home()
   const s = seedResidue(h)
   assert.equal(run(['install', '--target', 'opencode'], h).status, 0)
@@ -584,7 +593,7 @@ test('Issue #20 默认 uninstall 仅提示残留与清理命令，不执行删�
   assert.match(r.stdout, /--clean-global/)
 })
 
-test('Issue #20 _npx 白名单：名字相似但不在 @grape-dev 下的条目不删', () => {
+test('Issue #20 _npx 白名单：名字相似但不在 @grape-dev 下的条目不删', skipOnWin, () => {
   const h = home()
   const npx = join(h, '.npm', '_npx')
   const fake = join(npx, 'cccccccc')
@@ -597,7 +606,7 @@ test('Issue #20 _npx 白名单：名字相似但不在 @grape-dev 下的条目�
 
 /* ── QA 复审（PR #11）P1：--clean-global 主路径不得被宿主解析短路 ── */
 
-test('QA#P1 uninstall --clean-global 不带 --target：零宿主痕迹时也照跑全局清理（exit 0）', () => {
+test('QA#P1 uninstall --clean-global 不带 --target：零宿主痕迹时也照跑全局清理（exit 0）', skipOnWin, () => {
   const h = home()
   const s = seedResidue(h)
   // seedResidue 不建任何宿主痕迹：旧实现先走 resolveTargetAuto()，非 TTY 下 exit 1，
@@ -613,7 +622,7 @@ test('QA#P1 uninstall --clean-global 不带 --target：零宿主痕迹时也照�
   }
 })
 
-test('QA#P1 uninstall --clean-global 不带 --target：有宿主痕迹时卸载宿主并执行全局清理', () => {
+test('QA#P1 uninstall --clean-global 不带 --target：有宿主痕迹时卸载宿主并执行全局清理', skipOnWin, () => {
   const h = home()
   const s = seedResidue(h)
   assert.equal(run(['install', '--target', 'opencode'], h).status, 0)
@@ -627,8 +636,6 @@ test('QA#P1 uninstall --clean-global 不带 --target：有宿主痕迹时卸载�
 })
 
 /* ── QA 复审（PR #11）硬违规 2：rc 备份不得含明文凭据，残留检测必须覆盖备份 ── */
-
-const isWin = process.platform === 'win32'
 
 test('QA#硬违规2 --clean-global 的 rc 备份不得含明文凭据行（凭据归零不得换文件名留盘）', { skip: isWin }, () => {
   const h = home()
@@ -661,7 +668,7 @@ test('QA#硬违规2 含凭据的旧 .bak-grapemcp-* 备份：残留提示点名�
 
 /* ── QA 复审（PR #11）P2：--clean-global --dry-run 预览语义（危险操作门） ── */
 
-test('QA#P2 --clean-global --dry-run：只预览将清理项，不动盘上任何凭据/痕迹', () => {
+test('QA#P2 --clean-global --dry-run：只预览将清理项，不动盘上任何凭据/痕迹', skipOnWin, () => {
   const h = home()
   const s = seedResidue(h)
   assert.equal(run(['install', '--target', 'opencode'], h).status, 0)

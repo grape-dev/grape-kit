@@ -265,8 +265,17 @@ test('Issue #20 auth init 写入 GRAPE_HOME/config.json（权限 600）并打印
   const cfg = JSON.parse(readFileSync(cfgPath, 'utf8'))
   assert.equal(cfg.token, 'grape_fake_init')
   assert.equal(cfg.base_url, 'https://self.example')
-  assert.equal(statSync(cfgPath).mode & 0o777, 0o600, '凭据文件权限应为 600')
-  assert.match(r.stdout, /export GRAPE_API_TOKEN=/, 'POSIX 应打印 export 设置命令')
+  // 权限位断言按平台分流（QA P2.8）：win32 无 600 权限位，chmod 为 no-op
+  if (process.platform !== 'win32') {
+    assert.equal(statSync(cfgPath).mode & 0o777, 0o600, '凭据文件权限应为 600')
+  }
+  // env 通道指引按平台分流：POSIX 打印 export，Windows 打印 setx（并提示需重启宿主）
+  if (process.platform === 'win32') {
+    assert.match(r.stdout, /setx GRAPE_API_TOKEN=/, 'Windows 应打印 setx 设置命令')
+    assert.match(r.stdout, /重启/, 'setx 只对新进程生效，应提示重启')
+  } else {
+    assert.match(r.stdout, /export GRAPE_API_TOKEN=/, 'POSIX 应打印 export 设置命令')
+  }
   assert.match(r.stdout, /GRAPE_BASE_URL/)
   assert.match(r.stdout, /GRAPE_API_TOKEN_ONCE[\s\S]*GRAPE_API_TOKEN[\s\S]*(GRAPE_AUTH_FILE|config\.json)/, '应说明优先级链')
 })
