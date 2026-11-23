@@ -18,6 +18,7 @@ const GIT_IDENTITY = ['-c', 'user.name=changelog-test', '-c', 'user.email=change
  * `0.2.3` 从未发布，不得补造。
  */
 const PUBLISHED = [
+  ['0.4.0', '2026-11-23'],
   ['0.3.10', '2026-11-23'],
   ['0.3.9', '2026-11-23'],
   ['0.3.8', '2026-11-20'],
@@ -127,11 +128,16 @@ test('每个版本节含发布日期与至少一条 Added/Changed/Fixed 条目',
   }
 })
 
-test('README 版本历史节链接 CHANGELOG.md、含 0.3.3/0.3.6/0.3.7/0.3.8/0.3.9/0.3.10 行且计数与 npm 发布记录一致', () => {
+test('README 版本历史节链接 CHANGELOG.md、含 0.3.3/0.3.6/0.3.7/0.3.8/0.3.9/0.3.10/0.4.0 行且计数与 npm 发布记录一致', () => {
   const md = readme()
   const section = mdSection(md, '版本历史') || mdSection(md, 'Version history')
   assert.ok(section, 'README 应保留版本历史节（英文版为 Version history）')
   assert.match(section, /\[[^\]]*CHANGELOG[^\]]*\]\(\.?\/?CHANGELOG\.md\)/, '版本历史节应含指向 CHANGELOG.md 的相对链接')
+
+  const row040 = section.split('\n').find((l) => /^\| 0\.4\.0 \|/.test(l))
+  assert.ok(row040, '版本历史表应含 0.4.0 行')
+  assert.match(row040, /\| 2026-11-23 \|/, '0.4.0 日期应与 CHANGELOG 发布节一致（2026-11-23）')
+  assert.match(row040, /dsh/, '0.4.0 行应记录 dsh 适配')
 
   const row0310 = section.split('\n').find((l) => /^\| 0\.3\.10 \|/.test(l))
   assert.ok(row0310, '版本历史表应含 0.3.10 行')
@@ -165,7 +171,7 @@ test('README 版本历史节链接 CHANGELOG.md、含 0.3.3/0.3.6/0.3.7/0.3.8/0.
   assert.ok(row033, '版本历史表应含 0.3.3 行')
   assert.match(row033, /\| 2026-11-18 \|/, '0.3.3 日期应为 npm 发布日 2026-11-18')
 
-  assert.match(section, /20 条发布记录/, '发布记录计数应为 20（npm 已发布 19 + 0.3.10，含 0.0.0-stage 占位包）')
+  assert.match(section, /21 条发布记录/, '发布记录计数应为 21（npm 已发布 20 + 0.4.0，含 0.0.0-stage 占位包）')
   assert.ok(!/12 个已发布版本|12 条发布记录/.test(section), '不得再写「12 个已发布版本」')
 })
 
@@ -201,7 +207,7 @@ function runGenerator(dir, prev) {
 }
 
 test('gen-changelog 把新版本节插在 Unreleased 段之后，历史节逐字保留', () => {
-  // 用未发布的假想版本 0.3.11：0.3.10 已定稿（发版簿记已写入发布节），用 0.3.10 会打到「跳过写入」分支，测不到插入落位
+  // 用未发布的假想版本 0.3.11：0.4.0 已定稿（发版簿记已写入发布节），用已发布版本会打到「跳过写入」分支，测不到插入落位
   const dir = tempRepo('0.3.11')
   try {
     const before = readFileSync(join(dir, 'CHANGELOG.md'), 'utf8')
@@ -209,11 +215,11 @@ test('gen-changelog 把新版本节插在 Unreleased 段之后，历史节逐字
     assert.equal(preambleOf(after), preambleOf(before), '标题与说明应保持原位（新节不得压到标题之上）')
     const atUnreleased = after.search(/^## Unreleased$/m)
     const atNew = after.search(/^## 0\.3\.11 \(/m)
-    const atPrev = after.search(/^## 0\.3\.9 \(/m)
+    const atPrev = after.search(/^## 0\.4\.0 \(/m)
     assert.ok(atUnreleased >= 0, 'CHANGELOG 应保留 Unreleased 段')
     assert.ok(atUnreleased < atNew && atNew < atPrev, 'Unreleased 保持在最上，新版本节紧跟其后、已发布节之前')
     // 已发布版本节逐字保留：从最新发布节起算，与改前内容完全一致
-    const releasedBefore = before.slice(before.search(/^## 0\.3\.9 \(/m))
+    const releasedBefore = before.slice(before.search(/^## 0\.4\.0 \(/m))
     assert.ok(after.endsWith(releasedBefore), '历史版本节应逐字保留')
     assert.match(after, /^# Changelog$/m, '文件仍应以 Keep a Changelog 标题开头')
   } finally {
