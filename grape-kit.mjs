@@ -19,7 +19,7 @@ import { join, dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
 import { checkUpdateStatus, formatUpdateNotice } from './src/update-check.mjs'
-import { resolveCredentials } from './src/api.mjs'
+import { resolveCredentials, getBaseUrl } from './src/api.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const DEFAULT_SCRIPT = resolve(HERE, 'grape-kit-mcp.mjs')
@@ -72,8 +72,21 @@ function credentialSourceCheck() {
           : ''
   return ['当前生效凭据来源', c.token ? `ok（${label}；base_url=${c.baseUrl}，不回显 token）` : '未配置（FAIL）：看上一行修复动作']
 }
+/** base_url 展示：与 getBaseUrl() 同源，并标注来源（env / 文件通道 / 默认），避免只读 env 的假阳性 FAIL */
+function baseUrlInfo() {
+  const base = getBaseUrl()
+  if (process.env.GRAPE_BASE_URL) return { base, source: '环境变量 GRAPE_BASE_URL' }
+  const authFile = process.env.GRAPE_AUTH_FILE || join(homedir(), '.grape', 'config.json')
+  if (existsSync(authFile)) {
+    try {
+      const cfg = JSON.parse(readFileSync(authFile, 'utf8').replace(/^\uFEFF/, ''))
+      if (cfg.base_url || cfg.baseUrl) return { base, source: `文件通道 ${authFile}` }
+    } catch { /* 损坏文件按未配置处理 */ }
+  }
+  return { base, source: '默认' }
+}
 const envChecks = () => [
-  ['GRAPE_BASE_URL', process.env.GRAPE_BASE_URL ? `ok（${process.env.GRAPE_BASE_URL}）` : '未设置（FAIL）：export GRAPE_BASE_URL=https://www.grapedev.cn'],
+  (() => { const { base, source } = baseUrlInfo(); return ['GRAPE_BASE_URL', `ok（${base}；来源=${source}）`] })(),
   ['GRAPE_API_TOKEN', process.env.GRAPE_API_TOKEN
     ? 'ok（已设置，不回显）'
     : existsSync(join(homedir(), '.grape', 'config.json'))
@@ -224,7 +237,7 @@ function doctorWorkbuddy(probe) {
   const found = detectWorkbuddy()
   checks.push(entryCheck('workbuddy mcpServers.grape-kit', found, 'npx -y @grape-dev/grape-kit install --target workbuddy'))
   checks.push(['workbuddy skill 副本', existsSync(join(p.skillsDir, 'grape-remote', 'SKILL.md')) ? 'ok' : '未安装'])
-  if (probe && process.env.GRAPE_BASE_URL) checks.push(['契约连通性', connectivityCheck(process.env.GRAPE_BASE_URL)])
+  if (probe) checks.push(['契约连通性', connectivityCheck(getBaseUrl())])
   printChecks(checks)
 }
 
@@ -316,7 +329,7 @@ function doctorCodearts(probe) {
   const checks = baseChecks()
   const found = detectCodearts()
   checks.push(entryCheck('codearts mcp.grape-kit', found, 'npx -y @grape-dev/grape-kit install --target codearts'))
-  if (probe && process.env.GRAPE_BASE_URL) checks.push(['契约连通性', connectivityCheck(process.env.GRAPE_BASE_URL)])
+  if (probe) checks.push(['契约连通性', connectivityCheck(getBaseUrl())])
   printChecks(checks)
 }
 
@@ -388,7 +401,7 @@ function doctorOfficeace(probe) {
   const found = detectOfficeace()
   checks.push(entryCheck('officeace mcpServers.grape-kit', found, 'npx -y @grape-dev/grape-kit install --target officeace'))
   if (found.ok) checks.push(['officeace 导入状态', '需在客户端「扩展 → 连接器」中确认已连接（清单存在 ≠ 已导入）'])
-  if (probe && process.env.GRAPE_BASE_URL) checks.push(['契约连通性', connectivityCheck(process.env.GRAPE_BASE_URL)])
+  if (probe) checks.push(['契约连通性', connectivityCheck(getBaseUrl())])
   printChecks(checks)
 }
 
@@ -793,11 +806,11 @@ async function doctorOpencode(probe) {
   const p = opencodePaths()
   // 与其它宿主共用 baseChecksWithCli / printChecks，避免文案与判定各写一份后漂移
   const checks = baseChecksWithCli()
-  const baseUrl = process.env.GRAPE_BASE_URL
+  const baseUrl = getBaseUrl()
   const found = detectOpencode()
   checks.push(entryCheck('opencode mcp.grape 条目', found, 'node setup.mjs install --target opencode'))
   checks.push(['opencode skill 副本', existsSync(join(p.skillsDir, 'grape-remote', 'SKILL.md')) ? 'ok' : '未安装'])
-  if (probe && baseUrl) {
+  if (probe) {
     const ok = spawnSync(process.execPath, ['-e', `
 const base = process.argv[1]
 const tok = process.env.GRAPE_API_TOKEN || ''
@@ -848,7 +861,7 @@ async function doctorAll(probe) {
     const found = host.detect()
     checks.push(entryCheck(`${name} 条目`, found, `npx -y @grape-dev/grape-kit install --target ${name}`))
   }
-  if (probe && process.env.GRAPE_BASE_URL) checks.push(['契约连通性', connectivityCheck(process.env.GRAPE_BASE_URL)])
+  if (probe) checks.push(['契约连通性', connectivityCheck(getBaseUrl())])
   // check_update：汇总模式同样提示版本（24h 缓存 + 5s 有界超时，失败静默）
   const pkgVersion = JSON.parse(readFileSync(join(HERE, 'package.json'), 'utf8')).version
   let updateStatus = { state: 'unavailable' }

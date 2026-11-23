@@ -234,3 +234,17 @@ test('doctor 升级提示与 MCP 共用文案：两个等价开关都列出', ()
   assert.match(r.stdout, /GRAPE_KIT_SKIP_UPDATE_CHECK=1 或 GRAPE_KIT_NO_UPDATE_CHECK=1 关闭提醒/)
   rmSync(h, { recursive: true, force: true })
 })
+
+/* ── Issue #17：doctor base_url 双通道（env + 文件），消除假阳性 FAIL ── */
+
+test('Issue #17 仅 ~/.grape/config.json 配 base_url 时 doctor PASS 标注文件通道且探针照常执行', () => {
+  const h = home()
+  mkdirSync(join(h, '.grape'), { recursive: true })
+  writeFileSync(join(h, '.grape', 'config.json'), JSON.stringify({ token: 'grape_file', base_url: 'http://127.0.0.1:9' }))
+  const r = run(['doctor', '--probe'], h, {
+    GRAPE_KIT_SKIP_UPDATE_CHECK: '1', GRAPE_BASE_URL: '', GRAPE_AUTH_FILE: '',
+  })
+  assert.equal(r.status, 0, r.stderr)
+  assert.match(r.stdout, /\[ok\] GRAPE_BASE_URL: .*文件通道/, '文件通道必须 PASS 并标注来源')
+  assert.match(r.stdout, /契约连通性/, '解析到地址后探针必须执行（不再依赖 env）')
+})
