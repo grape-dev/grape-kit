@@ -85,6 +85,25 @@ const asAgentType = (v) => {
  */
 const seqOf = (json, key) => Number(json?.session?.[key] ?? json?.[key]) || 0
 
+/**
+ * 平台 `handoff` 字段的渲染口径：字符串直接当标签；对象一律按结构化口径描述，
+ * 不得把对象插进模板串——否则渲染成 `handoff=[object Object]`，
+ * 平台失败原文（实测形状 `{"ok":false,"error":"HTTP 405: ..."}`）随之丢失。
+ */
+function describeHandoff(v) {
+  if (v === undefined || v === null || v === '') return { label: 'a2a', failure: '' }
+  if (typeof v === 'string') return { label: v.trim() || 'a2a', failure: '' }
+  if (typeof v === 'object') return { label: '结构化', failure: handoffFailure(v) }
+  return { label: String(v), failure: '' }
+}
+
+/** 平台 handoff 失败原文：`ok=false`（或缺 ok 但带错误字段）即失败，原样透出 error/detail/message */
+function handoffFailure(v = {}) {
+  const failed = v.ok === false || (v.ok === undefined && Boolean(v.error || v.detail || v.message))
+  if (!failed) return ''
+  return String(v.error ?? v.detail ?? v.message ?? '').trim() || '平台返回 ok=false 但未给错误详情'
+}
+
 /** 交回结果里的结构化输出（session.result_json 平台给对象或 JSON 文本两种形态） */
 function resultJsonOf(json = {}) {
   const raw = json.result_json ?? json.session?.result_json
@@ -1038,7 +1057,9 @@ export const TOOLS = [
       if (isRequestOnly) lines.push('### 已报告完成，等待用户确认', '', '用户确认后再次调用本工具（request_only=false）正式交回。')
       else {
         lines.push('### 接管交回完成', '')
-        if (json.next_agent) lines.push(`- 下一节点: ${json.next_agent}（handoff=${json.handoff ?? 'a2a'}）`)
+        const ho = describeHandoff(json.handoff)
+        if (json.next_agent) lines.push(`- 下一节点: ${json.next_agent}（handoff=${ho.label}）`)
+        if (ho.failure) lines.push(`- **⚠️ 平台 handoff 派发失败：${ho.failure}**`)
         if (json.issue_stage) lines.push(`- issue 阶段: ${json.issue_stage}`)
         if (json.event_status) lines.push(`- 事件终态: ${json.event_status}`)
         const handoffSeq = seqOf(json, 'handoff_seq')
@@ -1066,6 +1087,9 @@ export const TOOLS = [
         } else {
           // 无 dispatch 字段：旧平台/CLI 回退通道的响应形状，按平台原样披露
           lines.push('', '_流水线从断点继续，无需 context 口述、无需 trigger 重触发。_')
+        }
+        if (ho.failure) {
+          lines.push('', `_平台 handoff 未成功：先 grape_get_issue_events 确认下一节点无事件，再调 \`grape_trigger_pipeline(agent=${json.next_agent || '…'})\` 手动补发。_`)
         }
       }
       return lines.join('\n')
