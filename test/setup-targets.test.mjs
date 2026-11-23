@@ -658,3 +658,26 @@ test('QA#硬违规2 含凭据的旧 .bak-grapemcp-* 备份：残留提示点名�
   assert.equal(after.status, 0, after.stderr)
   assert.match(after.stdout, /未检测到[^\n]*残留/, `清理后应真零残留，实际:\n${after.stdout}`)
 })
+
+/* ── QA 复审（PR #11）P2：--clean-global --dry-run 预览语义（危险操作门） ── */
+
+test('QA#P2 --clean-global --dry-run：只预览将清理项，不动盘上任何凭据/痕迹', () => {
+  const h = home()
+  const s = seedResidue(h)
+  assert.equal(run(['install', '--target', 'opencode'], h).status, 0)
+  const r = run(['uninstall', '--clean-global', '--dry-run'], h, { GRAPE_API_TOKEN: '', GRAPE_BASE_URL: '' })
+  assert.equal(r.status, 0, r.stderr)
+  assert.match(r.stdout, /dry-run|预览/, '应明确标注预览模式（未执行删除）')
+  assert.match(r.stdout, /将删除目录[^\n]*\.grape/, '应预览 GRAPE_HOME 删除')
+  assert.match(r.stdout, /将清理[^\n]*_npx/, '应预览 _npx 清理')
+  // dry-run 只作用于全局清理：宿主卸载照常（可回滚，非破坏性）
+  const cfgPath = join(h, '.config', 'opencode', 'opencode.jsonc')
+  assert.ok(!JSON.parse(readFileSync(cfgPath, 'utf8')).mcp?.grape, '宿主条目卸载不受 dry-run 影响')
+  // 一切全局痕迹必须原样保留
+  assert.ok(existsSync(s.grapeHome), 'dry-run 不得删除 GRAPE_HOME')
+  assert.ok(existsSync(s.own), 'dry-run 不得删除 _npx 缓存')
+  assert.ok(existsSync(s.other), '其他包缓存必须保留')
+  if (process.platform !== 'win32') {
+    assert.match(readFileSync(join(h, '.bashrc'), 'utf8'), /GRAPE_API_TOKEN=/, 'dry-run 不得改动 rc')
+  }
+})

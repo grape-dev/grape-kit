@@ -1235,6 +1235,36 @@ function cleanGlobal() {
   cleanNpxCache()
 }
 
+/** --clean-global --dry-run：只预览将清理项，不执行任何删除（AGENTS.md 危险操作门精神）。
+ *  预览与清理共用 scanResidues 单一扫描，保证「所见即所删」。 */
+function cleanGlobalPlan() {
+  console.log('\n[clean-global --dry-run] 预览将清理的凭据/使用痕迹（未执行任何删除）：')
+  const s = scanResidues()
+  let any = false
+  if (s.grapeHome) {
+    console.log(`  将删除目录: ${s.grapeHome.path}${s.grapeHome.items.length ? `（${s.grapeHome.items.join(', ')}）` : ''}`)
+    any = true
+  }
+  if (s.envKeys.length) {
+    console.log(`  环境变量 ${s.envKeys.join('/')}：${process.platform === 'win32' ? 'reg delete 用户级注册表项' : '删除 rc 中的导出行'}（已运行会话需重启后生效）`)
+    any = true
+  }
+  for (const hit of s.rcHits) {
+    console.log(`  将从 ${hit.path} 删除 ${hit.hits} 行 GRAPE_* 导出（备份只留非凭据行）`)
+    any = true
+  }
+  for (const b of s.rcCredentialBackups) {
+    console.log(`  将删除含凭据的旧备份: ${b}`)
+    any = true
+  }
+  for (const e of s.npxHits) {
+    console.log(`  将清理本包 _npx 缓存条目: ${e}`)
+    any = true
+  }
+  if (!any) console.log('  未发现可清理项（磁盘已干净）')
+  console.log('  确认执行：去掉 --dry-run 重跑')
+}
+
 /** 残留检测：默认 uninstall 只提示，不静默执行破坏性清理。扫描与清理同源（scanResidues） */
 function detectResiduals() {
   const s = scanResidues()
@@ -1276,6 +1306,9 @@ if (cmd === 'intro') {
 } else if (cmd === 'install' || cmd === 'uninstall' || cmd === 'doctor') {
   let installed = false
   const cleanGlobalWanted = cmd === 'uninstall' && process.argv.includes('--clean-global')
+  const cleanGlobalDryRun = cmd === 'uninstall' && process.argv.includes('--dry-run')
+  /** clean-global 收尾：--dry-run 只预览（单一扫描，所见即所删），否则执行破坏性清理 */
+  const runCleanGlobal = () => (cleanGlobalDryRun ? cleanGlobalPlan() : cleanGlobal())
   // doctor 未显式指定 --target 时汇总全部宿主；install/uninstall 仍默认 opencode
   if (cmd === 'doctor' && !process.argv.slice(2).some((a) => a === '--target' || a.startsWith('--target='))) {
     doctorAll(!!arg('probe'))
@@ -1295,7 +1328,7 @@ if (cmd === 'intro') {
         HOSTS[n].uninstall()
       }
     }
-    cleanGlobal()
+    runCleanGlobal()
   } else {
     if (!targetExplicit && cmd !== 'doctor') target = await resolveTargetAuto()
     const t = resolveTarget()
@@ -1318,17 +1351,17 @@ if (cmd === 'intro') {
     }
   }
   if (installed) printInstallGuide()
-  // uninstall 生命周期收尾：--clean-global 显式触发破坏性清理；否则仅提示残留。
-  // 无 --target 分支已在上面执行过 cleanGlobal，此处只兜显式 --target 的收尾。
+  // uninstall 生命周期收尾：--clean-global 显式触发破坏性清理（--dry-run 只预览）；否则仅提示残留。
+  // 无 --target 分支已在上面执行过，此处只兜显式 --target 的收尾。
   if (cmd === 'uninstall') {
-    if (cleanGlobalWanted && targetExplicit) cleanGlobal()
+    if (cleanGlobalWanted && targetExplicit) runCleanGlobal()
     else if (!cleanGlobalWanted) printResidualHint()
   }
 } else {
   // intro 不吃 --target（只读本地凭据状态，重看能力地图与宿主无关）：与 install/uninstall/doctor 拆行，
   // 否则用户会以为 `grape-kit intro --target codearts` 能指定宿主
   console.log(`用法: node setup.mjs install|uninstall|doctor [--target ${SUPPORTED_TARGETS.join('|')}] [--probe]`)
-  console.log('      node setup.mjs uninstall [--target <宿主>] [--clean-global]   同时清理 ~/.grape 凭据与使用痕迹')
+  console.log('      node setup.mjs uninstall [--target <宿主>] [--clean-global] [--dry-run]   同时清理 ~/.grape 凭据与使用痕迹（--dry-run 先预览）')
   console.log('      node setup.mjs auth init --token <grape_...> [--base-url <url>]   凭据唯一写入入口（文件通道 + env 指引）')
   console.log('      node setup.mjs intro                   重看安装后能力地图（与宿主无关，随时可用）')
   for (const [name, host] of Object.entries(HOSTS)) console.log(`  --target ${name.padEnd(10)} ${host.label}`)
