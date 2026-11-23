@@ -295,3 +295,19 @@ test('Issue #20 doctor 展示 runtime > env > file 完整优先级链且不回�
   assert.match(r.stdout, /凭据优先级[^\n]*file/, '应列出 file 档')
   assert.doesNotMatch(r.stdout, /grape_env_secret|grape_file_secret/, '不得回显 token')
 })
+
+/* ── QA 复审（PR #11）P1：doctor 解析失败不得把文件内容透传进输出 ── */
+
+test('QA#P1 doctor 文件通道解析失败：报错固定为「解析失败」，不回显 JSON.parse 携带的文件原文片段', () => {
+  const h = home()
+  const grapeHome = join(h, 'grapehome')
+  mkdirSync(grapeHome, { recursive: true })
+  // 非法 JSON：JSON.parse 的 e.message 会带出原文（实测 `Unexpected token 'k', "tk_9…"`），
+  // 凭据片段由此进入 doctor 输出——违反 Spec「never echo the token」
+  writeFileSync(join(grapeHome, 'config.json'), 'tk_9leaked_fragment_not_json')
+  const r = run(['doctor'], h, { ...cleanCredEnv, GRAPE_HOME: grapeHome, GRAPE_KIT_SKIP_UPDATE_CHECK: '1' })
+  assert.equal(r.status, 0, '解析失败按未配置处理，doctor 不非零退出', r.stderr)
+  const out = `${r.stdout}${r.stderr}`
+  assert.match(out, /解析失败/, '应提示解析失败')
+  assert.doesNotMatch(out, /tk_9leaked/, '不得回显文件内容片段')
+})

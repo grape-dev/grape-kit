@@ -99,15 +99,17 @@ function baseUrlInfo() {
   return { base, source: '默认' }
 }
 
-/** 文件通道解析：存在性 / 解析错误 / token 有无分开报，doctor 优先级视图据此给出未命中原因 */
+/** 文件通道解析：存在性 / 解析错误 / token 有无分开报，doctor 优先级视图据此给出未命中原因。
+ *  解析失败只置 parseError 标志、不透传 e.message——JSON.parse 的报错消息会携带文件原文片段
+ *  （凭据文件即 token 泄露），凭据文件报错必须固定为「解析失败」（QA 安全回归）。 */
 function fileChannelInfo() {
   const authFile = process.env.GRAPE_AUTH_FILE || configPath()
   if (!existsSync(authFile)) return { authFile, exists: false }
   try {
     const cfg = JSON.parse(readFileSync(authFile, 'utf8').replace(/^\uFEFF/, ''))
     return { authFile, exists: true, cfg }
-  } catch (e) {
-    return { authFile, exists: true, error: e.message }
+  } catch {
+    return { authFile, exists: true, parseError: true }
   }
 }
 
@@ -138,7 +140,7 @@ function priorityChecks() {
 
   let fileDetail
   if (!f.exists) fileDetail = `未命中：文件不存在（${f.authFile}）`
-  else if (f.error) fileDetail = `未命中：文件解析失败（${f.error}）`
+  else if (f.parseError) fileDetail = '未命中：文件解析失败（内容不回显）'
   else if (!f.cfg || !f.cfg.token) fileDetail = `未命中：文件存在但无 token（${f.authFile}）`
   else if (effective === `file:${f.authFile}`) fileDetail = `命中，当前生效（${f.authFile}；不回显 token）`
   else fileDetail = `已配置，被更高优先级覆盖（${f.authFile}）`
@@ -148,11 +150,11 @@ function priorityChecks() {
 
 const envChecks = () => {
   const f = fileChannelInfo()
-  const fileToken = f.exists && !f.error && f.cfg && f.cfg.token
+  const fileToken = f.exists && !f.parseError && f.cfg && f.cfg.token
   let tokenLine
   if (process.env.GRAPE_API_TOKEN) tokenLine = 'ok（已设置，不回显）'
   else if (fileToken) tokenLine = `ok（文件通道 ${f.authFile}）`
-  else if (f.exists && f.error) tokenLine = `未设置（FAIL）：${f.authFile} 解析失败`
+  else if (f.exists && f.parseError) tokenLine = `未设置（FAIL）：${f.authFile} 解析失败（内容不回显）`
   else tokenLine = '未设置（FAIL）：打开 https://www.grapedev.cn/app/#account/profile 生成用户级 API Key（自部署实例用「你的地址/app/#account/profile」），用环境变量或 ~/.grape/config.json 提供'
   return [
     (() => { const { base, source } = baseUrlInfo(); return ['GRAPE_BASE_URL', `ok（${base}；来源=${source}）`] })(),
