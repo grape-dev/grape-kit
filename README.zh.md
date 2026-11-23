@@ -88,12 +88,12 @@ npx -y @grape-dev/grape-kit uninstall --target codearts
 npx -y @grape-dev/grape-kit install --target workbuddy
 ```
 
-写入 `~/.workbuddy/mcp.json`（`mcpServers.grape-kit`，走 npx 免全局安装）+ skill 落 `~/.workbuddy/skills/grape-remote/`。装完需在 WorkBuddy 手动「信任」一次。凭据走环境变量，**不要**写进 mcp.json。
+写入 `~/.workbuddy/mcp.json`（`mcpServers.grape-kit`，走 npx 免全局安装）+ skill 落 `~/.workbuddy/skills/grape-remote/`。**重启宿主会话**即可加载连接器——无需手动「信任」（实测直接 spawn，宿主不弹授权）。凭据走环境变量，**不要**写进 mcp.json。
 
 ```bash
 npx -y @grape-dev/grape-kit doctor --target workbuddy --probe
 npx -y @grape-dev/grape-kit update --target workbuddy
-npx -y @grape-dev/grape-kit uninstall --target workbuddy   # 移除条目+skill+receipt（配置自动备份；「信任」记录属宿主侧数据另行移除）
+npx -y @grape-dev/grape-kit uninstall --target workbuddy   # 移除条目+skill+receipt（配置自动备份）
 ```
 
 ### openclaw（ClawHub 市场）
@@ -123,6 +123,16 @@ npx -y @grape-dev/grape-kit uninstall        # 卸载（宿主自动检测）
 > 干完了——上报平台，等我确认再正式交回                          ← progress + request-finish + finish（finish 需用户级凭据）
 > 这个节点干不了——还给云端重跑，链不断                          ← takeover_abort
 ```
+
+### 装完看能力地图（intro）
+
+每次 `install` 成功都会打印一张**能力地图**：5 组能力说明，每组配一条可直接复制的示例问句。若尚未检测到凭据，同一段输出会先给 3 步 API Key 获取指引（去哪生成、`grape_` 前缀、写到哪），避免首次调用直接 401。
+
+```bash
+npx -y @grape-dev/grape-kit intro     # 随时重看能力地图
+```
+
+`intro` 与安装结束共用同一份常量，文案不会漂移。它不收 `--target`——能力地图与宿主无关，只读本地凭据状态；宿主相关命令见上面各宿主小节。
 
 ## 版本历史
 
@@ -157,7 +167,7 @@ npx -y @grape-dev/grape-kit uninstall        # 卸载（宿主自动检测）
 
 ```bash
 npm install
-npm test        # 136 个单测（fake-grape 替身，不依赖真实服务端）
+npm test        # 156 个单测（fake-grape 替身，不依赖真实服务端）
 npm run smoke   # 真实 stdio JSON-RPC 往返：initialize → tools/list → tools/call
 ```
 

@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { resolveCredentials, apiRequest, GrapeApiError, waitTaskNative, api } from '../src/api.mjs'
+import { resolveCredentials, apiRequest, GrapeApiError, waitTaskNative, api, getBaseUrl, AGENT_TYPES } from '../src/api.mjs'
 import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -127,4 +127,88 @@ test('#2-5 回归：wait 超时返回复查引导', async () => {
   const out = t.render({ seq: 85, status: 'running', polls: 100, timedOut: true })
   assert.match(out, /grape_get_task_status/)
   assert.match(out, /别死等/)
+})
+
+/* ── Issue #17：地址单一事实源 getBaseUrl() + trigger agent 透传 ── */
+
+test('getBaseUrl 优先级：env > ~/.grape/config.json > 默认', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gk-base-'))
+  try {
+    const cfg = join(dir, 'config.json')
+    writeFileSync(cfg, JSON.stringify({ token: 't', base_url: 'https://file.example' }))
+    assert.equal(getBaseUrl({ GRAPE_AUTH_FILE: cfg, GRAPE_BASE_URL: 'https://env.example' }), 'https://env.example')
+    assert.equal(getBaseUrl({ GRAPE_AUTH_FILE: cfg }), 'https://file.example')
+    assert.equal(getBaseUrl({ GRAPE_AUTH_FILE: join(dir, 'missing.json') }), 'https://www.grapedev.cn')
+  } finally { rmSync(dir, { recursive: true, force: true }) }
+})
+
+test('getBaseUrl 支持 baseUrl 驼峰别名与 BOM 文件通道', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gk-base-'))
+  try {
+    const cfg = join(dir, 'config.json')
+    writeFileSync(cfg, '\uFEFF' + JSON.stringify({ token: 't', baseUrl: 'https://camel.example' }))
+    assert.equal(getBaseUrl({ GRAPE_AUTH_FILE: cfg }), 'https://camel.example')
+  } finally { rmSync(dir, { recursive: true, force: true }) }
+})
+
+test('triggerPipeline agent：默认 vod / 指定 qa 透传 / 非法值可读错误', async () => {
+  const origFetch = globalThis.fetch
+  const saved = { tok: process.env.GRAPE_API_TOKEN, base: process.env.GRAPE_BASE_URL, auth: process.env.GRAPE_AUTH_FILE }
+  let captured = null
+  globalThis.fetch = async (url, opts) => {
+    captured = { url: String(url), method: opts.method, body: JSON.parse(opts.body) }
+    return new Response(JSON.stringify({ seq: 90, agent: captured.body.agent, status: 'running' }), {
+      status: 200, headers: { 'content-type': 'application/json' },
+    })
+  }
+  process.env.GRAPE_API_TOKEN = 'grape_fake'
+  process.env.GRAPE_BASE_URL = 'https://env.example'
+  delete process.env.GRAPE_AUTH_FILE
+  try {
+    assert.deepEqual(AGENT_TYPES, ['vod', 'issue', 'coding', 'qa', 'sre'])
+    await api.triggerPipeline('acme', 'demo', 12, '')
+    assert.equal(captured.body.agent, 'vod', '不传 agent 时缺省 vod')
+    assert.match(captured.url, /\/api\/a2a$/)
+    await api.triggerPipeline('acme', 'demo', 12, '', 'qa')
+    assert.equal(captured.body.agent, 'qa', 'agent 必须透传到 POST /api/a2a')
+    await assert.rejects(
+      api.triggerPipeline('acme', 'demo', 12, '', 'nope'),
+      (e) => e instanceof GrapeApiError && /非法 agent/.test(e.message) && /vod/.test(e.message),
+    )
+  } finally {
+    globalThis.fetch = origFetch
+    if (saved.tok === undefined) delete process.env.GRAPE_API_TOKEN; else process.env.GRAPE_API_TOKEN = saved.tok
+    if (saved.base === undefined) delete process.env.GRAPE_BASE_URL; else process.env.GRAPE_BASE_URL = saved.base
+    if (saved.auth === undefined) delete process.env.GRAPE_AUTH_FILE; else process.env.GRAPE_AUTH_FILE = saved.auth
+  }
+})
+
+test('Issue #17：worker_onboard 地址与 getBaseUrl() 同源（env / 文件通道，无需 GRAPE_BASE_URL）', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gk-onboard-'))
+  const cfg = join(dir, 'config.json')
+  writeFileSync(cfg, JSON.stringify({ token: 'grape_file', base_url: 'https://file.example' }))
+  const saved = { tok: process.env.GRAPE_API_TOKEN, base: process.env.GRAPE_BASE_URL, auth: process.env.GRAPE_AUTH_FILE }
+  const { findTool } = await import('../src/tools.mjs')
+  const t = findTool('grape_worker_onboard')
+  const apiModule = { workerCredentialCreate: async () => ({ token: 'rta_x' }) }
+  try {
+    // 文件通道：只有 token+base_url，没有 GRAPE_BASE_URL
+    process.env.GRAPE_AUTH_FILE = cfg
+    delete process.env.GRAPE_BASE_URL
+    delete process.env.GRAPE_API_TOKEN
+    const byFile = await t.run({ device_name: 'probe' }, { runGrape: null, apiModule })
+    assert.match(byFile.install_command, /curl -sSL https:\/\/file\.example\/api\/runtime\/install/)
+    assert.match(byFile.install_command, /--server https:\/\/file\.example/)
+
+    // env 通道：显式 GRAPE_BASE_URL 优先
+    process.env.GRAPE_BASE_URL = 'https://env.example'
+    const byEnv = await t.run({ device_name: 'probe' }, { runGrape: null, apiModule })
+    assert.match(byEnv.install_command, /--server https:\/\/env\.example/)
+    assert.equal(getBaseUrl(), 'https://env.example')
+  } finally {
+    if (saved.tok === undefined) delete process.env.GRAPE_API_TOKEN; else process.env.GRAPE_API_TOKEN = saved.tok
+    if (saved.base === undefined) delete process.env.GRAPE_BASE_URL; else process.env.GRAPE_BASE_URL = saved.base
+    if (saved.auth === undefined) delete process.env.GRAPE_AUTH_FILE; else process.env.GRAPE_AUTH_FILE = saved.auth
+    rmSync(dir, { recursive: true, force: true })
+  }
 })

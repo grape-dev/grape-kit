@@ -88,12 +88,12 @@ npx -y @grape-dev/grape-kit uninstall --target codearts
 npx -y @grape-dev/grape-kit install --target workbuddy
 ```
 
-Writes `~/.workbuddy/mcp.json` (`mcpServers.grape-kit`, via npx — no global install) + skill to `~/.workbuddy/skills/grape-remote/`. **Trust the connector once in WorkBuddy** after install. Credentials go through environment variables — **never** write them into mcp.json.
+Writes `~/.workbuddy/mcp.json` (`mcpServers.grape-kit`, via npx — no global install) + skill to `~/.workbuddy/skills/grape-remote/`. **Just restart the host session** — no manual "trust" step is needed (verified: the server spawns without an authorization prompt). Credentials go through environment variables — **never** write them into mcp.json.
 
 ```bash
 npx -y @grape-dev/grape-kit doctor --target workbuddy --probe
 npx -y @grape-dev/grape-kit update --target workbuddy
-npx -y @grape-dev/grape-kit uninstall --target workbuddy   # removes entry + skill + receipt (config backed up); the manual "trust" record is host-side data
+npx -y @grape-dev/grape-kit uninstall --target workbuddy   # removes entry + skill + receipt (config backed up)
 ```
 
 ### openclaw (ClawHub marketplace)
@@ -123,6 +123,16 @@ Then just talk to your agent:
 > Done — report to the platform, wait for my confirmation before formal hand-back  ← progress + request-finish + finish (finish needs a user-level credential)
 > Can't finish this node — give it back to the cloud, keep the chain            ← takeover_abort
 ```
+
+### Capability map after install (`intro`)
+
+Every successful `install` ends with a **capability map**: 5 groups of what the agent can do for you, each with one copy-paste example question. If no credential is found yet, the same block starts with a 3-step API Key guide (where to generate it, the `grape_` prefix, where to put it), so the first tool call does not die with 401.
+
+```bash
+npx -y @grape-dev/grape-kit intro     # reprint the capability map at any time
+```
+
+`intro` and the install-end output share one constant, so the two cannot drift. It takes no `--target` — the map is host-independent and only local credential state is read; use the per-host sections above for host-specific commands.
 
 ## Version history
 
@@ -157,7 +167,7 @@ Full release notes: [CHANGELOG.md](CHANGELOG.md) — 18 条发布记录（含 0.
 
 ```bash
 npm install
-npm test        # 136 unit tests (fake-grape stand-in, no real server needed)
+npm test        # 156 unit tests (fake-grape stand-in, no real server needed)
 npm run smoke   # real stdio JSON-RPC round-trip: initialize → tools/list → tools/call
 ```
 

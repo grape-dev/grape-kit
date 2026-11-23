@@ -35,27 +35,46 @@ export function hostInfo() {
   return { host_os, host_arch: process.arch, host_shell }
 }
 
+/** 文件通道配置（剥 BOM；损坏文件按未配置处理） */
+function readFileConfig(env = process.env) {
+  const authFile = env.GRAPE_AUTH_FILE || join(homedir(), '.grape', 'config.json')
+  if (!existsSync(authFile)) return { authFile, cfg: null }
+  try {
+    // 剥 BOM：Windows 记事本保存会带 UTF-8 BOM，JSON.parse 直接抛错（P2 实修，不只写文档）
+    return { authFile, cfg: JSON.parse(readFileSync(authFile, 'utf-8').replace(/^\uFEFF/, '')) }
+  } catch {
+    return { authFile, cfg: null }
+  }
+}
+
+/**
+ * 平台地址单一事实源：env > ~/.grape/config.json（base_url/baseUrl）> 默认生产实例。
+ * 运行时 API、doctor 显示层、worker_onboard、takeover 脚本必须同源，否则「显示层裁掉文件
+ * 通道」会把已可用实例误报成 FAIL（Issue #17 假阳性根因）。
+ */
+export function getBaseUrl(env = process.env) {
+  if (env.GRAPE_BASE_URL) return String(env.GRAPE_BASE_URL)
+  const { cfg } = readFileConfig(env)
+  if (cfg && (cfg.base_url || cfg.baseUrl)) return String(cfg.base_url || cfg.baseUrl)
+  return 'https://www.grapedev.cn'
+}
+
 export function resolveCredentials(env = process.env) {
+  const baseUrl = getBaseUrl(env)
   // ① 一次性参数（进程内）
   if (env.GRAPE_API_TOKEN_ONCE) {
-    return { token: env.GRAPE_API_TOKEN_ONCE, baseUrl: env.GRAPE_BASE_URL || 'https://www.grapedev.cn', source: 'env:GRAPE_API_TOKEN_ONCE' }
+    return { token: env.GRAPE_API_TOKEN_ONCE, baseUrl, source: 'env:GRAPE_API_TOKEN_ONCE' }
   }
   // ② env（标准路径）
   if (env.GRAPE_API_TOKEN) {
-    return { token: env.GRAPE_API_TOKEN, baseUrl: env.GRAPE_BASE_URL || 'https://www.grapedev.cn', source: 'env:GRAPE_API_TOKEN' }
+    return { token: env.GRAPE_API_TOKEN, baseUrl, source: 'env:GRAPE_API_TOKEN' }
   }
   // ③ 文件通道（hermes 等 env 清洗场景 + GRAPE_AUTH_FILE 显式指向）
-  const authFile = env.GRAPE_AUTH_FILE || join(homedir(), '.grape', 'config.json')
-  if (existsSync(authFile)) {
-    try {
-      // 剥 BOM：Windows 记事本保存会带 UTF-8 BOM，JSON.parse 直接抛错（P2 实修，不只写文档）
-      const cfg = JSON.parse(readFileSync(authFile, 'utf-8').replace(/^\uFEFF/, ''))
-      if (cfg.token) {
-        return { token: cfg.token, baseUrl: cfg.base_url || env.GRAPE_BASE_URL || 'https://www.grapedev.cn', source: `file:${authFile}` }
-      }
-    } catch { /* 损坏文件按未配置处理 */ }
+  const { authFile, cfg } = readFileConfig(env)
+  if (cfg && cfg.token) {
+    return { token: cfg.token, baseUrl, source: `file:${authFile}` }
   }
-  return { token: '', baseUrl: env.GRAPE_BASE_URL || 'https://www.grapedev.cn', source: '' }
+  return { token: '', baseUrl, source: '' }
 }
 
 /**
@@ -142,10 +161,31 @@ export async function apiRequest(method, path, opts = {}) {
 
 /* ── 端点封装：与 tools.mjs 的 31 个工具一一对应 ─────────────── */
 
+/** A2A 节点枚举：与平台 pipelines.json 的 agent tag 对齐 */
+export const AGENT_TYPES = ['vod', 'issue', 'coding', 'qa', 'sre']
+
+/**
+ * agent 归一 + 枚举校验：native 与 CLI 回退通道共用同一份，两通道报错逐字一致。
+ * 缺省/空值回落 vod（不传即从流水线首节点起步）；非法值在发请求前就拒掉，
+ * 否则 CLI 通道会把非法 agent 静默交给服务端，等到平台侧才失败。
+ */
+export function normalizeTriggerAgent(agent) {
+  const a = agent === undefined || agent === null || agent === '' ? 'vod' : String(agent)
+  if (!AGENT_TYPES.includes(a)) {
+    throw new GrapeApiError(`非法 agent：${a}（可用值：${AGENT_TYPES.join(' / ')}）`, {
+      status: 400,
+      hint: '不传 agent 时缺省从 vod 起步；仅当上游节点已完成、需要断点续跑时才显式指定后续节点。',
+    })
+  }
+  return a
+}
+
 export const api = {
   // 流水线
-  triggerPipeline: (owner, repo, issueNumber, context = '') =>
-    apiRequest('POST', '/api/a2a', { body: { agent: 'vod', payload: { repository: `${owner}/${repo}`, account: owner, issue_number: Number(issueNumber), ...(context ? { context } : {}) } } }),
+  triggerPipeline: async (owner, repo, issueNumber, context = '', agent) => {
+    const a = normalizeTriggerAgent(agent)
+    return apiRequest('POST', '/api/a2a', { body: { agent: a, payload: { repository: `${owner}/${repo}`, account: owner, issue_number: Number(issueNumber), ...(context ? { context } : {}) } } })
+  },
   taskStatus: (seq) => apiRequest('GET', `/api/events/detail/${seq}`),
   issuePipeline: (owner, repo, number) => apiRequest('GET', `/api/issues/${owner}/${repo}/${number}/pipeline`),
   repoRoadmap: (owner, repo) => apiRequest('GET', `/api/pipeline/${owner}/${repo}`),

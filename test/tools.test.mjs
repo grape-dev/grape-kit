@@ -118,3 +118,104 @@ test('worker_onboard 渲染出可见安装命令', () => {
   assert.match(out, /```bash/)
   assert.match(out, /--token RTA/)
 })
+
+/* ── Issue #17：trigger 工具 agent 枚举 + native 透传 ── */
+
+test('trigger 工具 schema 声明 agent 枚举并在 native 透传', async () => {
+  const { api } = await import('../src/api.mjs')
+  const t = findTool('grape_trigger_pipeline')
+  assert.deepEqual(t.schema.properties.agent.enum, ['vod', 'issue', 'coding', 'qa', 'sre'])
+  assert.equal(t.schema.properties.agent.default, 'vod')
+  const args = t.buildArgs({ owner: 'acme', repo: 'demo', issue_number: 12, agent: 'qa' })
+  const body = JSON.parse(args[args.indexOf('--json') + 1])
+  assert.equal(body.agent, 'qa', 'CLI 通道同样透传 agent')
+  const orig = api.triggerPipeline
+  let seen = null
+  api.triggerPipeline = async (...a) => { seen = a; return { seq: 1 } }
+  try {
+    await t.native({ owner: 'acme', repo: 'demo', issue_number: 12, context: '续跑', agent: 'qa' })
+  } finally { api.triggerPipeline = orig }
+  assert.deepEqual(seen, ['acme', 'demo', 12, '续跑', 'qa'], 'native 必须把 agent 透传给 api.triggerPipeline')
+})
+
+test('trigger 工具 CLI 回退通道拒绝非法 agent，与 native 同口径', async () => {
+  const { GrapeApiError } = await import('../src/api.mjs')
+  const t = findTool('grape_trigger_pipeline')
+  const caught = (fn) => { try { fn(); return null } catch (e) { return e } }
+
+  // CLI 通道 buildArgs 若不过枚举校验，会把非法 agent 静默交给服务端（native 已报错，两通道必须一致）
+  const cliErr = caught(() => t.buildArgs({ owner: 'acme', repo: 'demo', issue_number: 12, agent: 'pm' }))
+  assert.ok(cliErr instanceof GrapeApiError, 'CLI 通道必须在本地就拒绝非法 agent')
+  assert.match(cliErr.message, /非法 agent：pm（可用值：vod \/ issue \/ coding \/ qa \/ sre）/)
+
+  // 缺省/空值仍回落到 vod，不因校验把默认路径拒掉
+  for (const agent of [undefined, null, '']) {
+    const args = t.buildArgs({ owner: 'acme', repo: 'demo', issue_number: 12, agent })
+    assert.equal(JSON.parse(args[args.indexOf('--json') + 1]).agent, 'vod', `agent=${agent} 应回落 vod`)
+  }
+
+  // native 在发起请求前就报错（校验早于网络），且与 CLI 通道同一份文案，避免两条通道各写一份枚举
+  let nativeErr = null
+  try { await t.native({ owner: 'acme', repo: 'demo', issue_number: 12, agent: 'pm' }) } catch (e) { nativeErr = e }
+  assert.ok(nativeErr instanceof GrapeApiError, 'native 通道必须拒绝非法 agent')
+  assert.equal(nativeErr.message, cliErr.message, 'native 与 CLI 回退通道报错必须同源')
+})
+
+/* ── Issue #17：审核三工具 native 直调（api.apiRequest 崩溃修复） ── */
+
+function withFakeFetch(handler, fn) {
+  const origFetch = globalThis.fetch
+  const saved = { tok: process.env.GRAPE_API_TOKEN, base: process.env.GRAPE_BASE_URL, auth: process.env.GRAPE_AUTH_FILE }
+  process.env.GRAPE_API_TOKEN = 'grape_fake'
+  process.env.GRAPE_BASE_URL = 'https://env.example'
+  delete process.env.GRAPE_AUTH_FILE
+  globalThis.fetch = handler
+  const restore = () => {
+    globalThis.fetch = origFetch
+    if (saved.tok === undefined) delete process.env.GRAPE_API_TOKEN; else process.env.GRAPE_API_TOKEN = saved.tok
+    if (saved.base === undefined) delete process.env.GRAPE_BASE_URL; else process.env.GRAPE_BASE_URL = saved.base
+    if (saved.auth === undefined) delete process.env.GRAPE_AUTH_FILE; else process.env.GRAPE_AUTH_FILE = saved.auth
+  }
+  return Promise.resolve(fn()).finally(restore)
+}
+
+test('审核三工具 native 不再崩溃，直调真实端点，描述标注会话级通道', async () => {
+  const calls = []
+  await withFakeFetch(async (url, opts) => {
+    const u = String(url)
+    calls.push({ url: u, method: opts.method, body: opts.body ? JSON.parse(opts.body) : null })
+    const payload = u.endsWith('/api/issues/acme/demo') && opts.method === 'GET'
+      ? { issues: [{ issue_number: 5, id: 77 }] }
+      : { ok: true, issue_number: 5 }
+    return new Response(JSON.stringify(payload), { status: 200, headers: { 'content-type': 'application/json' } })
+  }, async () => {
+    const cases = [
+      ['grape_review_pass', { owner: 'acme', repo: 'demo', number: 5, comment: '放行' }, /\/api\/issues\/acme\/demo\/5\/review-pass$/, { comment: '放行' }],
+      ['grape_review_reject', { owner: 'acme', repo: 'demo', number: 5, comment: '缺校验' }, /\/api\/issues\/acme\/demo\/5\/review-reject$/, { comment: '缺校验' }],
+      ['grape_confirm_done', { owner: 'acme', repo: 'demo', number: 5, confirmation: '已完成' }, /\/api\/issues\/77\/confirm-done$/, { confirmation: '已完成' }],
+    ]
+    for (const [name, args, pathRe, body] of cases) {
+      const t = findTool(name)
+      assert.match(t.description, /tk_|会话级/, `${name} 描述必须标注真实可用通道`)
+      calls.length = 0
+      await t.native(args)
+      const post = calls.find((c) => c.method === 'POST')
+      assert.ok(post, `${name} 应发出 POST`)
+      assert.match(post.url, pathRe, `${name} endpoint`)
+      assert.deepEqual(post.body, body, `${name} body`)
+    }
+  })
+})
+
+test('审核工具 403 抛出带修复动作的通道提示', async () => {
+  await withFakeFetch(
+    async () => new Response(JSON.stringify({ detail: 'forbidden' }), { status: 403, headers: { 'content-type': 'application/json' } }),
+    async () => {
+      const { GrapeApiError } = await import('../src/api.mjs')
+      await assert.rejects(
+        findTool('grape_review_pass').native({ owner: 'a', repo: 'b', number: 1 }),
+        (e) => e instanceof GrapeApiError && e.status === 403 && /tk_|会话级/.test(e.hint),
+      )
+    },
+  )
+})

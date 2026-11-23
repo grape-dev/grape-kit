@@ -70,7 +70,7 @@ function mdSection(md, title) {
   return next === -1 ? md.slice(start) : md.slice(start, start + 1 + next)
 }
 
-/** 首个版本节的起点；其前为标题 + 说明，其后为历史版本节 */
+/** 首个二级标题的起点；其前为标题 + 说明（`## Unreleased` 段也在此之后） */
 function firstSectionAt(md) {
   return md.search(/^## /m)
 }
@@ -78,11 +78,6 @@ function firstSectionAt(md) {
 function preambleOf(md) {
   const at = firstSectionAt(md)
   return at === -1 ? md : md.slice(0, at)
-}
-
-function historyOf(md) {
-  const at = firstSectionAt(md)
-  return at === -1 ? '' : md.slice(at)
 }
 
 test('CHANGELOG 版本节与 npm 已发布记录完全一致（倒序，无 0.2.3）', () => {
@@ -193,14 +188,21 @@ function runGenerator(dir, prev) {
   return readFileSync(join(dir, 'CHANGELOG.md'), 'utf8')
 }
 
-test('gen-changelog 把新版本节插在标题与说明之后，历史节逐字保留', () => {
-  const dir = tempRepo('0.3.8')
+test('gen-changelog 把新版本节插在 Unreleased 段之后，历史节逐字保留', () => {
+  // 用未发布的假想版本 0.3.9：0.3.8 已定稿，会把生成器打到「跳过写入」分支，测不到插入落位
+  const dir = tempRepo('0.3.9')
   try {
     const before = readFileSync(join(dir, 'CHANGELOG.md'), 'utf8')
     const after = runGenerator(dir, 'HEAD~1')
     assert.equal(preambleOf(after), preambleOf(before), '标题与说明应保持原位（新节不得压到标题之上）')
-    assert.match(historyOf(after), /^## 0\.3\.8 \(\d{4}-\d{2}-\d{2}\)/, '新版本节应为首个版本节')
-    assert.ok(after.endsWith(historyOf(before)), '历史版本节应逐字保留')
+    const atUnreleased = after.search(/^## Unreleased$/m)
+    const atNew = after.search(/^## 0\.3\.9 \(/m)
+    const atPrev = after.search(/^## 0\.3\.8 \(/m)
+    assert.ok(atUnreleased >= 0, 'CHANGELOG 应保留 Unreleased 段')
+    assert.ok(atUnreleased < atNew && atNew < atPrev, 'Unreleased 保持在最上，新版本节紧跟其后、已发布节之前')
+    // 已发布版本节逐字保留：从上一个发布节起算，与改前内容完全一致
+    const releasedBefore = before.slice(before.search(/^## 0\.3\.8 \(/m))
+    assert.ok(after.endsWith(releasedBefore), '历史版本节应逐字保留')
     assert.match(after, /^# Changelog$/m, '文件仍应以 Keep a Changelog 标题开头')
   } finally {
     rmSync(dir, { recursive: true, force: true })

@@ -14,7 +14,7 @@
 import * as R from './render.mjs'
 import { hostname } from 'node:os'
 import { fileURLToPath } from 'node:url'
-import { api } from './api.mjs'
+import { api, apiRequest, getBaseUrl, AGENT_TYPES, normalizeTriggerAgent, GrapeApiError } from './api.mjs'
 
 /** kit 安装根（发布包含 skills/，Node 版接管脚本随 skill 副本分发） */
 const KIT_ROOT = fileURLToPath(new URL('..', import.meta.url)).replace(/[\\/]+$/, '')
@@ -54,6 +54,26 @@ const WARNING_HINTS = {
 }
 const warningHint = (w) => WARNING_HINTS[String(w).split(':')[0].trim()] || ''
 
+/**
+ * 审核类端点直调：apiRequest 是 src/api.mjs 的命名导出，必须直接调用
+ * （曾误写成 api.apiRequest → 三个工具 native 必崩）。403 属凭据通道边界，
+ * 补上可执行的修复动作，避免用户误以为权限缺失而反复重试。
+ */
+async function reviewPost(path, body) {
+  try {
+    return await apiRequest('POST', path, { body })
+  } catch (e) {
+    if (e instanceof GrapeApiError && e.status === 403) {
+      throw new GrapeApiError(e.message, {
+        status: 403,
+        code: e.code,
+        hint: '审核端点仅放行会话级 tk_ token；用户级 grape_ Key 会被 403 拒绝（属凭据通道边界，不是权限缺失）。请改用 Grape WebUI 审核，或由持有 tk_ 会话的宿主执行。',
+      })
+    }
+    throw e
+  }
+}
+
 const OWNER_REPO_NUM = {
   owner: str('仓库归属（owner）'),
   repo: str('仓库名（repo）'),
@@ -74,22 +94,24 @@ export const TOOLS = [
         owner: str('owner'),
         repo: str('repo'),
         issue_number: num('issue 编号'),
-        agent: { type: 'string', description: '目标节点 agent，默认 vod', default: 'vod' },
+        agent: { type: 'string', enum: AGENT_TYPES, description: '起始节点 agent（默认 vod）。指定后跳过已完成的上游节点，用于 cascade 断链续跑；可用值：vod/issue/coding/qa/sre', default: 'vod' },
         context: str('任务上下文/补充说明（可选）'),
       },
       required: ['owner', 'repo', 'issue_number'],
     },
     buildArgs(a) {
+      // CLI 回退通道与 native 共用 normalizeTriggerAgent：非法 agent 在本地就报错，不静默下发给服务端
+      const agent = normalizeTriggerAgent(a.agent)
       const payload = {
         repository: `${a.owner}/${a.repo}`,
         account: a.owner,
         issue_number: a.issue_number,
       }
       if (a.context) payload.context = a.context
-      return ['a2a', 'handoff', '--json', JSON.stringify({ agent: a.agent || 'vod', payload })]
+      return ['a2a', 'handoff', '--json', JSON.stringify({ agent, payload })]
     },
     async native(a) {
-      const r = await api.triggerPipeline(a.owner, a.repo, a.issue_number, a.context || '')
+      const r = await api.triggerPipeline(a.owner, a.repo, a.issue_number, a.context || '', a.agent)
       return { seq: r.seq ?? r.event_seq, agent: r.agent ?? 'vod', status: r.status ?? 'running' }
     },
     render: R.renderTrigger,
@@ -303,10 +325,10 @@ export const TOOLS = [
 
   {
     name: 'grape_review_pass',
-    description: '审核通过：对处于 pending_review 的 issue 点审通过（节点放行、流水线继续）。若当前身份权限不足会如实返回 403 与指引。',
+    description: '审核通过：对处于 pending_review 的 issue 点审通过（节点放行、流水线继续）。通道：/api/issues/{n}/review-pass 仅放行会话级 tk_ token，用户级 grape_ Key 会 403（请用 WebUI 或持有 tk_ 会话的宿主执行）。',
     schema: { type: 'object', properties: { owner: str('仓库 owner'), repo: str('仓库名'), number: num('issue 编号'), comment: str('审批意见（可选）') }, required: ['owner', 'repo', 'number'] },
     async native(a) {
-      return api.apiRequest('POST', `/api/issues/${a.owner}/${a.repo}/${a.number}/review-pass`, { body: { ...(a.comment ? { comment: a.comment } : {}) } })
+      return reviewPost(`/api/issues/${a.owner}/${a.repo}/${a.number}/review-pass`, { ...(a.comment ? { comment: a.comment } : {}) })
     },
     render(json) {
       return json && typeof json === 'object' && !json.detail
@@ -316,10 +338,10 @@ export const TOOLS = [
   },
   {
     name: 'grape_review_reject',
-    description: '审核打回：对 pending_review 的 issue 打回并附意见（打回后按平台规则重派整改）。⚠️ 用户决策层动作：打回前向用户确认。',
+    description: '审核打回：对 pending_review 的 issue 打回并附意见（打回后按平台规则重派整改）。通道：仅放行会话级 tk_ token，用户级 grape_ Key 会 403。⚠️ 用户决策层动作：打回前向用户确认。',
     schema: { type: 'object', properties: { owner: str('仓库 owner'), repo: str('仓库名'), number: num('issue 编号'), comment: str('打回意见（必填，说明原因）') }, required: ['owner', 'repo', 'number', 'comment'] },
     async native(a) {
-      return api.apiRequest('POST', `/api/issues/${a.owner}/${a.repo}/${a.number}/review-reject`, { body: { comment: a.comment } })
+      return reviewPost(`/api/issues/${a.owner}/${a.repo}/${a.number}/review-reject`, { comment: a.comment })
     },
     render(json) {
       return json && typeof json === 'object' && !json.detail
@@ -329,13 +351,13 @@ export const TOOLS = [
   },
   {
     name: 'grape_confirm_done',
-    description: '确认完成（开发者确认通道）：issue 实际已完成但单据未落终态时，以开发者身份确认收尾（效果等同 WebUI 确认完成/CLI issues confirm done）。⚠️ 用户决策层动作：确认前向用户核实成果真实存在。',
+    description: '确认完成（开发者确认通道）：issue 实际已完成但单据未落终态时，以开发者身份确认收尾（效果等同 WebUI 确认完成/CLI issues confirm done）。通道：confirm-done 仅放行会话级 tk_ token，用户级 grape_ Key 会 403。⚠️ 用户决策层动作：确认前向用户核实成果真实存在。',
     schema: { type: 'object', properties: { owner: str('仓库 owner'), repo: str('仓库名'), number: num('issue 编号'), confirmation: str('完成确认说明（必填）') }, required: ['owner', 'repo', 'number', 'confirmation'] },
     async native(a) {
       const list = await api.listIssues(a.owner, a.repo)
       const row = (list.issues || []).find((i) => Number(i.issue_number) === Number(a.number))
       if (!row) throw new Error(`未找到 #${a.number}`)
-      return api.apiRequest('POST', `/api/issues/${row.id}/confirm-done`, { body: { confirmation: a.confirmation } })
+      return reviewPost(`/api/issues/${row.id}/confirm-done`, { confirmation: a.confirmation })
     },
     render(json) {
       return json && typeof json === 'object' && !json.detail
@@ -874,7 +896,8 @@ export const TOOLS = [
       properties: { device_name: str('设备名（可选，默认 grape-kit-<主机名>）') },
     },
     async run(a, { runGrape, apiModule }) {
-      const base = (process.env.GRAPE_BASE_URL || 'https://www.grapedev.cn').replace(/\/$/, '')
+      // 地址与运行时 API 同源：env > ~/.grape/config.json > 默认（否则文件通道用户会连错实例）
+      const base = getBaseUrl().replace(/\/$/, '')
       const baseName = a.device_name || `grape-kit-${hostname()}`
       const A = apiModule || (await import('./api.mjs')).api
       // 凭据名全局唯一且 token 只展示一次：重名（400 已存在）自动加时间戳后缀重试一次
