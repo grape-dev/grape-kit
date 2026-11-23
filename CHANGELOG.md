@@ -6,6 +6,10 @@
 
 ## Unreleased
 
+暂无待发布变更。下一开发周期的用户可见变更先落本段（按 Added / Changed / Fixed 归类，见 CONTRIBUTING §7），发版时并入对应版本节。
+
+## 0.4.0 (2026-11-23)
+
 ### Added
 
 - `install --target dsh`（DeepSeek Harness）：以 **MCP stdio 托管 patch** 模式把 grape-kit 接入 dsh web profile —— 在 `$DSH_HOME/profiles/web/cordis.patch.yml`（`$DSH_HOME` 缺省 `~/.dsh`）写入带标记的 `insert` 托管块（`id: grape-kit` / `name: '@deepseek-ai/dsh-mcp-client'` / `transport: stdio`），MCP 入口本地脚本优先、解析不到回退 `npx`；`grape-remote` skill 落到 `$DSH_HOME/skills/`。39 工具零改动复用。

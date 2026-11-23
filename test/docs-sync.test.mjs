@@ -52,7 +52,7 @@ test('README 双语单测计数一致（同一口径，不许一边 136 一边 1
   assert.notEqual(en[1], '136', '旧口径 136 已过期，应更新为当前实际单测数')
 })
 
-test('CHANGELOG 保留 Unreleased 段（下一周期入口），0.3.10 发布节覆盖 #19 交回派发收口', () => {
+test('CHANGELOG 保留 Unreleased 段（下一周期入口），0.4.0 发布节覆盖 #21 dsh 适配', () => {
   const md = read('CHANGELOG.md')
   const at = md.search(/^## Unreleased$/m)
   assert.ok(at >= 0, 'CHANGELOG.md 必须保留 ## Unreleased 段（CONTRIBUTING §7）')
@@ -63,11 +63,30 @@ test('CHANGELOG 保留 Unreleased 段（下一周期入口），0.3.10 发布节
     !/^- \S/m.test(unreleasedBody) || /### (Added|Changed|Fixed)/.test(unreleasedBody),
     'Unreleased 段有条目时必须按 Added/Changed/Fixed 归类（发版后允许空段）',
   )
-  // #19 变更已随 0.3.10 发布：覆盖断言自 Unreleased 段迁至最新发布节
-  assert.match(md.slice(firstPublished, firstPublished + 30), /^## 0\.3\.10 \(2026-11-23\)/, '首个已发布节应为 0.3.10 (2026-11-23)')
+  // #21 dsh 适配已随 0.4.0 发布：首个已发布节断言 0.3.10→0.4.0，dsh 覆盖断言落最新发布节
+  assert.match(md.slice(firstPublished, firstPublished + 30), /^## 0\.4\.0 \(2026-11-23\)/, '首个已发布节应为 0.4.0 (2026-11-23)')
   const next = md.slice(firstPublished + 1).search(/^## /m)
   const body = next === -1 ? md.slice(firstPublished) : md.slice(firstPublished, firstPublished + 1 + next)
-  assert.match(body, /### (Added|Changed|Fixed)/, '0.3.10 发布节必须按 Added/Changed/Fixed 归类')
+  assert.match(body, /### (Added|Changed|Fixed)/, '0.4.0 发布节必须按 Added/Changed/Fixed 归类')
+  for (const [re, what] of [
+    [/install --target dsh/, '#21 dsh 托管 patch 安装'],
+    [/uninstall --target dsh/, '#21 dsh 卸载（只删托管块 + skill 副本）'],
+    [/doctor --target dsh/, '#21 dsh 三项检查'],
+    [/dsh-mcp-client/, '#21 dsh-mcp-client 依赖'],
+    [/托管块/, '#21 托管块'],
+    [/detect/, '#21 detect 把 ~/.dsh 纳入自动检测'],
+    [/不完整/, '#21 QA 写入安全：不完整托管块拒写'],
+    [/映射形状/, '#21 QA 写入安全：映射形状拒写'],
+    [/逐字节/, '#21 QA 往返保真：逐字节还原'],
+  ]) {
+    assert.match(body, re, `0.4.0 发布节应记录 ${what} 变更`)
+  }
+  // 历史发布节的覆盖断言不因新版本上移而丢失：#19 仍在 0.3.10 发布节
+  const at0310 = md.search(/^## 0\.3\.10 \(/m)
+  assert.ok(at0310 >= 0, 'CHANGELOG 应有 0.3.10 发布节')
+  const next0310 = md.slice(at0310 + 1).search(/^## /m)
+  const body0310 = next0310 === -1 ? md.slice(at0310) : md.slice(at0310, at0310 + 1 + next0310)
+  assert.match(body0310, /### (Added|Changed|Fixed)/, '0.3.10 发布节必须按 Added/Changed/Fixed 归类')
   for (const [re, what] of [
     [/派发指针只认 `next_seq`|`next_seq`[^\n]*派发指针/, '#19 派发指针只认 next_seq'],
     [/pending_dispatch|待派发/, '#19 待派发标记'],
@@ -75,7 +94,7 @@ test('CHANGELOG 保留 Unreleased 段（下一周期入口），0.3.10 发布节
     [/白名单外/, '#19 白名单外节点名不改写'],
     [/缺事件 `seq`|派发未证实/, '#19 补发缺 seq 判未证实'],
   ]) {
-    assert.match(body, re, `0.3.10 发布节应记录 ${what} 变更`)
+    assert.match(body0310, re, `0.3.10 发布节应记录 ${what} 变更`)
   }
   // 历史发布节的覆盖断言不因新版本上移而丢失：#17 仍在 0.3.9 发布节
   const at039 = md.search(/^## 0\.3\.9 \(/m)
