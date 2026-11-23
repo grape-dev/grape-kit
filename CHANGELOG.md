@@ -4,6 +4,24 @@
 
 > 发布口径说明：npm 已发布版本不可回写——0.3.3 的 npm tarball 内 CHANGELOG 仅含本节（10 行）、README 尚无本节链接且把 0.3.2 记为 2026-11-14（commit 日）。因此「npm 页面与仓内 CHANGELOG 一致」自下一版发布起生效。
 
+## Unreleased
+
+### Added
+
+- `intro` 子命令 + 安装结束统一打印**能力地图**（两者共用同一常量，文案不会漂移）：5 组能力各配一条可直接复制的示例问句；无凭据时先给 3 步 API Key 获取指引（生成地址 / `grape_` 前缀 / 写到哪），避免首次工具调用直接 401。
+- `trigger_pipeline` 新增 `agent` 参数（枚举 `vod` / `issue` / `coding` / `qa` / `sre`，缺省 `vod`）：上游节点已完成时可从指定节点断点续跑，不再一律从 vod 起步。native 与 CLI 回退通道共用 `normalizeTriggerAgent()` 做同一份枚举校验，非法值在发请求前就给出可读报错与可用值（此前 CLI 通道会静默把非法 agent 下发到服务端）。
+
+### Changed
+
+- `doctor` 的 `GRAPE_BASE_URL` 与契约连通性探针改读 `getBaseUrl()` 双通道（env > `~/.grape/config.json` > 默认），并逐行标注生效来源（`环境变量` / `文件通道 <路径>` / `默认`）——只配文件通道时不再假阳性 FAIL。
+- 地址解析收敛到 `src/api.mjs` 的 `getBaseUrl()` 单一事实源：`worker_onboard`、`doctor` 与接管脚本 `skills/grape-remote/scripts/takeover/_lib.mjs` 同源（env > 文件 > 默认）；`_lib.mjs` 为无依赖 skill 副本，保留自带解析并注释取舍。
+- WorkBuddy 安装提示改写为实测口径：无需手动「信任」，**重启宿主会话**即可加载连接器；`uninstall` 注释不再提宿主侧「信任」记录。README 双语同步。
+- `intro` 与 `install|uninstall|doctor` 用法行拆开：`intro` 不收 `--target`（与宿主无关），避免用户以为能指定宿主。
+
+### Fixed
+
+- 审核三工具（`grape_review_pass` / `grape_review_reject` / `grape_confirm_done`）native 通道崩溃（`api.apiRequest is not a function`）：改为直调命名导出 `apiRequest`。403 属 `tk_` 会话通道边界（非权限缺失），提示补上可执行修复动作：改用 WebUI 审核，或由持有 `tk_` 会话的宿主执行。
+
 ## 0.3.8 (2026-11-20)
 
 ### Added

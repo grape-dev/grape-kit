@@ -14,8 +14,10 @@ function sectionOf(md, title) {
   const at = md.indexOf(`### ${title}`)
   if (at === -1) return ''
   const rest = md.slice(at)
-  const next = rest.slice(1).search(/^#{2,3} /m)
-  return next === -1 ? rest : rest.slice(0, 1 + next)
+  const nl = rest.indexOf('\n')
+  if (nl === -1) return rest
+  const next = rest.slice(nl + 1).search(/^#{2,3} /m)
+  return next === -1 ? rest : rest.slice(0, nl + 1 + next)
 }
 
 test('README 双语 WorkBuddy 节：不再要求手动「信任」，改为重启宿主会话', () => {
@@ -24,7 +26,7 @@ test('README 双语 WorkBuddy 节：不再要求手动「信任」，改为重�
   assert.ok(en && zh, '双语 README 均应保留 WorkBuddy 节')
   // 实测 spawn 调用无需授权：旧文案「信任一次」必须消失，否则用户多做一个无用动作
   assert.doesNotMatch(en, /Trust the connector once/i, '英文 README 不得再要求手动信任')
-  assert.doesNotMatch(zh, /手动「信任」/, '中文 README 不得再要求手动信任')
+  assert.doesNotMatch(zh, /需在 WorkBuddy 手动「信任」一次/, '中文 README 不得再要求手动信任一次')
   assert.match(en, /restart the host session/i, '英文 README 应给出实测准确的生效方式')
   assert.match(zh, /重启宿主会话/, '中文 README 应给出实测准确的生效方式')
 })
@@ -61,7 +63,7 @@ test('CHANGELOG 有 Unreleased 段，且覆盖本次工具面与引导变更，�
   for (const [re, what] of [
     [/`agent`|agent.*枚举|枚举.*agent/, 'trigger_pipeline agent 参数/枚举'],
     [/`?intro`?/, 'intro 子命令'],
-    [/安装.*(能力菜单|引导)|能力菜单/, '安装后能力引导'],
+    [/安装.*能力地图|能力地图/, '安装后能力地图/引导'],
     [/getBaseUrl|base_url|baseUrl/, 'doctor base_url 来源展示'],
   ]) {
     assert.match(body, re, `Unreleased 段应记录 ${what} 变更`)
