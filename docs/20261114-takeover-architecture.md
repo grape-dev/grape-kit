@@ -112,7 +112,7 @@ sequenceDiagram
 | `next_seq` > 0 | 平台已派发，**不重复派发** | `已由平台派发（next_seq=N）` |
 | `next_seq=0` 且 `next_agent=qa`（或当前节点 `coding` 推导 coding→qa），无阻塞 | **兜底补发**一次 A2A（复用 trigger 同源 `/api/a2a`），回填 `next_seq` | `已自动派发（seq=N）` |
 | `next_seq=0` 且目标不在 coding→qa 范围（vod/issue/qa 等节点） | 不改其它节点派发行为（Spec Out of Scope），只如实披露 | `兜底范围仅 coding→qa` |
-| `remote_may_still_run` 等警告码、`skipped_dispatches>0`、缺 owner/repo/issue_number 标识、补发失败 | 不瞎派：`dispatch.status=pending` + `pending_dispatch{agent,owner,repo,issue_number,reason}` 随交回结果返回。**标记不走 task_messages**——finish 在服务端同步关会话，事后向已结束会话写 progress 必 409 not_active（mgmt 路由实测）；标记由**会话记录派生**：`grape_takeover_status` 对已结束会话仍可查，`finished + next_agent + handoff_seq=0` 即派发指针缺失，渲染给出目标/原因/补发指引 | 显式告警 + `grape_trigger_pipeline(agent=…)` 补发指引（补发前先 `grape_get_issue_events` 核实，防兜底已成功时重复派发） |
+| `remote_may_still_run` 等警告码、`skipped_dispatches>0`、缺 owner/repo/issue_number 标识、补发失败 | 不瞎派：`dispatch.status=pending` + `pending_dispatch{agent,owner,repo,issue_number,reason}` 随交回结果返回。**标记不走 task_messages**——finish 在服务端同步关会话，事后向已结束会话写 progress 必 409 not_active（mgmt 路由实测）；标记由**会话记录派生**：`grape_takeover_status` 对已结束会话仍可查，`finished + next_agent + 派发指针 next_seq=0` 即派发未证实（仅 `handoff_seq>0` 不作已派发证据，降级为「交回已写、派发未证实」并提示先核实事件），渲染给出目标/原因/补发指引 | 显式告警 + `grape_trigger_pipeline(agent=…)` 补发指引（补发前先 `grape_get_issue_events` 核实，防兜底已成功时重复派发） |
 
 **派发目标口径**：`issue_number` 才是单号；平台 `/tasks` 的 `issue.id`（#19 实测 `18808`）是内部主键，**不能**当 `issue_number` 兜底，否则派发会打到错误 issue。会话未带仓库标识时用 `owner`/`repo`/`issue_number` 入参补齐；平台未给下一节点且不在兜底范围（如 qa 交回、非 coding 节点）返回 `no_next_node` 或 `out_of_scope`，属正常收尾。**会话未带 `agent_type` 时同样按 `out_of_scope` 处理**：无当前节点标识就无法确认兜底范围（coding→qa），宁可不派、由渲染如实披露，不静默。
 
