@@ -94,6 +94,33 @@ const envChecks = () => [
       : '未设置（FAIL）：打开 https://www.grapedev.cn/app/#account/profile 生成用户级 API Key（自部署实例用「你的地址/app/#account/profile」），用环境变量或 ~/.grape/config.json 提供'],
   credentialSourceCheck(),
 ]
+/** 安装后能力清单：安装结束与 `intro` 子命令共用同一份常量，避免两处文案漂移 */
+const CAPABILITY_GROUPS = [
+  { title: '流水线遥控', desc: '建/查/触发/取消需求，观察流水线进度', ask: '我有哪些单子在跑流水线？' },
+  { title: '进度追踪', desc: '按 issue 查看当前节点、事件与停滞原因', ask: '帮我看 #12 的流水线到哪一步了？' },
+  { title: '端云接管', desc: '把云端任务让渡到本地 agent，审查后交回', ask: '接管 grape-dev/grape-kit 的 #12' },
+  { title: 'Worker 接入', desc: '把本机注册成 grape 执行引擎', ask: '把本机接入 Grape Worker' },
+  { title: '仓库与知识', desc: '托管仓库、项目模板、知识库与技能检索', ask: '帮我搜一下登录相关的知识' },
+]
+function capabilityMenu() {
+  const lines = ['能力地图（对 agent 直接说自然语言即可，示例可直接复制）：']
+  for (const g of CAPABILITY_GROUPS) {
+    lines.push(`  ▸ ${g.title} — ${g.desc}`)
+    lines.push(`    例：「${g.ask}」`)
+  }
+  return lines.join('\n')
+}
+/** 安装结束 / intro 共用：无凭据先给 Key 获取指引（避免调用时 401），再打印能力清单 */
+function printInstallGuide() {
+  if (!resolveCredentials(process.env).token) {
+    console.log(`
+【凭据前置】尚未检测到 API Key（env 与 ~/.grape/config.json 均无 token）
+  1. 打开 ${getBaseUrl()}/app/#account/profile（自部署实例换成「你的地址/app/#account/profile」）
+  2. 生成 API Key（grape_ 前缀，明文只显示一次，立即复制）
+  3. export GRAPE_API_TOKEN=grape_你的Key（或写入 ~/.grape/config.json）`)
+  }
+  console.log(`\n${capabilityMenu()}\n`)
+}
 const baseChecks = () => [nodeCheck(), ...envChecks()]
 /** 单宿主详情与裸 doctor 汇总共用的检查序列（CLI 位于 node 之后），避免位置切片耦合 */
 const baseChecksWithCli = () => [nodeCheck(), cliCheck(), ...envChecks()]
@@ -191,7 +218,8 @@ function installWorkbuddy() {
   cfg.mcpServers['grape-kit'] = { command: 'npx', args: [...NPX_ARGS] }
   const backup = writeValidated(p.mcpJson, JSON.stringify(cfg, null, 2) + String.fromCharCode(10), originalText)
   console.log(`已写入 ${p.mcpJson}（mcpServers.grape-kit，${backup ? `备份: ${backup}` : '新建'}）`)
-  console.log('⚠️ 新注册的连接器需在 WorkBuddy 中手动「信任」一次，否则工具不可调用')
+  // 实测 spawn 调用无需手动「信任」步骤；重启宿主会话即可加载新连接器
+  console.log('提示：若 WorkBuddy 未立即加载 grape-kit 工具，重启 WorkBuddy 会话即可（无需手动「信任」）')
   return true
 }
 
@@ -890,21 +918,7 @@ const HOSTS = {
 【第 2 步 · 自检】
        npx -y @grape-dev/grape-kit doctor --probe
   全部 [ok] 即就绪；每个 [!!] 行都会给出对应修复动作。
-【第 3 步 · 重启宿主会话】然后对 agent 说一句话即可（见能力地图）。
-
-能力地图（36 个 MCP 工具，5 大类）：
-  ▸ 流水线遥控   建/查/触发/取消需求，看流水线进度与节点状态
-  ▸ 端云接管     takeover 五件套：云端任务让渡到本地 agent，人工确认后交回
-  ▸ Worker 接入  本机注册成 grape 执行引擎（worker_onboard）
-  ▸ 仓库/项目    托管仓库、项目模板、看板数据
-  ▸ 知识/技能    平台知识库与技能检索
-
-上手案例（对 agent 直接说，自然语言即可）：
-  ·「帮我建一个需求单：标题 xxx、描述 yyy」 → 建单进入流水线
-  ·「查 xxx/yyy 仓库流水线，#12 到哪个节点了」 → 观察进度
-  ·「接管 xxx/yyy 的 #12」 → 端云接管，本地干活
-  · 干完审查它的证据后说「确认」 → 正式交回，流水线自动接力
-
+【第 3 步 · 重启宿主会话】然后对 agent 说一句话即可（能力清单见下）。
 完整文档：https://gitcode.com/grape-dev/grape-kit/blob/main/README.md
 ──────────────────────────────────────────────`)
     },
@@ -987,7 +1001,11 @@ if (cmd === '--version' || cmd === 'version' || cmd === '-v') {
   process.exit(0)
 }
 
-if (cmd === 'install' || cmd === 'uninstall' || cmd === 'doctor') {
+if (cmd === 'intro') {
+  // 随时重看能力清单；与安装结束共用同一份文案（无凭据时同样先给 Key 指引）
+  printInstallGuide()
+} else if (cmd === 'install' || cmd === 'uninstall' || cmd === 'doctor') {
+  let installed = false
   // doctor 未显式指定 --target 时汇总全部宿主；install/uninstall 仍默认 opencode
   if (cmd === 'doctor' && !process.argv.slice(2).some((a) => a === '--target' || a.startsWith('--target='))) {
     doctorAll(!!arg('probe'))
@@ -1004,14 +1022,16 @@ if (cmd === 'install' || cmd === 'uninstall' || cmd === 'doctor') {
         else if (cmd === 'uninstall') HOSTS[n].uninstall()
         else await HOSTS[n].doctor(!!arg('probe'))
       }
+      if (cmd === 'install') installed = true
     } else {
       const host = HOSTS[t]
-      if (cmd === 'install') host.install()
+      if (cmd === 'install') { host.install(); installed = true }
       else if (cmd === 'uninstall') host.uninstall()
       else await host.doctor(!!arg('probe'))
     }
   }
+  if (installed) printInstallGuide()
 } else {
-  console.log(`用法: node setup.mjs install|uninstall|doctor [--target ${SUPPORTED_TARGETS.join('|')}] [--probe]`)
+  console.log(`用法: node setup.mjs install|uninstall|doctor|intro [--target ${SUPPORTED_TARGETS.join('|')}] [--probe]`)
   for (const [name, host] of Object.entries(HOSTS)) console.log(`  --target ${name.padEnd(10)} ${host.label}`)
 }
