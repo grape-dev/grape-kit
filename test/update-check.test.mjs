@@ -1,14 +1,30 @@
 import assert from 'node:assert/strict'
-import { test, beforeEach } from 'node:test'
+import { test, beforeEach, afterEach, after } from 'node:test'
 import { mkdtempSync, writeFileSync, mkdirSync, readFileSync } from 'node:fs'
 import { tmpdir, homedir } from 'node:os'
-import { join } from 'node:path'
+import { join, dirname } from 'node:path'
 import { rmSync, existsSync } from 'node:fs'
 
-const CACHE = join(homedir(), '.grape', 'grape-kit-update-check.json')
-beforeEach(() => { try { rmSync(CACHE, { force: true }) } catch {} })
+/* AC4（QA 复审）：update-check 缓存路径单源 grapeHome() 优先读 GRAPE_HOME——测试不接管该变量时，
+ * 外部继承的 GRAPE_HOME 会把缓存引到外部目录且跨用例共享同一文件互相污染
+ * （QA 实测 GRAPE_HOME=<dir> npm test → 13 红）。每个用例独立指向尚不存在的 <tmp>/.grape：
+ * 既隔离继承值，也顺带覆盖 writeCache「目录自动创建」路径。 */
+const OUTER_GRAPE_HOME = process.env.GRAPE_HOME
+const ucDirs = []
+beforeEach(() => {
+  const d = mkdtempSync(join(tmpdir(), 'grape-kit-uc-'))
+  ucDirs.push(d)
+  process.env.GRAPE_HOME = join(d, '.grape')
+})
+afterEach(() => {
+  if (OUTER_GRAPE_HOME === undefined) delete process.env.GRAPE_HOME
+  else process.env.GRAPE_HOME = OUTER_GRAPE_HOME
+})
+after(() => { for (const d of ucDirs) rmSync(d, { recursive: true, force: true }) })
 
-/** 临时 HOME（不预建 .grape）：返回 home 与恢复函数 */
+const CACHE = () => join(process.env.GRAPE_HOME, 'grape-kit-update-check.json')
+
+/** 临时 HOME（不预建 .grape）：返回 home 与恢复函数（缓存隔离由上方 GRAPE_HOME 接管，HOME 仅兜底） */
 function withTempHome() {
   const home = mkdtempSync(join(tmpdir(), 'grape-kit-update-home-'))
   const prev = process.env.HOME
@@ -121,8 +137,8 @@ test('checkUpdate：本地正式版高于 latest 预发布 → null', async () =
 
 test('checkUpdate：24h 缓存命中 → 同一新版本只提示一次且不再请求 registry', async () => {
   const { checkUpdate } = await loadMod()
-  mkdirSync(join(homedir(), '.grape'), { recursive: true })
-  writeFileSync(CACHE, JSON.stringify({ checkedAt: Date.now(), latest: '0.3.9' }))
+  mkdirSync(dirname(CACHE()), { recursive: true })
+  writeFileSync(CACHE(), JSON.stringify({ checkedAt: Date.now(), latest: '0.3.9' }))
   let called = 0
   const fetchImpl = async () => { called++; throw new Error('should not hit registry') }
   const first = await checkUpdate('0.3.2', { fetchImpl, env: {} })
@@ -134,8 +150,8 @@ test('checkUpdate：24h 缓存命中 → 同一新版本只提示一次且不再
 
 test('checkUpdate：24h 缓存过期 → 重新请求 registry', async () => {
   const { checkUpdate } = await loadMod()
-  mkdirSync(join(homedir(), '.grape'), { recursive: true })
-  writeFileSync(CACHE, JSON.stringify({ checkedAt: 1, latest: '0.3.9' }))
+  mkdirSync(dirname(CACHE()), { recursive: true })
+  writeFileSync(CACHE(), JSON.stringify({ checkedAt: 1, latest: '0.3.9' }))
   let called = 0
   const r = await checkUpdate('0.3.2', {
     now: 1 + 24 * 3600 * 1000,
@@ -154,7 +170,7 @@ test('checkUpdate：HOME 下无 .grape 目录时自动创建缓存，24h 去重�
     const fetchImpl = async () => { called++; return { ok: true, json: async () => ({ version: '9.9.9' }) } }
     const first = await checkUpdate('0.3.2', { now: Date.now(), fetchImpl, env: {} })
     assert.deepEqual(first, { latest: '9.9.9', cached: false })
-    const cacheFile = join(home, '.grape', 'grape-kit-update-check.json')
+    const cacheFile = CACHE()
     assert.ok(existsSync(cacheFile), '应自动创建 ~/.grape 并落盘缓存')
     const second = await checkUpdate('0.3.2', { now: Date.now(), fetchImpl, env: {} })
     assert.equal(second, null)
@@ -173,7 +189,7 @@ test('checkUpdate：registry 异常时落 24h 退避缓存，下次不再请求'
       env: {},
     })
     assert.equal(first, null)
-    const cache = JSON.parse(readFileSync(join(home, '.grape', 'grape-kit-update-check.json'), 'utf-8'))
+    const cache = JSON.parse(readFileSync(CACHE(), 'utf-8'))
     assert.equal(cache.latest, '', '失败路径也应落空结果缓存')
     assert.equal(typeof cache.checkedAt, 'number')
     const second = await checkUpdate('0.3.2', {
@@ -196,7 +212,7 @@ test('checkUpdate：非 2xx 响应同样落 24h 退避缓存', async () => {
       fetchImpl: async () => { called++; return { ok: false, status: 500, json: async () => ({}) } },
       env: {},
     })
-    assert.ok(existsSync(join(home, '.grape', 'grape-kit-update-check.json')))
+    assert.ok(existsSync(CACHE()))
     await checkUpdate('0.3.2', {
       now: Date.now(),
       fetchImpl: async () => { called++; return { ok: true, json: async () => ({ version: '9.9.9' }) } },
