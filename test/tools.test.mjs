@@ -138,6 +138,29 @@ test('trigger 工具 schema 声明 agent 枚举并在 native 透传', async () =
   assert.deepEqual(seen, ['acme', 'demo', 12, '续跑', 'qa'], 'native 必须把 agent 透传给 api.triggerPipeline')
 })
 
+test('trigger 工具 CLI 回退通道拒绝非法 agent，与 native 同口径', async () => {
+  const { GrapeApiError } = await import('../src/api.mjs')
+  const t = findTool('grape_trigger_pipeline')
+  const caught = (fn) => { try { fn(); return null } catch (e) { return e } }
+
+  // CLI 通道 buildArgs 若不过枚举校验，会把非法 agent 静默交给服务端（native 已报错，两通道必须一致）
+  const cliErr = caught(() => t.buildArgs({ owner: 'acme', repo: 'demo', issue_number: 12, agent: 'pm' }))
+  assert.ok(cliErr instanceof GrapeApiError, 'CLI 通道必须在本地就拒绝非法 agent')
+  assert.match(cliErr.message, /非法 agent：pm（可用值：vod \/ issue \/ coding \/ qa \/ sre）/)
+
+  // 缺省/空值仍回落到 vod，不因校验把默认路径拒掉
+  for (const agent of [undefined, null, '']) {
+    const args = t.buildArgs({ owner: 'acme', repo: 'demo', issue_number: 12, agent })
+    assert.equal(JSON.parse(args[args.indexOf('--json') + 1]).agent, 'vod', `agent=${agent} 应回落 vod`)
+  }
+
+  // native 在发起请求前就报错（校验早于网络），且与 CLI 通道同一份文案，避免两条通道各写一份枚举
+  let nativeErr = null
+  try { await t.native({ owner: 'acme', repo: 'demo', issue_number: 12, agent: 'pm' }) } catch (e) { nativeErr = e }
+  assert.ok(nativeErr instanceof GrapeApiError, 'native 通道必须拒绝非法 agent')
+  assert.equal(nativeErr.message, cliErr.message, 'native 与 CLI 回退通道报错必须同源')
+})
+
 /* ── Issue #17：审核三工具 native 直调（api.apiRequest 崩溃修复） ── */
 
 function withFakeFetch(handler, fn) {
