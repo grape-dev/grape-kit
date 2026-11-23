@@ -8,16 +8,23 @@
 
 ### Added
 
-- `uninstall --clean-global`：一键清理凭据与使用痕迹——整删 `~/.grape`（含文件通道 `config.json` 与 worker 注册产物）、删除用户级 `GRAPE_API_TOKEN`/`GRAPE_BASE_URL`（POSIX 精确删 rc 中的 `export` 行，备份只保留非凭据行；Windows 用 `reg delete HKCU\Environment`）、清理 `_npx` 中仅含 `node_modules/@grape-dev` 的条目（其他包缓存不动）。主命令不带 `--target` 也可用（无宿主痕迹时跳过宿主卸载、照跑全局清理）；残留提示与三路清理共用同一扫描（所见即所删）。新增 `--dry-run` 预览模式：只列出将删除项、不动盘。不带该选项时 `uninstall` 只列出残留项与清理命令，不静默删除。
-- `auth init` 子命令：凭据唯一写入入口，`--token grape_... [--base-url ...]`（TTY 下可交互），写入目标与解析目标严格一致（`GRAPE_AUTH_FILE` 已设置时写它，否则写 `GRAPE_HOME/config.json`），权限 600、剥 BOM，写盘后回读校验，并打印 env 通道设置命令与优先级说明；非 `grape_` 前缀直接拒绝。
+- `uninstall --clean-global`：一键清理凭据与使用痕迹——整删 `~/.grape`（含文件通道 `config.json` 与 worker 注册产物）、删除 `GRAPE_AUTH_FILE` 指向的凭据文件（非凭据形态的目标不盲删，点名提示人工处理）、删除用户级 `GRAPE_API_TOKEN`/`GRAPE_BASE_URL`（POSIX 精确删 rc 中的 `export` 行，备份保留非凭据原文、凭据行掩码标注；Windows 用 `reg delete HKCU\Environment`）、清理 `_npx` 中仅含 `node_modules/@grape-dev/grape-kit` 的条目（其他包缓存不动；Windows 读 `%LocalAppData%\npm-cache\_npx`）。主命令不带 `--target` 也可用（无宿主痕迹时跳过宿主卸载、照跑全局清理，且先打印残留项与清理命令）；残留提示与清理路径共用同一扫描（所见即所删）。新增 `--dry-run` 全程预览：宿主条目移除、skill 删除、备份与全局清理均只列不做、不动盘；预览与执行共用误删护栏（`GRAPE_HOME` 先 resolve/realpath 归一化，指向 `$HOME`/`$HOME/.config`/`..` 穿越/祖先一律拒绝，自定义路径须有真实 grape 产物证据，通用文件名 `config.json` 不再单独构成特征）。不带该选项时 `uninstall` 只列出残留项与清理命令，不静默删除。
+- `auth init` 子命令：凭据唯一写入入口，`--token grape_... [--base-url ...]`（TTY 下可交互），写入目标与解析目标严格一致（`GRAPE_AUTH_FILE` 已设置时写它，否则写 `GRAPE_HOME/config.json`），权限 600、剥 BOM（win32 无 600 权限位、按目录 ACL，文案平台分流），写盘后回读校验，并打印 env 通道设置命令与优先级说明；已设置更高优先级 env（`GRAPE_API_TOKEN_ONCE`/`GRAPE_API_TOKEN`）时提示冲突与让文件通道生效的处置指引，非 TTY 会话对 token 掩码回显（明文只落文件通道）；非 `grape_` 前缀直接拒绝。
 
 ### Changed
 
-- `doctor` 把单行「当前生效凭据来源」升级为**完整优先级视图**：逐档列出 runtime（`GRAPE_API_TOKEN_ONCE`）> env（`GRAPE_API_TOKEN`/`GRAPE_BASE_URL`）> file（`GRAPE_AUTH_FILE`/`GRAPE_HOME/config.json`）的命中/未命中及原因，仍不回显 token。渲染三态化：命中档 `[ok]`，未命中/被覆盖档 `[--]` 信息行（无修复动作），失败项 `[!!]`——不再出现「`[ok]` 行内写着未命中」的自相矛盾；`doctor --target <宿主>` 的检查项不再重复打印。
+- `doctor` 把单行「当前生效凭据来源」升级为**完整优先级视图**：逐档列出 runtime（`GRAPE_API_TOKEN_ONCE`）> env（`GRAPE_API_TOKEN`/`GRAPE_BASE_URL`）> file（`GRAPE_AUTH_FILE`/`GRAPE_HOME/config.json`）的命中/未命中及原因，仍不回显 token。渲染三态化：命中档 `[ok]`，未命中/被覆盖档 `[--]` 信息行（无修复动作），失败项 `[!!]`——不再出现「`[ok]` 行内写着未命中」的自相矛盾，runtime 档命中时凭据行也不再出现 `[!!]`；`doctor --target <宿主>` 的检查项不再重复打印。
 - `GRAPE_HOME` 覆盖点（默认 `~/.grape`）收敛到 `src/api.mjs` 单源实现（`grapeHome()`/`readAuthChannel()` 导出），安装器、版本检查缓存与文件通道解析共用；takeover 脚本 `skills/grape-remote/scripts/takeover/_lib.mjs` 同语义接入（无依赖 skill 副本，保留逐字一致表达式）。README 双语同步凭据优先级链与新命令用法。
 
 ### Fixed
 
+- QA 复审（合入后 dev 基线，修复 PR）硬违规 1：`GRAPE_AUTH_FILE` 指向的凭据文件在 `auth init` 写入后既不检测也不清理，默认 uninstall 谎报零残留、同屏 doctor 仍报该文件生效——`GRAPE_AUTH_FILE` 纳入 `scanResidues` 单一扫描：残留提示点名路径，`--clean-global` 删除该文件，`--dry-run` 预览同步；非凭据形态目标拒删并提示人工处理。
+- QA 复审（同批）硬违规 2：`--dry-run` 仍执行宿主卸载/删 skill/写备份（与 README/CHANGELOG「不动盘」矛盾），测试还把该行为固化为断言——dry-run 全程不动盘，宿主卸载改为各宿主 `plan()` 预览（与 uninstall 同路径判定），错误断言测试同步修正；不带 `--clean-global` 时不再静默忽略。
+- QA 复审（同批）硬违规 3：误删护栏可被路径形态绕过——`GRAPE_HOME=$HOME/.config`（普通 config.json 误判特征）整删 `.config`、`GRAPE_HOME=$HOME/.grape/..` 清空 HOME。护栏改为 resolve/realpath 归一化后与 HOME/根/祖先比较；特征收窄为已知 grape 产物 + 凭据形态 config.json，HOME 直接子目录要求全部条目为 grape 产物；空目录拒删；`--dry-run` 预览与执行同护栏；拒绝信息给出解析后的绝对路径。
+- Spec AC1：普通 `uninstall` 不带 `--target` 零宿主痕迹时 exit 1 且不打印残留提示——现于非零退出前输出残留项与清理命令（干净环境亦明确报告「未检测到残留」）。
+- Spec AC2：已存在旧 `GRAPE_API_TOKEN` 时 `auth init` 不检测冲突、双通道不一致——现提示 env/runtime 覆盖与处置指引。
+- Spec AC4：测试套件继承导出的 `GRAPE_HOME` 时 13 处红（夹具未隔离）——update-check 每用例接管缓存目录、setup/intro run 夹具清继承值，导出 `GRAPE_HOME` 跑测全绿。
+- QA 判断项批：仅 runtime 档生效时凭据检查行误报 `[!!]`（与「没有 [!!] 即就绪」矛盾）——改 `[--]` 信息行；win32 残留扫描不读注册表（`setx` 变量旧进程不可见）——补 `reg query` 扫描与删除前预检（不再吞错）；`_npx` 路径 win32 写死 `~/.npm/_npx`——`npxCacheRoot()` 平台分流至 `%LocalAppData%\npm-cache\_npx`；`_npx` 按 `@grape-dev` scope 匹配误删仅含 `grape-card` 的条目——收窄到 `@grape-dev/grape-kit` 实体；rc 备份与清理后文件逐字节相同（无回滚价值）——备份改保留非凭据原文 + 凭据行掩码标注；`credentialSourceCheck` 字符串反推命中档——改用结构化 `sourceKind`。
 - QA 复审（PR #11）安全回归：`doctor` 文件通道解析失败时透传 `JSON.parse` 报错消息，会把 `config.json` 原文（含 token 片段）带进输出——改为固定文案「解析失败（内容不回显）」。
 - QA 复审（PR #11）硬违规：`--clean-global` 的 rc 备份曾保留完整 `export GRAPE_API_TOKEN=…` 明文行且残留检测不扫备份，卸载后打印「未检测到残留」实为假象——备份只保留非凭据行，旧版本留下的含凭据 `.bak-grapemcp-*` 备份纳入残留检测并由 `--clean-global` 清零。
 - QA 复审（PR #11）主命令不可达：`uninstall --clean-global` 不带 `--target` 时曾先走宿主自动解析，无宿主痕迹即 exit 1、清理从未执行——见 Added（全局清理前置于宿主解析）。

@@ -68,12 +68,15 @@ npx -y @grape-dev/grape-kit auth init --token grape_xxx --base-url https://www.g
 npx -y @grape-dev/grape-kit doctor     # 展示完整 runtime > env > file 优先级链（不回显 token）
 ```
 
-`auth init` 在 `GRAPE_AUTH_FILE` 已设置时写它，否则写 `GRAPE_HOME/config.json`——写入目标始终与解析目标一致，写盘后回读校验。`doctor` 输出中命中档显示 `[ok]`；未命中/被覆盖档显示 `[--]`（信息行，无需处理）。
+`auth init` 在 `GRAPE_AUTH_FILE` 已设置时写它，否则写 `GRAPE_HOME/config.json`——写入目标始终与解析目标一致，写盘后回读校验。已设置更高优先级环境变量（`GRAPE_API_TOKEN_ONCE`/`GRAPE_API_TOKEN`）时会提示文件通道被覆盖、如何让它生效。非交互会话中打印的 env 命令对 token 掩码回显（明文只落文件通道），TTY 下保留可复制形态。`doctor` 输出中命中档显示 `[ok]`；未命中/被覆盖档显示 `[--]`（信息行，无需处理——runtime 档命中时不会再出现凭据 `[!!]` 行）。
 
-普通 `uninstall` 只移除宿主条目并提示残留凭据；加 `--clean-global` 才会删除 `~/.grape`（文件通道 + worker 注册产物）、用户级 `GRAPE_API_TOKEN`/`GRAPE_BASE_URL`（POSIX：从 rc 文件精确删除 `export` 行，备份只保留非凭据行——含凭据的备份等于换个文件名把 token 留盘；Windows 用 `reg delete`），并仅清理含 `node_modules/@grape-dev` 的 `_npx` 缓存条目。`--clean-global` 带不带 `--target` 均可执行（零宿主痕迹时也照跑全局清理）；`--dry-run` 先预览将删除项、不动盘：
+普通 `uninstall` 只移除宿主条目并提示残留凭据（零宿主痕迹时同样会打印残留项与清理命令）；加 `--clean-global` 才会删除 `~/.grape`（文件通道 + worker 注册产物）、`GRAPE_AUTH_FILE` 指向的凭据文件（非凭据形态的目标不盲删——点名提示人工处理）、用户级 `GRAPE_API_TOKEN`/`GRAPE_BASE_URL`（POSIX：从 rc 文件精确删除 `export` 行，备份保留非凭据原文、凭据行掩码标注——含凭据的备份等于换个文件名把 token 留盘；Windows 用 `reg delete`），并仅清理含 `node_modules/@grape-dev/grape-kit` 的 `_npx` 缓存条目（Windows npm 缓存在 `%LocalAppData%\npm-cache\_npx`）。`--clean-global` 带不带 `--target` 均可执行（零宿主痕迹时也照跑全局清理）。
+
+`--dry-run` 是全程预览：宿主条目移除、skill 删除、备份同样只列不做——无论是否带 `--clean-global` 都不动盘。全局清理带误删护栏：`GRAPE_HOME` 先经 `resolve`/realpath 归一化再比较——指向 `$HOME`、`$HOME/.config`、含 `..` 的穿越形态或 HOME 的祖先一律拒绝；自定义路径必须有真实 grape 产物证据（通用文件名 `config.json` 不再单独构成特征），预览与执行共用同一护栏：
 
 ```bash
-npx -y @grape-dev/grape-kit uninstall --clean-global --dry-run   # 先预览
+npx -y @grape-dev/grape-kit uninstall --target opencode --dry-run  # 预览宿主卸载
+npx -y @grape-dev/grape-kit uninstall --clean-global --dry-run   # 先预览全部
 npx -y @grape-dev/grape-kit uninstall --clean-global
 ```
 
@@ -192,7 +195,7 @@ npx -y @grape-dev/grape-kit intro     # 随时重看能力地图
 
 ```bash
 npm install
-npm test        # 177 个单测（fake-grape 替身，不依赖真实服务端）
+npm test        # 201 个单测（fake-grape 替身，不依赖真实服务端）
 npm run smoke   # 真实 stdio JSON-RPC 往返：initialize → tools/list → tools/call
 ```
 
