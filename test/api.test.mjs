@@ -142,6 +142,23 @@ test('getBaseUrl 优先级：env > ~/.grape/config.json > 默认', () => {
   } finally { rmSync(dir, { recursive: true, force: true }) }
 })
 
+test('Issue #20 GRAPE_HOME 覆盖文件通道路径（测试隔离 + 自部署）', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gk-home-'))
+  try {
+    mkdirSync(join(dir, '.grape'), { recursive: true })
+    writeFileSync(join(dir, '.grape', 'config.json'), JSON.stringify({ token: 'grape_home', base_url: 'https://home.example' }))
+    // 无 GRAPE_AUTH_FILE 时，文件通道应落在 GRAPE_HOME/config.json
+    const env = { GRAPE_HOME: join(dir, '.grape') }
+    assert.equal(resolveCredentials(env).token, 'grape_home')
+    assert.equal(resolveCredentials(env).source, `file:${join(dir, '.grape', 'config.json')}`)
+    assert.equal(getBaseUrl(env), 'https://home.example')
+    // GRAPE_AUTH_FILE 显式指定优先级高于 GRAPE_HOME 默认路径
+    const explicit = join(dir, 'explicit.json')
+    writeFileSync(explicit, JSON.stringify({ token: 'grape_explicit' }))
+    assert.equal(resolveCredentials({ ...env, GRAPE_AUTH_FILE: explicit }).token, 'grape_explicit')
+  } finally { rmSync(dir, { recursive: true, force: true }) }
+})
+
 test('getBaseUrl 支持 baseUrl 驼峰别名与 BOM 文件通道', () => {
   const dir = mkdtempSync(join(tmpdir(), 'gk-base-'))
   try {

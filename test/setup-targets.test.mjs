@@ -27,6 +27,8 @@ function run(args, h, extraEnv = {}) {
       HOME: h,
       GRAPE_CODEARTS_CONFIG: '',
       GRAPE_OFFICEACE_MANIFEST: '',
+      GRAPE_HOME: '',
+      GRAPE_AUTH_FILE: '',
       ...extraEnv,
     },
     timeout: 30_000,
@@ -535,4 +537,60 @@ test('opencode 纯 JSON 无 mcp 块：整体重写保留既有字段并留备份
   assert.equal(cfg.theme, 'dark', '既有字段必须保留')
   assert.ok(cfg.mcp.grape, '应新建 mcp.grape 条目')
   assert.deepEqual(backupContents(dir), [seed], '备份内容必须是改动前原文')
+})
+
+/* ── Issue #20：uninstall --clean-global / _npx 白名单 / 默认残留提示 ── */
+
+function seedResidue(h) {
+  const grapeHome = join(h, '.grape')
+  mkdirSync(join(grapeHome, 'workers'), { recursive: true })
+  writeFileSync(join(grapeHome, 'config.json'), JSON.stringify({ token: 'grape_secret_file', base_url: 'https://x.example' }))
+  writeFileSync(join(grapeHome, 'workers', 'worker.json'), '{}')
+  writeFileSync(join(h, '.bashrc'), 'export PATH=$PATH:/bin\nexport GRAPE_API_TOKEN=grape_secret_env\nexport GRAPE_BASE_URL=https://x.example\n')
+  const npx = join(h, '.npm', '_npx')
+  const own = join(npx, 'aaaaaaaa')
+  mkdirSync(join(own, 'node_modules', '@grape-dev', 'grape-kit'), { recursive: true })
+  writeFileSync(join(own, 'package.json'), '{}')
+  const other = join(npx, 'bbbbbbbb')
+  mkdirSync(join(other, 'node_modules', 'some-other'), { recursive: true })
+  writeFileSync(join(other, 'package.json'), '{}')
+  return { grapeHome, npx, own, other }
+}
+
+test('Issue #20 uninstall --clean-global 零残留且不影响其他 npx 缓存', () => {
+  const h = home()
+  const s = seedResidue(h)
+  assert.equal(run(['install', '--target', 'opencode'], h).status, 0)
+  const r = run(['uninstall', '--target', 'opencode', '--clean-global'], h)
+  assert.equal(r.status, 0, r.stderr)
+  assert.ok(!existsSync(s.grapeHome), 'GRAPE_HOME（含 config.json + worker 产物）应被整目录删除')
+  const bashrc = readFileSync(join(h, '.bashrc'), 'utf8')
+  assert.doesNotMatch(bashrc, /GRAPE_API_TOKEN=/, 'rc 中 GRAPE_API_TOKEN 导出行应删除')
+  assert.doesNotMatch(bashrc, /GRAPE_BASE_URL=/, 'rc 中 GRAPE_BASE_URL 导出行应删除')
+  assert.match(bashrc, /export PATH=/, '无关行必须保留')
+  assert.ok(backupsIn(h).some((f) => f.startsWith('.bashrc.bak-grapemcp-')), 'rc 改动前应留备份')
+  assert.ok(!existsSync(s.own), '含 node_modules/@grape-dev 的 _npx 条目应删除')
+  assert.ok(existsSync(s.other), '其他包缓存必须保留')
+})
+
+test('Issue #20 默认 uninstall 仅提示残留与清理命令，不执行删除', () => {
+  const h = home()
+  const s = seedResidue(h)
+  assert.equal(run(['install', '--target', 'opencode'], h).status, 0)
+  const r = run(['uninstall', '--target', 'opencode'], h)
+  assert.equal(r.status, 0, r.stderr)
+  assert.ok(existsSync(s.grapeHome), '默认 uninstall 不得删除 GRAPE_HOME')
+  assert.match(r.stdout, /残留/)
+  assert.match(r.stdout, /--clean-global/)
+})
+
+test('Issue #20 _npx 白名单：名字相似但不在 @grape-dev 下的条目不删', () => {
+  const h = home()
+  const npx = join(h, '.npm', '_npx')
+  const fake = join(npx, 'cccccccc')
+  mkdirSync(join(fake, 'node_modules', 'grape-kit'), { recursive: true })
+  writeFileSync(join(fake, 'package.json'), '{}')
+  const r = run(['uninstall', '--target', 'opencode', '--clean-global'], h)
+  assert.equal(r.status, 0, r.stderr)
+  assert.ok(existsSync(fake), '非 @grape-dev 实体不得删除')
 })
