@@ -54,6 +54,29 @@ export GRAPE_API_TOKEN=grape_xxx      # API Key：https://www.grapedev.cn/app/#a
 # 环境变量被清洗的宿主：写文件通道 ~/.grape/config.json {"token":"grape_xxx","base_url":"..."}
 ```
 
+### 凭据优先级与 `auth init`
+
+凭据写入收敛为单一入口；解析顺序固定，API 客户端、`doctor` 与接管脚本共用同一份语义：
+
+1. `GRAPE_API_TOKEN_ONCE` —— runtime，仅当前进程（最高）
+2. `GRAPE_API_TOKEN` / `GRAPE_BASE_URL` —— env 环境变量通道
+3. `GRAPE_AUTH_FILE` 或 `~/.grape/config.json`（目录可用 `GRAPE_HOME` 覆盖）—— file 文件通道
+
+```bash
+# 写文件通道（权限 600、剥 BOM），并打印对应的 env 设置命令
+npx -y @grape-dev/grape-kit auth init --token grape_xxx --base-url https://www.grapedev.cn
+npx -y @grape-dev/grape-kit doctor     # 展示完整 runtime > env > file 优先级链（不回显 token）
+```
+
+`auth init` 在 `GRAPE_AUTH_FILE` 已设置时写它，否则写 `GRAPE_HOME/config.json`——写入目标始终与解析目标一致，写盘后回读校验。`doctor` 输出中命中档显示 `[ok]`；未命中/被覆盖档显示 `[--]`（信息行，无需处理）。
+
+普通 `uninstall` 只移除宿主条目并提示残留凭据；加 `--clean-global` 才会删除 `~/.grape`（文件通道 + worker 注册产物）、用户级 `GRAPE_API_TOKEN`/`GRAPE_BASE_URL`（POSIX：从 rc 文件精确删除 `export` 行，备份只保留非凭据行——含凭据的备份等于换个文件名把 token 留盘；Windows 用 `reg delete`），并仅清理含 `node_modules/@grape-dev` 的 `_npx` 缓存条目。`--clean-global` 带不带 `--target` 均可执行（零宿主痕迹时也照跑全局清理）；`--dry-run` 先预览将删除项、不动盘：
+
+```bash
+npx -y @grape-dev/grape-kit uninstall --clean-global --dry-run   # 先预览
+npx -y @grape-dev/grape-kit uninstall --clean-global
+```
+
 ### OpenCode
 
 ```bash
@@ -110,6 +133,7 @@ openclaw plugins install clawhub:grape-kit@latest
 npx -y @grape-dev/grape-kit --version        # 版本查询
 npm install -g @grape-dev/grape-kit          # 更新（更新后重启 Agent 会话）
 npx -y @grape-dev/grape-kit uninstall        # 卸载（宿主自动检测）
+npx -y @grape-dev/grape-kit uninstall --clean-global   # 同时清理 ~/.grape + 用户环境变量 + _npx 缓存
 ```
 
 启动时自动检查 npm 新版本（24h 去重，`GRAPE_KIT_SKIP_UPDATE_CHECK=1` 关闭）；国内镜像同步滞后 1-3 天，最新版用 `--registry https://registry.npmjs.org/`。
@@ -138,6 +162,7 @@ npx -y @grape-dev/grape-kit intro     # 随时重看能力地图
 
 | 版本 | 日期 | 要点 |
 |---|---|---|
+| 0.3.10 | 2026-11-23 | 接管交回派发收口（#19）：派发指针只认 `next_seq`（`handoff_seq` 只是交回事件序号，不作派发证据）· 平台漏派时客户端兜底补发 coding→qa（与 trigger 同源 A2A 通道）并回填 `next_seq` · 受阻（`remote_may_still_run`／缺仓库-issue 标识／补发失败）落 `pending_dispatch` 待派发标记 + 可读告警，不再静默 grace；三处「未证实当成功」收口：交回未成功（`ok=false`／`changed=false`）不派发下一节点 · 白名单外节点名（如 `reviewer`）按「未知」上报不改写为 qa · 补发响应缺事件 `seq` 判未证实；#20 凭据/卸载批：`auth init` 唯一写入入口 · `uninstall --clean-global`（`--dry-run`、rc 备份不留凭据行、`_npx` 收窄到 grape-kit）· doctor 完整凭据优先级视图；单测 156→257 |
 | 0.3.9 | 2026-11-23 | 端云接管全链路硬化（#12）：takeover_start 分支/MR 前置检查 · warnings 全量透出 · Node 跨平台接管三脚本（report/request-finish/finish）· 409 agent_mismatch 友好提示 · bundle 脚本 {{CWD}} 渲染 · doctor 凭据来源行；#17 修复批：intro 子命令 + 能力地图（无凭据先给 3 步 API Key 指引）· trigger_pipeline agent 参数（可从指定节点续跑）· doctor base_url 双通道并标注生效来源 · 审核三工具 native 崩溃修复；单测 136→156 |
 | 0.3.8 | 2026-11-20 | 审核三工具（grape_review_pass / grape_review_reject / grape_confirm_done，工具面 36→39）· issues 表新增「仓库」列 · doctor 识别 ~/.grape/config.json 文件通道凭证（不再误报 FAIL） |
 | 0.3.7 | 2026-11-20 | trigger/task_status 图形化渲染（触发即出节点链图 · 状态查询出卡片+进度条+下一步指引）· Quick Start 重构对齐 devkit 模式 + Capabilities 总览节 · 卸载清理 receipt · Codex/hermes 移出露出面 |
@@ -150,11 +175,11 @@ npx -y @grape-dev/grape-kit intro     # 随时重看能力地图
 | 0.3.0 | 2026-11-11 | 传输层原生化：原生 HTTP 直连，grape CLI/Python 变可选（401 回退通道） |
 | 0.2.x | 2026-11-09 前 | 13→31 工具扩展 · worker_onboard · B1 接管闭环 |
 
-逐版本完整记录（发布日期、工具面变化、行为修复，覆盖 npm 全部 19 条发布记录——含 `0.0.0-stage` 占位包，0.2.3 从未发布）：[CHANGELOG.md](CHANGELOG.md)
+逐版本完整记录（发布日期、工具面变化、行为修复，覆盖 npm 全部 20 条发布记录——含 `0.0.0-stage` 占位包，0.2.3 从未发布）：[CHANGELOG.md](CHANGELOG.md)
 
 ## 设计原则
 
-- **只触发、只观察、可推进、可接管**：A2A 编排由服务端 `pipelines.json` 驱动，插件永不干预节点交接；接管以会话原语完成原子让渡与交回
+- **只触发、只观察、可推进、可接管**：A2A 编排默认服务端驱动；takeover 交回时平台漏派 coding→qa（`next_seq=0`）由客户端兜底补发——且只在交回**本身成功**之后，交回未成功绝不把下一节点拉进一个未交回的任务；白名单外节点名按「未知」上报而不被改写；超出该范围保持平台原行为；接管以会话原语完成原子让渡与交回
 - **scope 是第一道门禁**：契约 219 命令中 session_only 的 28 个（git-repo 等）对外部 token 必 403，直接排除；`tko_` 接管凭据仅 repo_session 能力、结束即吊销
 - **无 UI 补偿**：工具返回即 Markdown 表格 / 节点链 / 事件时间线；`wait_task` 轮询带阶段摘要与超时提示
 
@@ -168,7 +193,9 @@ npx -y @grape-dev/grape-kit intro     # 随时重看能力地图
 
 ```bash
 npm install
-npm test        # 156 个单测（fake-grape 替身，不依赖真实服务端）
+
+npm test        # 257 个单测（fake-grape 替身，不依赖真实服务端）
+
 npm run smoke   # 真实 stdio JSON-RPC 往返：initialize → tools/list → tools/call
 ```
 

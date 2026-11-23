@@ -22,6 +22,8 @@ function run(args, h, extraEnv = {}) {
     env: {
       ...process.env,
       HOME: h,
+      // AC4（QA 复审）：隔离继承的 GRAPE_HOME——printInstallGuide/doctor 读文件通道走 grapeHome()
+      GRAPE_HOME: '',
       GRAPE_BASE_URL: '',
       GRAPE_API_TOKEN: '',
       GRAPE_AUTH_FILE: '',

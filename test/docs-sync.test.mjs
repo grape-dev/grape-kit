@@ -52,7 +52,7 @@ test('README 双语单测计数一致（同一口径，不许一边 136 一边 1
   assert.notEqual(en[1], '136', '旧口径 136 已过期，应更新为当前实际单测数')
 })
 
-test('CHANGELOG 保留 Unreleased 段（下一周期入口），0.3.9 发布节覆盖 #17 工具面与引导变更', () => {
+test('CHANGELOG 保留 Unreleased 段（下一周期入口），0.3.10 发布节覆盖 #19 交回派发收口', () => {
   const md = read('CHANGELOG.md')
   const at = md.search(/^## Unreleased$/m)
   assert.ok(at >= 0, 'CHANGELOG.md 必须保留 ## Unreleased 段（CONTRIBUTING §7）')
@@ -63,17 +63,44 @@ test('CHANGELOG 保留 Unreleased 段（下一周期入口），0.3.9 发布节�
     !/^- \S/m.test(unreleasedBody) || /### (Added|Changed|Fixed)/.test(unreleasedBody),
     'Unreleased 段有条目时必须按 Added/Changed/Fixed 归类（发版后允许空段）',
   )
-  // #17 变更已随 0.3.9 发布：覆盖断言自 Unreleased 段迁至 0.3.9 发布节
-  assert.match(md.slice(firstPublished, firstPublished + 30), /^## 0\.3\.9 \(2026-11-23\)/, '首个已发布节应为 0.3.9 (2026-11-23)')
+  // #19 变更已随 0.3.10 发布：覆盖断言自 Unreleased 段迁至最新发布节
+  assert.match(md.slice(firstPublished, firstPublished + 30), /^## 0\.3\.10 \(2026-11-23\)/, '首个已发布节应为 0.3.10 (2026-11-23)')
   const next = md.slice(firstPublished + 1).search(/^## /m)
   const body = next === -1 ? md.slice(firstPublished) : md.slice(firstPublished, firstPublished + 1 + next)
-  assert.match(body, /### (Added|Changed|Fixed)/, '0.3.9 发布节必须按 Added/Changed/Fixed 归类')
+  assert.match(body, /### (Added|Changed|Fixed)/, '0.3.10 发布节必须按 Added/Changed/Fixed 归类')
+  for (const [re, what] of [
+    [/派发指针只认 `next_seq`|`next_seq`[^\n]*派发指针/, '#19 派发指针只认 next_seq'],
+    [/pending_dispatch|待派发/, '#19 待派发标记'],
+    [/交回未成功/, '#19 交回未成功不派发'],
+    [/白名单外/, '#19 白名单外节点名不改写'],
+    [/缺事件 `seq`|派发未证实/, '#19 补发缺 seq 判未证实'],
+  ]) {
+    assert.match(body, re, `0.3.10 发布节应记录 ${what} 变更`)
+  }
+  // 历史发布节的覆盖断言不因新版本上移而丢失：#17 仍在 0.3.9 发布节
+  const at039 = md.search(/^## 0\.3\.9 \(/m)
+  const next039 = md.slice(at039 + 1).search(/^## /m)
+  const body039 = next039 === -1 ? md.slice(at039) : md.slice(at039, at039 + 1 + next039)
   for (const [re, what] of [
     [/`agent`|agent.*枚举|枚举.*agent/, 'trigger_pipeline agent 参数/枚举'],
     [/`?intro`?/, 'intro 子命令'],
     [/安装.*能力地图|能力地图/, '安装后能力地图/引导'],
     [/getBaseUrl|base_url|baseUrl/, 'doctor base_url 来源展示'],
   ]) {
-    assert.match(body, re, `0.3.9 发布节应记录 ${what} 变更`)
+    assert.match(body039, re, `0.3.9 发布节应记录 ${what} 变更`)
+  }
+})
+/* ── Issue #20：凭据优先级链与新命令用法必须双语 README + CHANGELOG 同步 ── */
+
+test('Issue #20 README 双语载明凭据优先级链与 auth init / uninstall --clean-global', () => {
+  for (const name of ['README.md', 'README.zh.md']) {
+    const md = read(name)
+    assert.match(md, /auth init/, `${name} 应载明 auth init 单入口`)
+    assert.match(md, /--clean-global/, `${name} 应载明 uninstall --clean-global`)
+    assert.match(
+      md,
+      /GRAPE_API_TOKEN_ONCE[\s\S]{0,240}GRAPE_API_TOKEN[\s\S]{0,240}(GRAPE_AUTH_FILE|config\.json)/,
+      `${name} 应列出 runtime > env > file 完整优先级链`,
+    )
   }
 })

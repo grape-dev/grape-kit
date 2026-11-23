@@ -1,8 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { resolveCredentials, apiRequest, GrapeApiError, waitTaskNative, api, getBaseUrl, AGENT_TYPES } from '../src/api.mjs'
+import { resolveCredentials, apiRequest, GrapeApiError, waitTaskNative, api, getBaseUrl, grapeHome, readAuthChannel, npxCacheRoot, AGENT_TYPES } from '../src/api.mjs'
 import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { tmpdir, homedir } from 'node:os'
 import { join } from 'node:path'
 
 test('凭据解析优先级：env > auth file', () => {
@@ -139,6 +139,76 @@ test('getBaseUrl 优先级：env > ~/.grape/config.json > 默认', () => {
     assert.equal(getBaseUrl({ GRAPE_AUTH_FILE: cfg, GRAPE_BASE_URL: 'https://env.example' }), 'https://env.example')
     assert.equal(getBaseUrl({ GRAPE_AUTH_FILE: cfg }), 'https://file.example')
     assert.equal(getBaseUrl({ GRAPE_AUTH_FILE: join(dir, 'missing.json') }), 'https://www.grapedev.cn')
+  } finally { rmSync(dir, { recursive: true, force: true }) }
+})
+
+test('Issue #20 GRAPE_HOME 覆盖文件通道路径（测试隔离 + 自部署）', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gk-home-'))
+  try {
+    mkdirSync(join(dir, '.grape'), { recursive: true })
+    writeFileSync(join(dir, '.grape', 'config.json'), JSON.stringify({ token: 'grape_home', base_url: 'https://home.example' }))
+    // 无 GRAPE_AUTH_FILE 时，文件通道应落在 GRAPE_HOME/config.json
+    const env = { GRAPE_HOME: join(dir, '.grape') }
+    assert.equal(resolveCredentials(env).token, 'grape_home')
+    assert.equal(resolveCredentials(env).source, `file:${join(dir, '.grape', 'config.json')}`)
+    assert.equal(resolveCredentials(env).sourceKind, 'file', 'sourceKind 结构化标注命中档（doctor 据此渲染，不做字符串反推）')
+    assert.equal(getBaseUrl(env), 'https://home.example')
+    // GRAPE_AUTH_FILE 显式指定优先级高于 GRAPE_HOME 默认路径
+    const explicit = join(dir, 'explicit.json')
+    writeFileSync(explicit, JSON.stringify({ token: 'grape_explicit' }))
+    assert.equal(resolveCredentials({ ...env, GRAPE_AUTH_FILE: explicit }).token, 'grape_explicit')
+    // sourceKind 三档结构化（QA 判断项：priorityChecks 不得用字符串反推命中档）
+    assert.equal(resolveCredentials({ GRAPE_API_TOKEN_ONCE: 'grape_once', GRAPE_API_TOKEN: 'grape_env' }).sourceKind, 'runtime')
+    assert.equal(resolveCredentials({ GRAPE_API_TOKEN: 'grape_env' }).sourceKind, 'env')
+    assert.equal(resolveCredentials({ GRAPE_AUTH_FILE: '/nonexistent/gk-none.json' }).sourceKind, '')
+  } finally { rmSync(dir, { recursive: true, force: true }) }
+})
+
+/* ── QA 复审（PR #11）P2：GRAPE_HOME 表达式与 config.json 解析单源化 ── */
+
+test('QA#P2 grapeHome 单源导出：GRAPE_HOME 覆盖 + 默认 ~/.grape（全文唯一实现）', () => {
+  assert.equal(grapeHome({ GRAPE_HOME: '  ' }), join(homedir(), '.grape'), '空白 GRAPE_HOME 视为未设置')
+  assert.equal(grapeHome({ GRAPE_HOME: '/custom/grape' }), '/custom/grape')
+  assert.equal(grapeHome({}), join(homedir(), '.grape'))
+})
+
+/* ── QA 复审（合入后 dev 基线）win32 盲区：_npx 缓存路径按平台分流（%LocalAppData%） ── */
+
+test('QA#win32 npxCacheRoot：Windows 走 %LocalAppData%\\npm-cache\\_npx（LOCALAPPDATA 缺省回落 homedir），POSIX 走 ~/.npm/_npx', () => {
+  assert.equal(npxCacheRoot({ LOCALAPPDATA: 'C:\\Users\\u\\AppData\\Local' }, 'win32'), join('C:\\Users\\u\\AppData\\Local', 'npm-cache', '_npx'), 'Windows npm 缓存实际在 %LocalAppData%\\npm-cache\\_npx')
+  assert.equal(npxCacheRoot({}, 'win32'), join(join(homedir(), 'AppData', 'Local'), 'npm-cache', '_npx'), 'LOCALAPPDATA 缺省回落 homedir/AppData/Local')
+  assert.equal(npxCacheRoot({}, 'linux'), join(homedir(), '.npm', '_npx'), 'POSIX 保持 ~/.npm/_npx')
+  assert.equal(npxCacheRoot({}, 'darwin'), join(homedir(), '.npm', '_npx'), 'macOS 与 POSIX 同路径')
+})
+
+test('QA#P2 readAuthChannel 单源解析：GRAPE_AUTH_FILE 优先 / BOM 剥除 / 解析失败只置标志不透传原文', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gk-authch-'))
+  try {
+    const cfg = join(dir, 'auth.json')
+    writeFileSync(cfg, '\uFEFF' + JSON.stringify({ token: 'grape_x', base_url: 'https://a.example' }))
+    const ok = readAuthChannel({ GRAPE_AUTH_FILE: cfg })
+    assert.equal(ok.cfg.token, 'grape_x', 'BOM 应被剥除')
+    assert.equal(ok.exists, true)
+    assert.equal(ok.parseError, false)
+
+    const home = join(dir, '.grape')
+    mkdirSync(home, { recursive: true })
+    writeFileSync(join(home, 'config.json'), JSON.stringify({ token: 'grape_home' }))
+    const fallback = readAuthChannel({ GRAPE_HOME: home })
+    assert.equal(fallback.cfg.token, 'grape_home', '无 GRAPE_AUTH_FILE 时回落 GRAPE_HOME/config.json')
+    assert.equal(fallback.authFile, join(home, 'config.json'))
+
+    const broken = join(dir, 'broken.json')
+    writeFileSync(broken, 'tk_9oops_not_json')
+    const fail = readAuthChannel({ GRAPE_AUTH_FILE: broken })
+    assert.equal(fail.parseError, true, '解析失败应置 parseError 标志')
+    assert.equal(fail.cfg, null)
+    // 契约：不携带 e.message（JSON.parse 报错含文件原文，凭据文件会因此泄露片段）
+    assert.deepEqual(Object.keys(fail).sort(), ['authFile', 'cfg', 'exists', 'parseError'])
+
+    const missing = readAuthChannel({ GRAPE_AUTH_FILE: join(dir, 'nope.json') })
+    assert.equal(missing.exists, false)
+    assert.equal(missing.cfg, null)
   } finally { rmSync(dir, { recursive: true, force: true }) }
 })
 
