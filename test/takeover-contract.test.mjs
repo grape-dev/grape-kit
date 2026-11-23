@@ -530,6 +530,16 @@ test('#19 派发指针取值单一口径：session 优先、顶层 0 不遮蔽�
   } finally { stub.restore() }
 })
 
+test('#19 模块导出面收敛：派发收口为内部实现，外部仍只有 TOOLS/TOOL_NAMES/findTool/toolDefs', async () => {
+  const mod = await import('../src/tools.mjs')
+  for (const name of ['resolveNextAgent', 'resolveDispatchTarget', 'ensureNextNodeDispatched']) {
+    assert.equal(mod[name], undefined, `${name} 仓库内无外部消费者（用例经 findTool 公开面），不得扩大导出面`)
+  }
+  for (const name of ['TOOLS', 'TOOL_NAMES', 'findTool', 'toolDefs']) {
+    assert.ok(mod[name], `${name} 属既有导出面，必须保留`)
+  }
+})
+
 test('#19/S6 next_step 只认整串 agent 名：散文不解析，靠场景链兜底', async () => {
   const t = finishTool()
   const stub = await stubFinish({
