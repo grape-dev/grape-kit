@@ -64,8 +64,13 @@ const warningHint = (w) => WARNING_HINTS[String(w).split(':')[0].trim()] || ''
  */
 const DISPATCH_SCOPE = { coding: 'qa' }
 
-/** 交回结果里会阻塞「立即派发」的警告（远端仍在跑时贸然派发会与云端任务撞车） */
-const DISPATCH_BLOCKERS = /remote_may_still_run|conflict|冲突/i
+/**
+ * 交回结果里会阻塞「立即派发」的警告**稳定码**（取 `code:` 前缀精确匹配）。
+ * 平台 warnings 元素是稳定 code 列表；不匹配散文子串——「branch_sync: 远端无冲突」
+ * 这类含「冲突」二字的文案不得误阻塞派发（远端仍在跑时贸然派发会与云端任务撞车）。
+ */
+const DISPATCH_BLOCKER_CODES = new Set(['remote_may_still_run', 'branch_conflict', 'merge_conflict'])
+const warningCode = (w) => String(w ?? '').split(':')[0].trim().toLowerCase()
 
 const asAgentType = (v) => {
   const s = String(v ?? '').trim().toLowerCase()
@@ -187,7 +192,7 @@ export async function ensureNextNodeDispatched(json, args = {}, apiMod = api) {
   })
   const platformWarnings = [base.warnings, sess.warnings]
     .flatMap((w) => (Array.isArray(w) ? w : (w ? [w] : [])))
-  const blockers = platformWarnings.filter((w) => DISPATCH_BLOCKERS.test(String(w)))
+  const blockers = platformWarnings.filter((w) => DISPATCH_BLOCKER_CODES.has(warningCode(w)))
   const skipped = Number(base.skipped_dispatches ?? sess.skipped_dispatches) || 0
   if (blockers.length) {
     return pending(`next_node_pending_dispatch: 平台警告「${blockers.join('；')}」，未立即派发 ${nextAgent}，需人工裁决后补发`)

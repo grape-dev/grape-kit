@@ -116,6 +116,8 @@ sequenceDiagram
 
 **派发目标口径**：`issue_number` 才是单号；平台 `/tasks` 的 `issue.id`（#19 实测 `18808`）是内部主键，**不能**当 `issue_number` 兜底，否则派发会打到错误 issue。会话未带仓库标识时用 `owner`/`repo`/`issue_number` 入参补齐；平台未给下一节点且不在兜底范围（如 qa 交回、非 coding 节点）返回 `no_next_node` 或 `out_of_scope`，属正常收尾。**会话未带 `agent_type` 时同样按 `out_of_scope` 处理**：无当前节点标识就无法确认兜底范围（coding→qa），宁可不派、由渲染如实披露，不静默。
 
+**待派发的阻塞判据**：只认警告**稳定码**（`remote_may_still_run` / `branch_conflict` / `merge_conflict`，取 `code:` 前缀精确匹配）。不匹配散文子串——「branch_sync: 远端无冲突」含「冲突」二字但不阻塞；平台 warnings 是稳定 code 列表，按码匹配不漏不误伤。
+
 **验收口径修正**：兜底路径只回填 `next_seq`，`handoff_seq` 由平台写入、本工具不写——AC 中「`handoff_seq`/`next_seq` 非 0」按「派发指针 `next_seq` 非 0」读取。`next_step` 仅整串 agent 名（如 `qa`）命中，散文（如「qa：请复查 PR #10」）不解析，由场景链 coding→qa 兜底。
 
 ## 4. 验证矩阵（全部真机）
