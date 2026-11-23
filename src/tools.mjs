@@ -97,7 +97,7 @@ function resultJsonOf(json = {}) {
  * 下一节点：平台 next_agent > 结构化 next_step（**整串** agent 名，如 `qa`）> 兜底范围内的场景链推导。
  * next_step 不做自然语言解析：真实形如「qa：请复查 PR #10」的散文推导为空，交给场景链兜底（QA 复审 S6）。
  */
-export function resolveNextAgent(json = {}) {
+function resolveNextAgent(json = {}) {
   const sess = json.session || {}
   const rj = resultJsonOf(json)
   const current = asAgentType(sess.agent_type) || asAgentType(json.agent_type)
@@ -114,7 +114,7 @@ export function resolveNextAgent(json = {}) {
  * ⚠️ 不拿 issue_id 兜底 issue_number：平台 /tasks 里 issue.id 是内部主键（#19 实测 18808），
  * issue_number 才是单号（19）；把主键当单号派发会打到错误 issue（QA 复审 S2）。
  */
-export function resolveDispatchTarget(json = {}, args = {}) {
+function resolveDispatchTarget(json = {}, args = {}) {
   const sess = json.session || {}
   const first = (...vals) => vals
     .map((v) => (v === undefined || v === null ? '' : String(v).trim()))
@@ -156,7 +156,7 @@ function dispatchContext(json, nextAgent) {
  * 不代表派发已发生；只见 handoff_seq 时按「交回已写、派发未证实」兜底补发并告警
  * （QA 复审 S1：两字段合并会把「事件已写、派发未发生」误判成已派发）。
  */
-export async function ensureNextNodeDispatched(json, args = {}, apiMod = api) {
+async function ensureNextNodeDispatched(json, args = {}, apiMod = api) {
   const base = json && typeof json === 'object' ? json : { raw: json }
   const sess = base.session || {}
   const nextAgent = resolveNextAgent(base)
