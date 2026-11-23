@@ -52,20 +52,28 @@ test('README 双语单测计数一致（同一口径，不许一边 136 一边 1
   assert.notEqual(en[1], '136', '旧口径 136 已过期，应更新为当前实际单测数')
 })
 
-test('CHANGELOG 有 Unreleased 段，且覆盖本次工具面与引导变更，位于首个发布节之前', () => {
+test('CHANGELOG 保留 Unreleased 段（下一周期入口），0.3.9 发布节覆盖 #17 工具面与引导变更', () => {
   const md = read('CHANGELOG.md')
   const at = md.search(/^## Unreleased$/m)
   assert.ok(at >= 0, 'CHANGELOG.md 必须保留 ## Unreleased 段（CONTRIBUTING §7）')
   const firstPublished = md.search(/^## \d+\.\d+\.\d+ \(/m)
   assert.ok(at < firstPublished, 'Unreleased 段应排在已发布版本节之前')
-  const body = md.slice(at, firstPublished)
-  assert.match(body, /### (Added|Changed|Fixed)/, 'Unreleased 段必须按 Added/Changed/Fixed 归类')
+  const unreleasedBody = md.slice(at, firstPublished)
+  assert.ok(
+    !/^- \S/m.test(unreleasedBody) || /### (Added|Changed|Fixed)/.test(unreleasedBody),
+    'Unreleased 段有条目时必须按 Added/Changed/Fixed 归类（发版后允许空段）',
+  )
+  // #17 变更已随 0.3.9 发布：覆盖断言自 Unreleased 段迁至 0.3.9 发布节
+  assert.match(md.slice(firstPublished, firstPublished + 30), /^## 0\.3\.9 \(2026-11-23\)/, '首个已发布节应为 0.3.9 (2026-11-23)')
+  const next = md.slice(firstPublished + 1).search(/^## /m)
+  const body = next === -1 ? md.slice(firstPublished) : md.slice(firstPublished, firstPublished + 1 + next)
+  assert.match(body, /### (Added|Changed|Fixed)/, '0.3.9 发布节必须按 Added/Changed/Fixed 归类')
   for (const [re, what] of [
     [/`agent`|agent.*枚举|枚举.*agent/, 'trigger_pipeline agent 参数/枚举'],
     [/`?intro`?/, 'intro 子命令'],
     [/安装.*能力地图|能力地图/, '安装后能力地图/引导'],
     [/getBaseUrl|base_url|baseUrl/, 'doctor base_url 来源展示'],
   ]) {
-    assert.match(body, re, `Unreleased 段应记录 ${what} 变更`)
+    assert.match(body, re, `0.3.9 发布节应记录 ${what} 变更`)
   }
 })

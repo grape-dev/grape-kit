@@ -136,10 +136,11 @@ npx -y @grape-dev/grape-kit intro     # reprint the capability map at any time
 
 ## Version history
 
-Full release notes: [CHANGELOG.md](CHANGELOG.md) — 18 条发布记录（含 0.0.0-stage 占位包）
+Full release notes: [CHANGELOG.md](CHANGELOG.md) — 19 条发布记录（含 0.0.0-stage 占位包）
 
 | Version | Date | Highlights |
 |---|---|---|
+| 0.3.9 | 2026-11-23 | Takeover full-chain hardening (#12): takeover_start branch/MR preflight checks + warnings fully surfaced, cross-platform Node takeover scripts (report / request-finish / finish), 409 agent_mismatch hints, bundle {{CWD}} rendering, doctor credential-source line; #17 fix batch: `intro` subcommand + post-install capability map (3-step API Key guide when no credentials), trigger_pipeline `agent` param (resume from a given node), doctor base_url dual-channel with source annotated, review tools native-channel crash fixed; unit tests 136→156 |
 | 0.3.8 | 2026-11-20 | Three review tools (grape_review_pass / grape_review_reject / grape_confirm_done — tools 36→39); issues table gains a "Repository" column; doctor recognizes ~/.grape/config.json file-channel credentials (no more false FAIL) |
 | 0.3.7 | 2026-11-20 | Graphical rendering for trigger/task_status (node-chain diagram on trigger; status card + progress bar + next-step hints); README Quick Start rebuilt in devkit style (per-agent sections, Capabilities overview, lifecycle command group); uninstall receipt cleanup; Codex/hermes removed from surfaced targets |
 | 0.3.6 | 2026-11-19 | Pipeline rendering supports the segments event-stream shape (real API payloads; no more raw-JSON fallback); stall status surfaced in the verdict line ("⚠️ suspected stall for N minutes"); segments-shape regression case added (unit tests 114→115) |
