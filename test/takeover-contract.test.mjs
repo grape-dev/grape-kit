@@ -686,8 +686,12 @@ test('#19 README 双语设计原则：不再宣称「永不干预」，如实写
 
 test('#19 CHANGELOG 登记 finish 新增可选入参（§7 工具面/参数变化）', () => {
   const cl = readFileSync(new URL('../CHANGELOG.md', import.meta.url), 'utf8')
-  const unreleased = cl.split('## Unreleased')[1]?.split('## 0.3.9')[0] || ''
-  assert.match(unreleased, /新增可选[^\n]*owner\/repo\/issue_number[^\n]*(兜底派发|用于兜底)/, 'Unreleased Fixed 应含一句可选入参说明')
+  // #19 变更已随 0.3.10 发布：按**发布节**取段（发版后 Unreleased 段为空，按 `## Unreleased` 切段会取到空串）
+  const at = cl.search(/^## 0\.3\.10 \(/m)
+  assert.ok(at >= 0, 'CHANGELOG 应有 0.3.10 发布节')
+  const next = cl.slice(at + 1).search(/^## /m)
+  const section = next === -1 ? cl.slice(at) : cl.slice(at, at + 1 + next)
+  assert.match(section, /新增可选[^\n]*owner\/repo\/issue_number[^\n]*(兜底派发|用于兜底)/, '0.3.10 发布节应含一句可选入参说明')
 })
 
 test('#19 handoff 失败但客户端已兜底派发：透出原文并标注覆盖，不再要求手动补发', async () => {
@@ -707,6 +711,133 @@ test('#19 handoff 失败但客户端已兜底派发：透出原文并标注覆�
     assert.match(out, /已由客户端兜底派发覆盖/, '兜底派发成功后须说明失败已被覆盖')
     assert.doesNotMatch(out, /手动补发/, '已派发时不得再要求手动补发（与「无需手动 trigger」互斥）')
   } finally { stub.restore() }
+})
+
+/* ── QA 终态复审（MR !14）追加项：交回未成功不得派发 / 未知节点名不改写 / 补发缺 seq 未证实 ── */
+
+test('#19 交回未成功（ok=false）：不得派发下一节点，落 pending 并渲染「交回未成功」', async () => {
+  const t = finishTool()
+  const stub = await stubFinish({
+    finish: {
+      ok: false, error: 'HTTP 409: not_active：接管会话已结束', next_agent: 'qa', handoff_seq: 0,
+      session: sessOf({ status: 'active' }),
+    },
+    trigger: { seq: 71, agent: 'qa', status: 'running' },
+  })
+  try {
+    const j = await t.native({ session_id: 'tkos_19', summary: '完成' })
+    assert.equal(stub.triggers().length, 0, '交回未成功不得派发下一节点——下一节点会接手一个未交回的任务')
+    assert.equal(j.dispatch.status, 'pending')
+    assert.match(String(j.pending_dispatch.reason), /交回未成功/)
+    assert.match(String(j.pending_dispatch.reason), /not_active/, '平台错误原文必须透出，便于判断该重试还是改判')
+    const out = t.render(j)
+    assert.match(out, /交回未成功/)
+    assert.doesNotMatch(out, /链不断/, '交回未成功时不得再宣称链不断')
+    assert.doesNotMatch(out, /无需手动 trigger/)
+    assert.doesNotMatch(out, /已自动派发/)
+  } finally { stub.restore() }
+})
+
+test('#19 交回未生效（changed=false）：同样不派发，按未成功处理', async () => {
+  const t = finishTool()
+  const stub = await stubFinish({
+    finish: { ok: true, changed: false, next_agent: 'qa', session: sessOf({ status: 'active' }) },
+    trigger: { seq: 71, agent: 'qa', status: 'running' },
+  })
+  try {
+    const j = await t.native({ session_id: 'tkos_19', summary: '完成' })
+    assert.equal(stub.triggers().length, 0, 'changed=false 说明平台未真正落账，与 ok=false 同等处理')
+    assert.equal(j.dispatch.status, 'pending')
+    const out = t.render(j)
+    assert.match(out, /交回未成功/)
+    assert.doesNotMatch(out, /链不断/)
+  } finally { stub.restore() }
+})
+
+test('#19 平台给白名单外 next_agent（reviewer）：不回落场景链改写为 qa，标注未知并待人工裁决', async () => {
+  const t = finishTool()
+  const stub = await stubFinish({
+    finish: { ok: true, changed: true, next_agent: 'reviewer', session: sessOf() },
+    trigger: { seq: 71, agent: 'qa', status: 'running' },
+  })
+  try {
+    const j = await t.native({ session_id: 'tkos_19', summary: '完成' })
+    assert.equal(stub.triggers().length, 0, '平台给了不认识的节点名时不得静默改写为场景链下一节点 qa')
+    assert.equal(j.dispatch.status, 'pending')
+    assert.match(String(j.pending_dispatch.reason), /reviewer/, '未知节点名必须原样点名')
+    assert.notEqual(j.next_agent, 'qa', 'next_agent 不得被改写成 qa')
+    const out = t.render(j)
+    assert.match(out, /reviewer/, '渲染须让读者看到平台原本指定的节点名')
+    assert.match(out, /未知/, '须说明是「不认识的节点名」而不是「平台未给」')
+  } finally { stub.restore() }
+})
+
+test('#19 平台未给 next_agent（空串/缺省）仍按场景链兜底：区分「未给」与「不认识」', async () => {
+  const t = finishTool()
+  const stub = await stubFinish({
+    finish: { ok: true, changed: true, next_agent: '', session: sessOf() },
+    trigger: { seq: 71, agent: 'qa', status: 'running' },
+  })
+  try {
+    const j = await t.native({ session_id: 'tkos_19', summary: '完成' })
+    assert.equal(stub.triggers().length, 1, '「平台未给」不是故障，仍按场景链 coding→qa 兜底补发')
+    assert.equal(j.next_agent, 'qa')
+    assert.equal(j.dispatch.status, 'dispatched')
+  } finally { stub.restore() }
+})
+
+test('#19 补发响应缺 seq：不得判 dispatched，落 pending 且不渲染 seq=0', async () => {
+  const t = finishTool()
+  const stub = await stubFinish({
+    finish: { ok: true, changed: true, next_agent: 'qa', session: sessOf() },
+    trigger: {},
+  })
+  try {
+    const j = await t.native({ session_id: 'tkos_19', summary: '完成' })
+    assert.notEqual(j.dispatch.status, 'dispatched', '响应缺 seq 时派发未证实，不得判成功')
+    assert.equal(j.dispatch.status, 'pending')
+    const out = t.render(j)
+    assert.doesNotMatch(out, /seq=0/, '不得把缺失的 seq 渲染成 seq=0 当作已派发证据')
+    assert.doesNotMatch(out, /已自动派发/, '未证实成功不得宣称已自动派发')
+    assert.match(out, /核实/, '须给出查事件核实/补发的可执行路径')
+  } finally { stub.restore() }
+})
+
+test('#19 takeover_status：客户端兜底不回填会话 next_seq，须注明「需查事件核实」', () => {
+  const t = findTool('grape_takeover_status')
+  const out = t.render({
+    ok: true,
+    session: {
+      id: 'tkos_19', status: 'finished', agent_type: 'coding', next_agent: 'qa', next_seq: 0, handoff_seq: 0,
+      repo_key: 'gitcode:acme/demo', issue_number: 62,
+    },
+  })
+  assert.match(out, /不回填/, '须说明客户端兜底派发不回填会话记录里的 next_seq')
+  assert.match(out, /需查事件核实/, '须注明确认派发要看事件而不是会话字段')
+})
+
+test('#19 takeover_status 派发指针与 finish 同源 seqOf：session 优先，顶层值不遮蔽', () => {
+  const t = findTool('grape_takeover_status')
+  const out = t.render({
+    ok: true,
+    next_seq: 99, skipped_dispatches: 0,
+    session: {
+      id: 'tkos_19', status: 'finished', agent_type: 'coding', next_agent: 'qa', next_seq: 0, handoff_seq: 0,
+      repo_key: 'gitcode:acme/demo', issue_number: 62,
+    },
+  })
+  assert.match(out, /待派发/, 'session 是会话记录的权威形态：顶层 next_seq 不得遮蔽 session 的 next_seq=0')
+  assert.doesNotMatch(out, /next_seq=99/, '不得把顶层值当成派发指针')
+})
+
+test('#19 描述与行为一致：交回未成功不派发 / 未知节点名不改写 / 缺 seq 未证实（§7 工具面同步）', () => {
+  const d = finishTool().description
+  assert.match(d, /交回未成功/, '描述须写明交回未成功时不派发下一节点')
+  assert.match(d, /白名单外|不认识|未知/, '描述须写明白名单外节点名不被改写')
+  assert.match(d, /缺事件 `seq`|未证实/, '描述须写明缺 seq 时判派发未证实')
+  const s = findTool('grape_takeover_status').description
+  assert.match(s, /不回填/, '状态工具描述须写明兜底派发不回填会话 next_seq')
+  assert.match(s, /核实/, '状态工具描述须给出查事件核实的通道')
 })
 
 test('#19 旧响应形状（无 dispatch 字段）且 handoff 失败：仍给出手动补发指引', () => {
