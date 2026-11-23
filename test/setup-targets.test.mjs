@@ -783,6 +783,46 @@ test('QA#硬违规2 含凭据的旧 .bak-grapemcp-* 备份：残留提示点名�
   assert.match(after.stdout, /未检测到[^\n]*残留/, `清理后应真零残留，实际:\n${after.stdout}`)
 })
 
+/* ── QA 复审（合入后 dev 基线）硬违规 1：GRAPE_AUTH_FILE 凭据既不检测也不清理 ── */
+
+test('QA#硬违规1 GRAPE_AUTH_FILE 指向的凭据文件：残留提示点名，--clean-global 清零后不谎报', { skip: isWin }, () => {
+  const h = home()
+  seedResidue(h)
+  // auth init 的写入目标（本批 P1 修复引入）→ 残留检测必须覆盖它，否则「零残留」谎报
+  const authFile = join(h, 'custom-auth.json')
+  writeFileSync(authFile, JSON.stringify({ token: 'grape_custom_file', base_url: 'https://custom.example' }))
+  const hint = run(['uninstall', '--target', 'opencode'], h, { GRAPE_API_TOKEN: '', GRAPE_BASE_URL: '', GRAPE_AUTH_FILE: authFile })
+  assert.equal(hint.status, 0, hint.stderr)
+  assert.match(hint.stdout, new RegExp(authFile.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), '残留提示必须点名 GRAPE_AUTH_FILE 路径')
+  const r = run(['uninstall', '--target', 'opencode', '--clean-global'], h, { GRAPE_AUTH_FILE: authFile })
+  assert.equal(r.status, 0, r.stderr)
+  assert.ok(!existsSync(authFile), '--clean-global 应删除 GRAPE_AUTH_FILE 指向的凭据文件')
+  // 清零后再次默认 uninstall：必须报告真零残留（不得因检测盲区谎报）
+  const after = run(['uninstall', '--target', 'opencode'], h, { GRAPE_API_TOKEN: '', GRAPE_BASE_URL: '', GRAPE_AUTH_FILE: authFile })
+  assert.equal(after.status, 0, after.stderr)
+  assert.match(after.stdout, /未检测到[^\n]*残留/, `清理后应真零残留，实际:\n${after.stdout}`)
+})
+
+test('QA#硬违规1 --clean-global --dry-run 预览点名 GRAPE_AUTH_FILE 将被删除（且不动盘）', { skip: isWin }, () => {
+  const h = home()
+  const authFile = join(h, 'custom-auth.json')
+  writeFileSync(authFile, JSON.stringify({ token: 'grape_custom_file' }))
+  const r = run(['uninstall', '--clean-global', '--dry-run'], h, { GRAPE_AUTH_FILE: authFile })
+  assert.equal(r.status, 0, r.stderr)
+  assert.match(r.stdout, /将删除凭据文件[^\n]*custom-auth\.json/, '预览必须点名 GRAPE_AUTH_FILE')
+  assert.ok(existsSync(authFile), 'dry-run 不得删除凭据文件')
+})
+
+test('QA#硬违规1 GRAPE_AUTH_FILE 指向非凭据形态文件：拒删并点名要求人工处理（不盲删任意路径）', { skip: isWin }, () => {
+  const h = home()
+  const notCreds = join(h, 'plain.txt')
+  writeFileSync(notCreds, 'just text, not credentials')
+  const r = run(['uninstall', '--target', 'opencode', '--clean-global'], h, { GRAPE_AUTH_FILE: notCreds })
+  assert.equal(r.status, 0, '非凭据形态不阻塞清理其余痕迹', r.stderr)
+  assert.match(`${r.stdout}${r.stderr}`, /人工/, '应提示人工处理而非静默盲删任意文件')
+  assert.ok(existsSync(notCreds), '非凭据形态文件不得被盲删')
+})
+
 /* ── QA 复审（合入后 dev 基线）硬违规 2：--dry-run 一律不动盘（宿主卸载/skill/备份同样只预览） ── */
 
 test('QA#硬违规2 --clean-global --dry-run：宿主条目/skill/备份同样不动盘（README「不动盘」承诺）', skipOnWin, () => {
