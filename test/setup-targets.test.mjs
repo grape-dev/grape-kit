@@ -789,6 +789,7 @@ test('QA#硬违规2 --clean-global --dry-run：宿主条目/skill/备份同样�
   const h = home()
   const s = seedResidue(h)
   assert.equal(run(['install', '--target', 'opencode'], h).status, 0)
+  const backupsAfterInstall = backupsIn(join(h, '.config', 'opencode')).length
   const r = run(['uninstall', '--clean-global', '--dry-run'], h, { GRAPE_API_TOKEN: '', GRAPE_BASE_URL: '' })
   assert.equal(r.status, 0, r.stderr)
   assert.match(r.stdout, /dry-run|预览/, '应明确标注预览模式（未执行删除）')
@@ -798,8 +799,8 @@ test('QA#硬违规2 --clean-global --dry-run：宿主条目/skill/备份同样�
   const cfgPath = join(h, '.config', 'opencode', 'opencode.jsonc')
   assert.ok(JSON.parse(readFileSync(cfgPath, 'utf8')).mcp?.grape, 'dry-run 不得卸载宿主条目')
   assert.ok(existsSync(join(h, '.config', 'opencode', 'skills', 'grape-remote', 'SKILL.md')), 'dry-run 不得删除 skill')
-  assert.equal(backupsIn(h).length, 0, 'dry-run 不得写任何 .bak 备份')
-  assert.equal(backupsIn(join(h, '.config', 'opencode')).length, 0, 'dry-run 不得写宿主配置备份')
+  assert.equal(backupsIn(h).length, 0, 'dry-run 不得新增任何 .bak 备份（HOME 根）')
+  assert.equal(backupsIn(join(h, '.config', 'opencode')).length, backupsAfterInstall, 'dry-run 不得新增宿主配置备份（install 产生的不计）')
   // 一切全局痕迹必须原样保留
   assert.ok(existsSync(s.grapeHome), 'dry-run 不得删除 GRAPE_HOME')
   assert.ok(existsSync(s.own), 'dry-run 不得删除 _npx 缓存')
@@ -812,6 +813,7 @@ test('QA#硬违规2 --clean-global --dry-run：宿主条目/skill/备份同样�
 test('QA#硬违规2 --dry-run 不带 --clean-global：宿主卸载同样只预览，不再被静默忽略', skipOnWin, () => {
   const h = home()
   assert.equal(run(['install', '--target', 'opencode'], h).status, 0)
+  const backupsAfterInstall = backupsIn(join(h, '.config', 'opencode')).length
   const r = run(['uninstall', '--target', 'opencode', '--dry-run'], h)
   assert.equal(r.status, 0, r.stderr)
   assert.match(r.stdout, /dry-run|预览/, '--dry-run 应明确标注预览模式，不得静默忽略')
@@ -819,16 +821,17 @@ test('QA#硬违规2 --dry-run 不带 --clean-global：宿主卸载同样只预�
   const cfgPath = join(h, '.config', 'opencode', 'opencode.jsonc')
   assert.ok(JSON.parse(readFileSync(cfgPath, 'utf8')).mcp?.grape, 'dry-run 不得卸载宿主条目')
   assert.ok(existsSync(join(h, '.config', 'opencode', 'skills', 'grape-remote', 'SKILL.md')), 'dry-run 不得删除 skill')
-  assert.equal(backupsIn(join(h, '.config', 'opencode')).length, 0, 'dry-run 不得写备份')
+  assert.equal(backupsIn(join(h, '.config', 'opencode')).length, backupsAfterInstall, 'dry-run 不得新增备份')
 })
 
 test('QA#硬违规2 不带 --target 的 --clean-global --dry-run：检测到宿主痕迹时也只预览宿主卸载', skipOnWin, () => {
   const h = home()
   assert.equal(run(['install', '--target', 'opencode'], h).status, 0)
+  const backupsAfterInstall = backupsIn(join(h, '.config', 'opencode')).length
   const r = run(['uninstall', '--clean-global', '--dry-run'], h)
   assert.equal(r.status, 0, r.stderr)
   const cfgPath = join(h, '.config', 'opencode', 'opencode.jsonc')
   assert.ok(JSON.parse(readFileSync(cfgPath, 'utf8')).mcp?.grape, 'dry-run 不得卸载宿主条目')
   assert.ok(existsSync(join(h, '.config', 'opencode', 'skills', 'grape-remote', 'SKILL.md')), 'dry-run 不得删除 skill')
-  assert.equal(backupsIn(join(h, '.config', 'opencode')).length, 0, 'dry-run 不得写备份')
+  assert.equal(backupsIn(join(h, '.config', 'opencode')).length, backupsAfterInstall, 'dry-run 不得新增备份')
 })

@@ -314,6 +314,19 @@ function detectWorkbuddy() {
   return detectJsonEntry(workbuddyPaths().mcpJson, 'mcpServers')
 }
 
+/** workbuddy 卸载预览（--dry-run）：与 uninstallWorkbuddy 同一路径/判定，只列不删 */
+function planUninstallWorkbuddy() {
+  const p = workbuddyPaths()
+  const lines = []
+  const found = detectWorkbuddy()
+  if (found.ok) lines.push(`将移除 mcpServers.grape-kit（${found.path}）`)
+  else if (found.error) lines.push(`配置损坏（${found.path}）：执行卸载会报错，请先修复`)
+  if (existsSync(join(p.skillsDir, 'grape-remote'))) lines.push(`将删除 skill 目录 ${join(p.skillsDir, 'grape-remote')}`)
+  const receipt = join(p.skillsDir, RECEIPT)
+  if (existsSync(receipt)) lines.push(`将删除 receipt ${receipt}`)
+  return lines
+}
+
 function doctorWorkbuddy(probe) {
   const p = workbuddyPaths()
   const checks = baseChecks()
@@ -408,6 +421,15 @@ function detectCodearts() {
   return { ok: false, path: cfgPath }
 }
 
+/** codearts 卸载预览（--dry-run）：与 uninstallCodearts 同一路径/判定，只列不删 */
+function planUninstallCodearts() {
+  const found = detectCodearts()
+  const lines = []
+  if (found.ok) lines.push(`将移除 mcp.grape-kit 条目（${found.path}）`)
+  else if (found.error) lines.push(`配置损坏（${found.path}）：执行卸载会报错，请先修复`)
+  return lines
+}
+
 function doctorCodearts(probe) {
   const checks = baseChecks()
   const found = detectCodearts()
@@ -477,6 +499,16 @@ function uninstallOfficeace() {
 /** 检出 officeace 清单条目（与 install 共用同一路径） */
 function detectOfficeace() {
   return detectJsonEntry(officeacePaths().manifest, 'mcpServers')
+}
+
+/** officeace 卸载预览（--dry-run）：与 uninstallOfficeace 同一路径/判定，只列不删 */
+function planUninstallOfficeace() {
+  const found = detectOfficeace()
+  const lines = []
+  if (found.ok) lines.push(`将移除 mcpServers.grape-kit（${found.path}）`)
+  else if (found.error) lines.push(`清单损坏（${found.path}）：执行卸载会报错，请先修复`)
+  lines.push('果办OfficeAce 侧的连接器仍需在客户端「扩展 → 连接器」中手动删除')
+  return lines
 }
 
 function doctorOfficeace(probe) {
@@ -932,6 +964,23 @@ function uninstallOpencode() {
   uninstallSkill()
 }
 
+/** opencode 卸载预览（--dry-run）：与 uninstallOpencode 同一路径/判定，只列不删 */
+function planUninstallOpencode() {
+  const p = opencodePaths()
+  const found = detectOpencode()
+  const lines = []
+  if (found.ok) lines.push(`将移除 mcp.grape 条目（${found.path}）`)
+  else if (found.error) lines.push(`配置损坏（${found.path}）：执行卸载会报错，请先修复`)
+  const receiptPath = join(p.skillsDir, RECEIPT)
+  let skills = ['grape-remote']
+  if (existsSync(receiptPath)) {
+    try { skills = JSON.parse(readFileSync(receiptPath, 'utf8')).skills || skills } catch { /* 与 uninstallSkill 同默认 */ }
+  }
+  for (const s of skills) if (existsSync(join(p.skillsDir, s))) lines.push(`将删除 skill 目录 ${join(p.skillsDir, s)}`)
+  if (existsSync(receiptPath)) lines.push(`将删除 receipt ${receiptPath}`)
+  return lines
+}
+
 /**
  * 不带 --target 的汇总自检：基础检查 + 逐宿主条目检出。
  * Issue 验收要求「两宿主全新安装后 doctor 检出对应条目」——裸 doctor 必须覆盖全部宿主，
@@ -977,6 +1026,7 @@ const HOSTS = {
 ──────────────────────────────────────────────`)
     },
     uninstall: uninstallOpencode,
+    plan: planUninstallOpencode,
     doctor: doctorOpencode,
     detect: detectOpencode,
   },
@@ -988,6 +1038,7 @@ const HOSTS = {
       rmSync(join(workbuddyPaths().skillsDir, 'grape-remote'), { recursive: true, force: true })
       rmSync(join(workbuddyPaths().skillsDir, RECEIPT), { force: true })
     },
+    plan: planUninstallWorkbuddy,
     doctor: doctorWorkbuddy,
     detect: detectWorkbuddy,
   },
@@ -995,6 +1046,7 @@ const HOSTS = {
     label: 'codearts（华为云码道 CodeArts Agent）',
     install: installCodearts,
     uninstall: uninstallCodearts,
+    plan: planUninstallCodearts,
     doctor: doctorCodearts,
     detect: detectCodearts,
   },
@@ -1002,6 +1054,7 @@ const HOSTS = {
     label: 'officeace（果办OfficeAce）',
     install: installOfficeace,
     uninstall: uninstallOfficeace,
+    plan: planUninstallOfficeace,
     doctor: doctorOfficeace,
     detect: detectOfficeace,
   },
@@ -1361,9 +1414,21 @@ if (cmd === 'intro') {
 } else if (cmd === 'install' || cmd === 'uninstall' || cmd === 'doctor') {
   let installed = false
   const cleanGlobalWanted = cmd === 'uninstall' && process.argv.includes('--clean-global')
-  const cleanGlobalDryRun = cmd === 'uninstall' && process.argv.includes('--dry-run')
+  const dryRun = cmd === 'uninstall' && process.argv.includes('--dry-run')
   /** clean-global 收尾：--dry-run 只预览（单一扫描，所见即所删），否则执行破坏性清理 */
-  const runCleanGlobal = () => (cleanGlobalDryRun ? cleanGlobalPlan() : cleanGlobal())
+  const runCleanGlobal = () => (dryRun ? cleanGlobalPlan() : cleanGlobal())
+  /** --dry-run 宿主卸载预览（QA 硬违规 2：dry-run 不得动盘——宿主条目/skill/备份同样只列不删） */
+  const uninstallHostOrPlan = (n) => {
+    console.log(`
+===== ${n} =====${dryRun ? '（--dry-run 预览，未执行任何删除）' : ''}`)
+    if (dryRun) {
+      const lines = HOSTS[n].plan()
+      if (!lines.length) console.log('  未发现可移除条目')
+      else for (const l of lines) console.log(`  ${l}`)
+    } else {
+      HOSTS[n].uninstall()
+    }
+  }
   // doctor 未显式指定 --target 时汇总全部宿主；install/uninstall 仍默认 opencode
   if (cmd === 'doctor' && !process.argv.slice(2).some((a) => a === '--target' || a.startsWith('--target='))) {
     doctorAll(!!arg('probe'))
@@ -1373,15 +1438,11 @@ if (cmd === 'intro') {
     // 宿主卸载与 resolveTargetAuto 同语义：单痕迹卸该宿主、多痕迹全卸、零痕迹跳过宿主卸载。
     const found = detectHosts()
     if (!found.length) {
-      console.log('未检测到宿主 agent 痕迹，跳过宿主卸载，直接执行全局清理')
+      console.log(`未检测到宿主 agent 痕迹，跳过宿主卸载${dryRun ? '（预览）' : ''}，${dryRun ? '直接预览全局清理' : '直接执行全局清理'}`)
     } else {
       const names = found.length === 1 ? found : SUPPORTED_TARGETS
-      if (names.length > 1) console.log(`检测到多个宿主痕迹，全部卸载: ${names.join(' + ')}`)
-      for (const n of names) {
-        console.log(`
-===== ${n} =====`)
-        HOSTS[n].uninstall()
-      }
+      if (names.length > 1) console.log(`检测到多个宿主痕迹，全部${dryRun ? '预览' : '卸载'}: ${names.join(' + ')}`)
+      for (const n of names) uninstallHostOrPlan(n)
     }
     runCleanGlobal()
   } else {
@@ -1389,19 +1450,18 @@ if (cmd === 'intro') {
     const t = resolveTarget()
     if (t === 'all') {
       const names = SUPPORTED_TARGETS
-      console.log(`检测到多个宿主痕迹，全部安装/自检: ${names.join(' + ')}`)
+      console.log(`检测到多个宿主痕迹，全部${cmd === 'uninstall' && dryRun ? '预览' : '安装/自检'}: ${names.join(' + ')}`)
       for (const n of names) {
-        console.log(`
-===== ${n} =====`)
-        if (cmd === 'install') HOSTS[n].install()
-        else if (cmd === 'uninstall') HOSTS[n].uninstall()
+        if (cmd === 'install') { console.log(`
+===== ${n} =====`); HOSTS[n].install() }
+        else if (cmd === 'uninstall') uninstallHostOrPlan(n)
         else await HOSTS[n].doctor(!!arg('probe'))
       }
       if (cmd === 'install') installed = true
     } else {
       const host = HOSTS[t]
       if (cmd === 'install') { host.install(); installed = true }
-      else if (cmd === 'uninstall') host.uninstall()
+      else if (cmd === 'uninstall') uninstallHostOrPlan(t)
       else await host.doctor(!!arg('probe'))
     }
   }
@@ -1410,7 +1470,10 @@ if (cmd === 'intro') {
   // 无 --target 分支已在上面执行过，此处只兜显式 --target 的收尾。
   if (cmd === 'uninstall') {
     if (cleanGlobalWanted && targetExplicit) runCleanGlobal()
-    else if (!cleanGlobalWanted) printResidualHint()
+    else if (!cleanGlobalWanted) {
+      printResidualHint()
+      if (dryRun) console.log('提示：--dry-run 只预览不删除；要预览全局清理请加 --clean-global（uninstall --clean-global --dry-run）。')
+    }
   }
 } else {
   // intro 不吃 --target（只读本地凭据状态，重看能力地图与宿主无关）：与 install/uninstall/doctor 拆行，
