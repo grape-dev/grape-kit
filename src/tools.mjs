@@ -59,6 +59,9 @@ const warningHint = (w) => WARNING_HINTS[String(w).split(':')[0].trim()] || ''
 /** 场景节点链（客户端兜底：平台未给 next_agent 时按当前节点推导下一节点） */
 const SCENE_CHAIN = { vod: 'issue', issue: 'coding', coding: 'qa', qa: 'sre' }
 
+/** 交回结果里会阻塞「立即派发」的警告（远端仍在跑时贸然派发会与云端任务撞车） */
+const DISPATCH_BLOCKERS = /remote_may_still_run|conflict|冲突/i
+
 const asAgentType = (v) => {
   const s = String(v ?? '').trim().toLowerCase()
   return AGENT_TYPES.includes(s) ? s : ''
@@ -134,9 +137,34 @@ export async function ensureNextNodeDispatched(json, args = {}, apiMod = api) {
     return { ...base, next_agent: '', next_seq: 0, dispatch: { status: 'no_next_node', agent: '', seq: 0, warnings: [] } }
   }
   const target = resolveDispatchTarget(base, args)
-  const r = await apiMod.triggerPipeline(target.owner, target.repo, target.issue_number, dispatchContext(base, nextAgent), nextAgent)
-  const seq = Number(r?.seq ?? r?.event_seq) || 0
-  return { ...base, next_agent: nextAgent, next_seq: seq, dispatch: { status: 'dispatched', agent: nextAgent, seq, warnings: [] } }
+  // 无法派发时一律落到「待派发」：显式告警 + 可查询标记，替代静默 grace
+  const pending = (reason) => ({
+    ...base,
+    next_agent: nextAgent,
+    next_seq: 0,
+    pending_dispatch: { agent: nextAgent, ...target, reason },
+    dispatch: { status: 'pending', agent: nextAgent, seq: 0, warnings: [reason] },
+  })
+  const platformWarnings = [base.warnings, sess.warnings, base.session?.warnings]
+    .flatMap((w) => (Array.isArray(w) ? w : (w ? [w] : [])))
+  const blockers = platformWarnings.filter((w) => DISPATCH_BLOCKERS.test(String(w)))
+  const skipped = Number(base.skipped_dispatches ?? sess.skipped_dispatches) || 0
+  if (blockers.length) {
+    return pending(`next_node_pending_dispatch: 平台警告「${blockers.join('；')}」，未立即派发 ${nextAgent}，需人工裁决后补发`)
+  }
+  if (skipped > 0) {
+    return pending(`next_node_pending_dispatch: 平台 skipped_dispatches=${skipped}，未派发 ${nextAgent}，需人工补发`)
+  }
+  if (!target.owner || !target.repo || !target.issue_number) {
+    return pending(`next_node_pending_dispatch: 缺少仓库/issue 标识，无法派发 ${nextAgent}；可用 owner/repo/issue_number 入参重试`)
+  }
+  try {
+    const r = await apiMod.triggerPipeline(target.owner, target.repo, target.issue_number, dispatchContext(base, nextAgent), nextAgent)
+    const seq = Number(r?.seq ?? r?.event_seq) || 0
+    return { ...base, next_agent: nextAgent, next_seq: seq, dispatch: { status: 'dispatched', agent: nextAgent, seq, warnings: [] } }
+  } catch (e) {
+    return pending(`next_node_pending_dispatch: 自动派发 ${nextAgent} 失败（${e?.message || e}），需手动补发`)
+  }
 }
 
 /**
@@ -884,7 +912,9 @@ export const TOOLS = [
     name: 'grape_takeover_finish',
     description:
       '结束接管：本地携结构化产物交回（conclusion/actions/artifacts/next_step/issue_summary），' +
-      '平台写入 events.structured_output（与 worker 同格式）、按场景链把下一节点派发（如 coding→qa），链不断。' +
+      '平台写入 events.structured_output（与 worker 同格式），并按场景链确保下一节点（如 coding→qa）被派发，链不断：' +
+      '平台已派发（handoff_seq/next_seq>0）则**不重复派发**；平台漏派时本工具按场景链**兜底补发**（复用 trigger 同源 A2A 通道）；' +
+      '因 remote_may_still_run 等阻塞、缺仓库标识或补发失败时，返回**显式告警 + 待派发标记（pending_dispatch）**，不再静默。' +
       '⚠️ 用户决策层动作：确认本地成果可交回后再调用。' +
       '两阶段确认流：先 request-finish（仅报告完成，等用户确认），用户确认后再本工具 finish。',
     schema: {
@@ -899,6 +929,9 @@ export const TOOLS = [
         artifacts: { type: 'array', items: { type: 'string' }, description: '产物（分支/PR/报告链接等）' },
         next_step: str('给下一节点（如 qa）的提示'),
         issue_summary: str('整单摘要（可选）'),
+        owner: str('兜底派发用 owner（可选；仅当会话未带仓库标识时使用）'),
+        repo: str('兜底派发用 repo（可选）'),
+        issue_number: num('兜底派发用 issue 编号（可选）'),
       },
       required: ['session_id', 'summary'],
     },
@@ -936,6 +969,12 @@ export const TOOLS = [
         } else if (d.status === 'already_dispatched') {
           lines.push(`- 下一节点 ${d.agent || '-'} 已由平台派发（seq=${d.seq}），未重复派发`)
           lines.push('', '_链不断：下一节点已被派发，无需手动 trigger。_')
+        } else if (d.status === 'pending') {
+          const pd = json.pending_dispatch || {}
+          lines.push('', '**⚠️ 下一节点未被派发（待派发，pending_dispatch）**', '')
+          lines.push(`- 目标节点: ${d.agent || '-'}${pd.owner ? ` · 仓库: ${pd.owner}/${pd.repo}` : ''}${pd.issue_number ? ` · issue: #${pd.issue_number}` : ''}`)
+          for (const w of (d.warnings || [])) lines.push(`- ${w}`)
+          lines.push('', `_链未自动接续：确认远端/节点状态后调 \`grape_trigger_pipeline(agent=${d.agent})\` 补发，或用 \`grape_takeover_status\` 复查会话。_`)
         } else if (d.status !== 'pending') {
           lines.push('', '_流水线从断点继续，无需 context 口述、无需 trigger 重触发。_')
         }
