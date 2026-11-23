@@ -54,6 +54,78 @@ const WARNING_HINTS = {
 }
 const warningHint = (w) => WARNING_HINTS[String(w).split(':')[0].trim()] || ''
 
+/* ── Issue #19：交回后按场景链确保下一节点被派发（「链不断」不能只在描述里） ── */
+
+/** 场景节点链（客户端兜底：平台未给 next_agent 时按当前节点推导下一节点） */
+const SCENE_CHAIN = { vod: 'issue', issue: 'coding', coding: 'qa', qa: 'sre' }
+
+const asAgentType = (v) => {
+  const s = String(v ?? '').trim().toLowerCase()
+  return AGENT_TYPES.includes(s) ? s : ''
+}
+
+/** 交回结果里的结构化输出（session.result_json 平台给对象或 JSON 文本两种形态） */
+function resultJsonOf(json = {}) {
+  const raw = json.result_json ?? json.session?.result_json
+  if (!raw) return {}
+  if (typeof raw === 'object') return raw
+  try { return JSON.parse(String(raw)) } catch { return {} }
+}
+
+/** 下一节点：平台 next_agent > 结构化 next_step 精确命中 > 场景链由会话节点推导 */
+export function resolveNextAgent(json = {}) {
+  const sess = json.session || {}
+  const rj = resultJsonOf(json)
+  return asAgentType(json.next_agent)
+    || asAgentType(sess.next_agent)
+    || asAgentType(rj.next_agent)
+    || asAgentType(rj.next_step)
+    || SCENE_CHAIN[asAgentType(sess.agent_type) || asAgentType(json.agent_type)]
+    || ''
+}
+
+/** 派发所需仓库/issue 标识：优先交回结果与 session，缺则回落到工具入参 */
+export function resolveDispatchTarget(json = {}, args = {}) {
+  const sess = json.session || {}
+  const first = (...vals) => vals
+    .map((v) => (v === undefined || v === null ? '' : String(v).trim()))
+    .find(Boolean) || ''
+  const repoKey = first(sess.repo_key, json.repo_key, sess.repoKey, json.repoKey)
+  const full = repoKey
+    ? repoKey.split(':').pop()
+    : first(sess.repo_full_name, json.repo_full_name, sess.full_name, json.full_name, sess.repository, json.repository)
+  const [fullOwner, fullRepo] = full && full.includes('/') ? full.split('/') : ['', '']
+  const [ownerFromKey, repoFromKey] = fullOwner && fullRepo ? [fullOwner, fullRepo] : ['', '']
+  const owner = ownerFromKey || first(sess.owner, json.owner, args.owner)
+  const repo = repoFromKey || first(sess.repo, json.repo, args.repo)
+  const issue = Number(first(sess.issue_number, json.issue_number, sess.issue_id, json.issue_id, args.issue_number))
+  return { owner, repo, issue_number: Number.isFinite(issue) && issue > 0 ? issue : 0 }
+}
+
+/** 补发时的 A2A context：说清上一节点已完成，避免下一节点重复实现 */
+function dispatchContext(json, nextAgent) {
+  const sid = json.session?.id || json.session_id || ''
+  const seq = Number(json.session?.handoff_seq ?? json.handoff_seq) || 0
+  return `接管会话 ${sid} 正式交回${seq ? `（上一节点结论见事件流 seq=${seq}）` : ''}，按场景链派发下一节点 ${nextAgent}；上一节点已完成，勿重复实现。`
+}
+
+/**
+ * 交回后确保下一节点被派发：平台已派发不重复；平台漏派时客户端兜底补发；
+ * 无法派发时返回结构化告警 + 待派发标记（不再静默 grace）。
+ */
+export async function ensureNextNodeDispatched(json, args = {}, apiMod = api) {
+  const base = json && typeof json === 'object' ? json : { raw: json }
+  const nextAgent = resolveNextAgent(base)
+  if (!nextAgent) {
+    // 场景链尾（如 sre）或平台未指定下一节点：不是故障，无需派发
+    return { ...base, next_agent: '', next_seq: 0, dispatch: { status: 'no_next_node', agent: '', seq: 0, warnings: [] } }
+  }
+  const target = resolveDispatchTarget(base, args)
+  const r = await apiMod.triggerPipeline(target.owner, target.repo, target.issue_number, dispatchContext(base, nextAgent), nextAgent)
+  const seq = Number(r?.seq ?? r?.event_seq) || 0
+  return { ...base, next_agent: nextAgent, next_seq: seq, dispatch: { status: 'dispatched', agent: nextAgent, seq, warnings: [] } }
+}
+
 /**
  * 审核类端点直调：apiRequest 是 src/api.mjs 的命名导出，必须直接调用
  * （曾误写成 api.apiRequest → 三个工具 native 必崩）。403 属凭据通道边界，
@@ -828,7 +900,8 @@ export const TOOLS = [
         issue_summary: a.issue_summary || '',
       }
       if (a.request_only) return api.takeoverRequestFinish(a.session_id, payload)
-      return api.takeoverFinish(a.session_id, { ...payload, outcome: 'completed', handoff: 'a2a' })
+      const json = await api.takeoverFinish(a.session_id, { ...payload, outcome: 'completed', handoff: 'a2a' })
+      return ensureNextNodeDispatched(json, a)
     },
     render(json) {
       if (!json || typeof json !== 'object') return R.fallbackJson(json)
@@ -843,7 +916,11 @@ export const TOOLS = [
         if (json.issue_stage) lines.push(`- issue 阶段: ${json.issue_stage}`)
         if (json.event_status) lines.push(`- 事件终态: ${json.event_status}`)
         if (json.session?.handoff_seq) lines.push(`- 结构化结论已写入事件流 seq=${json.session.handoff_seq}`)
-        lines.push('', '_流水线从断点继续，无需 context 口述、无需 trigger 重触发。_')
+        const d = json.dispatch || {}
+        if (d.status === 'dispatched') {
+          lines.push(`- 下一节点已自动派发：事件 seq=${d.seq}（平台 handoff_seq=0，客户端按场景链兜底补发）`)
+          lines.push('', '_链不断：下一节点已收到派发事件，无需手动 trigger。_')
+        }
       }
       return lines.join('\n')
     },
