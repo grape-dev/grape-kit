@@ -1059,7 +1059,8 @@ export const TOOLS = [
         lines.push('### 接管交回完成', '')
         const ho = describeHandoff(json.handoff)
         if (json.next_agent) lines.push(`- 下一节点: ${json.next_agent}（handoff=${ho.label}）`)
-        if (ho.failure) lines.push(`- **⚠️ 平台 handoff 派发失败：${ho.failure}**`)
+        const handoffCovered = ['dispatched', 'already_dispatched'].includes(json.dispatch?.status)
+        if (ho.failure) lines.push(`- **⚠️ 平台 handoff 派发失败：${ho.failure}**${handoffCovered ? '（已由客户端兜底派发覆盖）' : ''}`)
         if (json.issue_stage) lines.push(`- issue 阶段: ${json.issue_stage}`)
         if (json.event_status) lines.push(`- 事件终态: ${json.event_status}`)
         const handoffSeq = seqOf(json, 'handoff_seq')
@@ -1084,11 +1085,15 @@ export const TOOLS = [
           for (const w of (d.warnings || [])) lines.push(`- ${w}`)
           lines.push(`- 标记随本次交回结果返回；事后用 grape_takeover_status 复查会话（finished + next_agent=${d.agent || '-'} + handoff_seq=0 即派发指针缺失）`)
           lines.push('', `_链未自动接续：先 grape_get_issue_events 确认下一节点无事件，再调 \`grape_trigger_pipeline(agent=${d.agent})\` 补发。_`)
+        } else if (ho.failure) {
+          // 无 dispatch 字段但平台已明确 handoff 失败：不得再宣称「无需 trigger」
+          lines.push('', '_平台未返回派发结果，且 handoff 已失败：链可能停在当前节点，以下指引为准。_')
         } else {
           // 无 dispatch 字段：旧平台/CLI 回退通道的响应形状，按平台原样披露
           lines.push('', '_流水线从断点继续，无需 context 口述、无需 trigger 重触发。_')
         }
-        if (ho.failure) {
+        // pending 分支已给出更具体的补发指引；已派发（含兜底覆盖）时不再要求手动补发，避免与「无需 trigger」互斥
+        if (ho.failure && !handoffCovered && json.dispatch?.status !== 'pending') {
           lines.push('', `_平台 handoff 未成功：先 grape_get_issue_events 确认下一节点无事件，再调 \`grape_trigger_pipeline(agent=${json.next_agent || '…'})\` 手动补发。_`)
         }
       }

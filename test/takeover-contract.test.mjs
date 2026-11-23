@@ -629,3 +629,31 @@ test('#19 CHANGELOG 登记 finish 新增可选入参（§7 工具面/参数变�
   const unreleased = cl.split('## Unreleased')[1]?.split('## 0.3.9')[0] || ''
   assert.match(unreleased, /新增可选[^\n]*owner\/repo\/issue_number[^\n]*(兜底派发|用于兜底)/, 'Unreleased Fixed 应含一句可选入参说明')
 })
+
+test('#19 handoff 失败但客户端已兜底派发：透出原文并标注覆盖，不再要求手动补发', async () => {
+  const t = finishTool()
+  const stub = await stubFinish({
+    finish: {
+      ok: true, changed: true, next_agent: 'qa',
+      handoff: { ok: false, error: 'HTTP 405: Method Not Allowed' },
+      session: sessOf({}),
+    },
+    trigger: { seq: 71, agent: 'qa', status: 'running' },
+  })
+  try {
+    const j = await t.native({ session_id: 'tkos_19', summary: '完成' })
+    const out = t.render(j)
+    assert.match(out, /HTTP 405: Method Not Allowed/, '平台失败原文必须透出')
+    assert.match(out, /已由客户端兜底派发覆盖/, '兜底派发成功后须说明失败已被覆盖')
+    assert.doesNotMatch(out, /手动补发/, '已派发时不得再要求手动补发（与「无需手动 trigger」互斥）')
+  } finally { stub.restore() }
+})
+
+test('#19 旧响应形状（无 dispatch 字段）且 handoff 失败：仍给出手动补发指引', () => {
+  const t = finishTool()
+  const out = t.render({ ok: true, changed: true, next_agent: 'qa', handoff: { ok: false, error: 'HTTP 405: Method Not Allowed' } })
+  assert.doesNotMatch(out, /\[object Object\]/, 'handoff 对象不得直接插值')
+  assert.match(out, /平台 handoff 派发失败/)
+  assert.match(out, /平台 handoff 未成功/)
+  assert.match(out, /grape_trigger_pipeline\(agent=qa\)/, '未派发时须给出手动补发指引')
+})
