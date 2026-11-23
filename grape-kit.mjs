@@ -1290,7 +1290,7 @@ function cleanEnvVars() {
   for (const hit of s.rcHits) {
     const lines = readFileSync(hit.path, 'utf8').split('\n')
     const kept = lines.filter((line) => !EXPORT_RE.test(line))
-    const masked = lines.map((line) => (EXPORT_RE.test(line) ? `# [grape-kit --clean-global 已移除凭据行] ${/^export\s+(GRAPE_\w+)/.exec(line)?.[1] || 'GRAPE_*'}` : line))
+    const masked = lines.map((line) => (EXPORT_RE.test(line) ? `# [grape-kit --clean-global 已移除凭据行] ${/^\s*export\s+(GRAPE_\w+)/.exec(line)?.[1] || 'GRAPE_*'}` : line))
     const backup = backupOf(hit.path, masked.join('\n'))
     writeFileSync(hit.path, kept.join('\n'))
     console.log(`  已从 ${hit.path} 删除 ${hit.hits} 行 GRAPE_* 导出（备份保留非凭据原文+凭据行掩码: ${backup}）`)
