@@ -6,7 +6,15 @@
 
 ## Unreleased
 
-暂无待发布变更。下一开发周期的用户可见变更先落本段（按 Added / Changed / Fixed 归类，见 CONTRIBUTING §7），发版时并入对应版本节。
+### Added
+
+- `uninstall --clean-global`：一键清理凭据与使用痕迹——整删 `~/.grape`（含文件通道 `config.json` 与 worker 注册产物）、删除用户级 `GRAPE_API_TOKEN`/`GRAPE_BASE_URL`（POSIX 精确删 rc 中的 `export` 行并备份为 `.bak-grapemcp-*`，Windows 用 `reg delete HKCU\Environment`）、清理 `_npx` 中仅含 `node_modules/@grape-dev` 的条目（其他包缓存不动）。不带该选项时 `uninstall` 只列出残留项与清理命令，不静默删除。
+- `auth init` 子命令：凭据唯一写入入口，`--token grape_... [--base-url ...]`（TTY 下可交互），写 `GRAPE_HOME/config.json`（权限 600、剥 BOM）并打印 env 通道设置命令与优先级说明；非 `grape_` 前缀直接拒绝。
+
+### Changed
+
+- `doctor` 把单行「当前生效凭据来源」升级为**完整优先级视图**：逐档列出 runtime（`GRAPE_API_TOKEN_ONCE`）> env（`GRAPE_API_TOKEN`/`GRAPE_BASE_URL`）> file（`GRAPE_AUTH_FILE`/`GRAPE_HOME/config.json`）的命中/未命中及原因，仍不回显 token。
+- 新增 `GRAPE_HOME` 覆盖点（默认 `~/.grape`），`src/api.mjs` 文件通道与版本检查缓存同源读取；既是测试隔离前提，也让 `--clean-global` 可安全自动化验证。README 双语同步凭据优先级链与新命令用法。
 
 ## 0.3.9 (2026-11-23)
 

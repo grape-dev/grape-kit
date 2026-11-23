@@ -54,6 +54,26 @@ export GRAPE_API_TOKEN=grape_xxx      # API Key: https://www.grapedev.cn/app/#ac
 # Agents that sanitize env vars: file channel ~/.grape/config.json {"token":"grape_xxx","base_url":"..."}
 ```
 
+### Credential priority & `auth init`
+
+One entry point writes credentials; the resolution order is fixed and shared by the API client, `doctor`, and takeover scripts:
+
+1. `GRAPE_API_TOKEN_ONCE` — runtime, current process only (highest)
+2. `GRAPE_API_TOKEN` / `GRAPE_BASE_URL` — environment channel
+3. `GRAPE_AUTH_FILE` or `~/.grape/config.json` (the directory can be overridden with `GRAPE_HOME`) — file channel
+
+```bash
+# write the file channel (mode 600, BOM stripped) and print the matching env commands
+npx -y @grape-dev/grape-kit auth init --token grape_xxx --base-url https://www.grapedev.cn
+npx -y @grape-dev/grape-kit doctor     # shows the full runtime > env > file chain (never echoes the token)
+```
+
+A plain `uninstall` removes only the host entry and reports any leftover credentials. Add `--clean-global` to delete `~/.grape` (file channel + worker artifacts), the user-level `GRAPE_API_TOKEN`/`GRAPE_BASE_URL` (rc lines are backed up before edit; Windows uses `reg delete`), and only those `_npx` cache entries that contain `node_modules/@grape-dev`:
+
+```bash
+npx -y @grape-dev/grape-kit uninstall --clean-global
+```
+
 ### OpenCode
 
 ```bash
@@ -110,6 +130,7 @@ The `clawhub:` prefix is the source (matching devkit's listing form). Verify wit
 npx -y @grape-dev/grape-kit --version        # version check
 npm install -g @grape-dev/grape-kit          # update (then restart the agent session)
 npx -y @grape-dev/grape-kit uninstall        # uninstall, target auto-detected
+npx -y @grape-dev/grape-kit uninstall --clean-global   # also purge ~/.grape + user env vars + _npx cache
 ```
 
 A startup version check compares against the npm registry and reminds you once when a newer release exists (24h dedupe; disable with `GRAPE_KIT_SKIP_UPDATE_CHECK=1`). Mirror registries (npmmirror etc.) may lag 1-3 days — use `--registry https://registry.npmjs.org/` for the latest.
@@ -168,7 +189,7 @@ Full release notes: [CHANGELOG.md](CHANGELOG.md) — 19 条发布记录（含 0.
 
 ```bash
 npm install
-npm test        # 156 unit tests (fake-grape stand-in, no real server needed)
+npm test        # 164 unit tests (fake-grape stand-in, no real server needed)
 npm run smoke   # real stdio JSON-RPC round-trip: initialize → tools/list → tools/call
 ```
 
