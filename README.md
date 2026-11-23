@@ -19,10 +19,10 @@
 
 ---
 
-Grape-kit helps **mainstream agents** (opencode / CodeArts / WorkBuddy / openclaw, etc.) use [Grape](https://gitcode.com/grape-dev/grape) safely and in a structured way — an AI-native DevOps platform with multi-agent pipelines (vod → issue → coding → qa → sre).
+Grape-kit helps **mainstream agents** (opencode / CodeArts / WorkBuddy / dsh / openclaw, etc.) use [Grape](https://gitcode.com/grape-dev/grape) safely and in a structured way — an AI-native DevOps platform with multi-agent pipelines (vod → issue → coding → qa → sre).
 
 ```
-agent (MCP stdio: opencode / CodeArts / WorkBuddy…; other MCP-capable agents wire up manually)
+agent (MCP stdio: opencode / CodeArts / WorkBuddy / dsh…; other MCP-capable agents wire up manually)
   → grape-kit (39 tools · native HTTP · Markdown rendering · initialize-instruction bootstrap)
     → grape server (pipelines / events / takeover session API; CLI only as 401 fallback)
 ```
@@ -119,6 +119,29 @@ npx -y @grape-dev/grape-kit update --target workbuddy
 npx -y @grape-dev/grape-kit uninstall --target workbuddy   # removes entry + skill + receipt (config backed up)
 ```
 
+### DeepSeek Harness (dsh)
+
+```bash
+npx -y @grape-dev/grape-kit install --target dsh
+```
+
+Writes a **managed block** into `$DSH_HOME/profiles/web/cordis.patch.yml` (default `$DSH_HOME` = `~/.dsh`): an `insert` row with `id: grape-kit`, `name: '@deepseek-ai/dsh-mcp-client'`, `transport: stdio`, and a `node` command pointing at the local MCP entry (falls back to `npx` when the script cannot be resolved). The `grape-remote` skill is copied to `$DSH_HOME/skills/`. Only the lines between the managed markers are touched — your own patch rows stay byte-for-byte intact and every write is backed up first. **Restart the dsh session** afterwards to load the new patch.
+
+`@deepseek-ai/dsh-mcp-client` is a `web`-profile asset: the installer tries a best-effort install and never blocks on failure. If it cannot install it, run:
+
+```bash
+npx @deepseek-ai/dsh plugin --profile web add @deepseek-ai/dsh-mcp-client
+corepack enable pnpm   # first, if pnpm is missing
+```
+
+```bash
+npx -y @grape-dev/grape-kit doctor --target dsh --probe   # managed block / skill copy / dsh-mcp-client
+npx -y @grape-dev/grape-kit install --target dsh          # re-assembly after upgrade (idempotent)
+npx -y @grape-dev/grape-kit uninstall --target dsh        # removes the managed block + skill copy only
+```
+
+> dsh uses the **MCP minimal path** (all 39 tools reused unchanged). The full native Cordis plugin lives in [grape-dsh](https://gitcode.com/grape-dev/grape-dsh); the two coexist.
+
 ### openclaw (ClawHub marketplace)
 
 ```bash
@@ -160,10 +183,11 @@ npx -y @grape-dev/grape-kit intro     # reprint the capability map at any time
 
 ## Version history
 
-Full release notes: [CHANGELOG.md](CHANGELOG.md) — 20 条发布记录（含 0.0.0-stage 占位包）
+Full release notes: [CHANGELOG.md](CHANGELOG.md) — 21 条发布记录（含 0.0.0-stage 占位包）
 
 | Version | Date | Highlights |
 |---|---|---|
+| 0.4.0 | 2026-11-23 | DeepSeek Harness (dsh) support (#21): `install --target dsh` wires grape-kit into the dsh web profile via an **MCP stdio managed patch** — a marker-delimited `insert` block in `$DSH_HOME/profiles/web/cordis.patch.yml` (`id: grape-kit` / `name: '@deepseek-ai/dsh-mcp-client'` / local script first, `npx` fallback), `grape-remote` skill copied to `$DSH_HOME/skills/`, all 39 tools reused unchanged; `uninstall --target dsh` removes only the managed block + skill copy, `doctor --target dsh` checks block / skill copy / `dsh-mcp-client`, `detect` picks up `~/.dsh`; best-effort dependency install (failure prints manual guidance, exit 0). QA hardening (PR #12): refuse to write on incomplete managed blocks or map-shaped patches (no silent deletion of user lines, no invalid YAML), byte-exact install→uninstall round-trip, empty-patch/backup cleanup; unit tests 257→270 |
 | 0.3.10 | 2026-11-23 | Takeover hand-back dispatch closed (#19): the dispatch pointer is `next_seq` only (`handoff_seq` is the hand-back event seq, never evidence of dispatch); when the platform misses the dispatch the client falls back to re-dispatching coding→qa over the same A2A channel as trigger and backfills `next_seq`; blocked (`remote_may_still_run` / missing repo or issue / failed fallback) yields an explicit `pending_dispatch` marker plus readable warnings instead of silent grace. Three "unproven read as success" paths closed: a hand-back that did not succeed (`ok=false` / `changed=false`) never dispatches the next node, a node name outside the whitelist (e.g. `reviewer`) is reported as unknown instead of being silently rewritten to qa, and a fallback response without an event `seq` counts as unproven. #20 credential/uninstall batch: `auth init` as the single credential write entry, `uninstall --clean-global` (with `--dry-run`, rc backups keeping no credential lines, `_npx` narrowed to grape-kit), doctor's full credential-precedence view; unit tests 156→257 |
 | 0.3.9 | 2026-11-23 | Takeover full-chain hardening (#12): takeover_start branch/MR preflight checks + warnings fully surfaced, cross-platform Node takeover scripts (report / request-finish / finish), 409 agent_mismatch hints, bundle {{CWD}} rendering, doctor credential-source line; #17 fix batch: `intro` subcommand + post-install capability map (3-step API Key guide when no credentials), trigger_pipeline `agent` param (resume from a given node), doctor base_url dual-channel with source annotated, review tools native-channel crash fixed; unit tests 136→156 |
 | 0.3.8 | 2026-11-20 | Three review tools (grape_review_pass / grape_review_reject / grape_confirm_done — tools 36→39); issues table gains a "Repository" column; doctor recognizes ~/.grape/config.json file-channel credentials (no more false FAIL) |
@@ -194,7 +218,7 @@ Full release notes: [CHANGELOG.md](CHANGELOG.md) — 20 条发布记录（含 0.
 ```bash
 npm install
 
-npm test        # 257 unit tests (fake-grape stand-in, no real server needed)
+npm test        # 270 unit tests (fake-grape stand-in, no real server needed)
 
 npm run smoke   # real stdio JSON-RPC round-trip: initialize → tools/list → tools/call
 ```
@@ -213,7 +237,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the contribution flow, [AGENTS.md](AG
 - [x] Org repo home (grape-dev/grape-kit)
 - [ ] Full CI gating (GitHub Actions-compatible workflow provided today; enable GitCode GoCI once generally available)
 - [x] More install targets: codearts / officeace (three integration types)
-- [ ] dsh is served by the dedicated [grape-dsh](https://gitcode.com/grape-dev/grape-dsh) plugin, no duplicate effort
+- [x] dsh install target (MCP stdio managed patch); the full native Cordis plugin stays in [grape-dsh](https://gitcode.com/grape-dev/grape-dsh) — the two coexist
 
 ## Links
 

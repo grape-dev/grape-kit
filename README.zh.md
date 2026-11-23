@@ -19,10 +19,10 @@
 
 ---
 
-帮助各类 **Agent**（opencode / CodeArts / WorkBuddy 等）安全、结构化地使用 [Grape](https://gitcode.com/grape-dev/grape) —— 多 agent 协作的 AI Native DevOps 平台（vod → issue → coding → qa → sre）。
+帮助各类 **Agent**（opencode / CodeArts / WorkBuddy / dsh 等）安全、结构化地使用 [Grape](https://gitcode.com/grape-dev/grape) —— 多 agent 协作的 AI Native DevOps 平台（vod → issue → coding → qa → sre）。
 
 ```
-agent 宿主（MCP stdio：opencode / CodeArts / WorkBuddy…；其他 MCP 能力宿主可手动接线）
+agent 宿主（MCP stdio：opencode / CodeArts / WorkBuddy / dsh…；其他 MCP 能力宿主可手动接线）
   → grape-kit（39 工具 · 原生 HTTP 直连 · Markdown 渲染 · initialize instructions 自举）
     → grape 服务端（流水线 / events / takeover 会话 API；CLI 仅 401 回退用）
 ```
@@ -119,6 +119,29 @@ npx -y @grape-dev/grape-kit update --target workbuddy
 npx -y @grape-dev/grape-kit uninstall --target workbuddy   # 移除条目+skill+receipt（配置自动备份）
 ```
 
+### dsh（DeepSeek Harness）
+
+```bash
+npx -y @grape-dev/grape-kit install --target dsh
+```
+
+写入 `$DSH_HOME/profiles/web/cordis.patch.yml`（`$DSH_HOME` 缺省 `~/.dsh`）的**托管块**：`insert` 行含 `id: grape-kit`、`name: '@deepseek-ai/dsh-mcp-client'`、`transport: stdio`，`command: node` 指向本地 MCP 入口（入口脚本解析不到时回退 `npx`）；`grape-remote` skill 落到 `$DSH_HOME/skills/`。只改标记行之间的托管块，用户既有 patch 行逐字节保留，每次写入前自动备份。装完**重启 dsh 会话**加载新 patch。
+
+`@deepseek-ai/dsh-mcp-client` 属 dsh web profile 侧依赖：安装器 best-effort 自动装，失败只提示不阻塞。自动安装未成功时手动补：
+
+```bash
+npx @deepseek-ai/dsh plugin --profile web add @deepseek-ai/dsh-mcp-client
+corepack enable pnpm   # pnpm 缺失时先启用
+```
+
+```bash
+npx -y @grape-dev/grape-kit doctor --target dsh --probe   # 三项：托管块 / skill 副本 / dsh-mcp-client
+npx -y @grape-dev/grape-kit install --target dsh          # 升级后重新装配（幂等）
+npx -y @grape-dev/grape-kit uninstall --target dsh        # 只删托管块 + skill 副本
+```
+
+> dsh 走 **MCP 最小路径**（39 工具零改动复用）；完整形态的原生 Cordis 插件由 [grape-dsh](https://gitcode.com/grape-dev/grape-dsh) 承载，二者并存。
+
 ### openclaw（ClawHub 市场）
 
 ```bash
@@ -162,6 +185,7 @@ npx -y @grape-dev/grape-kit intro     # 随时重看能力地图
 
 | 版本 | 日期 | 要点 |
 |---|---|---|
+| 0.4.0 | 2026-11-23 | DeepSeek Harness（dsh）适配（#21）：`install --target dsh` 以 **MCP stdio 托管 patch** 模式接入 dsh web profile —— 在 `$DSH_HOME/profiles/web/cordis.patch.yml` 写入带标记的 `insert` 托管块（`id: grape-kit` / `name: '@deepseek-ai/dsh-mcp-client'` / 本地脚本优先、`npx` 回退），`grape-remote` skill 落 `$DSH_HOME/skills/`，39 工具零改动复用；`uninstall --target dsh` 只删托管块 + skill 副本 · `doctor --target dsh` 三项检查（托管块 / skill 副本 / `dsh-mcp-client`）· `detect` 把 `~/.dsh` 纳入自动检测；依赖安装 best-effort（失败只给手动指引、退出码 0）。QA 硬化（PR #12）：托管块不完整或 patch 顶层为映射形状时拒绝写入（不静默删用户行、不写非法 YAML）· install→uninstall 逐字节往返保真 · 空文件与仅含托管块的备份清理；单测 257→270 |
 | 0.3.10 | 2026-11-23 | 接管交回派发收口（#19）：派发指针只认 `next_seq`（`handoff_seq` 只是交回事件序号，不作派发证据）· 平台漏派时客户端兜底补发 coding→qa（与 trigger 同源 A2A 通道）并回填 `next_seq` · 受阻（`remote_may_still_run`／缺仓库-issue 标识／补发失败）落 `pending_dispatch` 待派发标记 + 可读告警，不再静默 grace；三处「未证实当成功」收口：交回未成功（`ok=false`／`changed=false`）不派发下一节点 · 白名单外节点名（如 `reviewer`）按「未知」上报不改写为 qa · 补发响应缺事件 `seq` 判未证实；#20 凭据/卸载批：`auth init` 唯一写入入口 · `uninstall --clean-global`（`--dry-run`、rc 备份不留凭据行、`_npx` 收窄到 grape-kit）· doctor 完整凭据优先级视图；单测 156→257 |
 | 0.3.9 | 2026-11-23 | 端云接管全链路硬化（#12）：takeover_start 分支/MR 前置检查 · warnings 全量透出 · Node 跨平台接管三脚本（report/request-finish/finish）· 409 agent_mismatch 友好提示 · bundle 脚本 {{CWD}} 渲染 · doctor 凭据来源行；#17 修复批：intro 子命令 + 能力地图（无凭据先给 3 步 API Key 指引）· trigger_pipeline agent 参数（可从指定节点续跑）· doctor base_url 双通道并标注生效来源 · 审核三工具 native 崩溃修复；单测 136→156 |
 | 0.3.8 | 2026-11-20 | 审核三工具（grape_review_pass / grape_review_reject / grape_confirm_done，工具面 36→39）· issues 表新增「仓库」列 · doctor 识别 ~/.grape/config.json 文件通道凭证（不再误报 FAIL） |
@@ -175,7 +199,7 @@ npx -y @grape-dev/grape-kit intro     # 随时重看能力地图
 | 0.3.0 | 2026-11-11 | 传输层原生化：原生 HTTP 直连，grape CLI/Python 变可选（401 回退通道） |
 | 0.2.x | 2026-11-09 前 | 13→31 工具扩展 · worker_onboard · B1 接管闭环 |
 
-逐版本完整记录（发布日期、工具面变化、行为修复，覆盖 npm 全部 20 条发布记录——含 `0.0.0-stage` 占位包，0.2.3 从未发布）：[CHANGELOG.md](CHANGELOG.md)
+逐版本完整记录（发布日期、工具面变化、行为修复，覆盖 npm 全部 21 条发布记录——含 `0.0.0-stage` 占位包，0.2.3 从未发布）：[CHANGELOG.md](CHANGELOG.md)
 
 ## 设计原则
 
@@ -194,7 +218,7 @@ npx -y @grape-dev/grape-kit intro     # 随时重看能力地图
 ```bash
 npm install
 
-npm test        # 257 个单测（fake-grape 替身，不依赖真实服务端）
+npm test        # 270 个单测（fake-grape 替身，不依赖真实服务端）
 
 npm run smoke   # 真实 stdio JSON-RPC 往返：initialize → tools/list → tools/call
 ```
@@ -213,7 +237,7 @@ node scripts/live-smoke.mjs
 - [x] install 目标 workbuddy（0.3.2）
 - [ ] CI 门禁全面接入（当前提供 GitHub Actions 兼容 workflow，GitCode GoCI 转正后启用）
 - [ ] install 目标扩展：codearts / officeace（integrations 三型）
-- [ ] dsh 宿主由 [grape-dsh](https://gitcode.com/grape-dev/grape-dsh) 独立插件承载，不重复建设
+- [x] install 目标 dsh（MCP stdio 托管 patch）；完整形态原生插件由 [grape-dsh](https://gitcode.com/grape-dev/grape-dsh) 承载，二者并存
 
 ## 相关链接
 
