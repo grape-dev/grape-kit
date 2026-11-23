@@ -244,6 +244,24 @@ test('#19 会话缺仓库标识：不瞎派，返回待派发标记并提示可�
   } finally { stub.restore() }
 })
 
+test('#19 skipped_dispatches>0（平台主动跳过）：标记待派发，不盲目补发', async () => {
+  const t = finishTool()
+  const stub = await stubFinish({
+    finish: {
+      ok: true, changed: true, next_agent: 'qa',
+      session: { id: 'tkos_19', agent_type: 'coding', repo_key: 'gitcode:acme/demo', issue_number: 62, handoff_seq: 0, skipped_dispatches: 1 },
+    },
+    trigger: { seq: 99, agent: 'qa', status: 'running' },
+  })
+  try {
+    const j = await t.native({ session_id: 'tkos_19', summary: '完成' })
+    assert.equal(stub.triggers().length, 0, '平台声明跳过派发时不得盲目补发')
+    assert.equal(j.dispatch.status, 'pending')
+    assert.match(j.dispatch.warnings.join('\n'), /skipped_dispatches=1/)
+    assert.match(t.render(j), /待派发/)
+  } finally { stub.restore() }
+})
+
 test('#19 工具描述与行为一致：兜底补发 / 不重复 / 待派发告警', () => {
   const d = finishTool().description
   assert.match(d, /兜底|补发/)

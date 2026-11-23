@@ -97,10 +97,9 @@ export function resolveDispatchTarget(json = {}, args = {}) {
   const full = repoKey
     ? repoKey.split(':').pop()
     : first(sess.repo_full_name, json.repo_full_name, sess.full_name, json.full_name, sess.repository, json.repository)
-  const [fullOwner, fullRepo] = full && full.includes('/') ? full.split('/') : ['', '']
-  const [ownerFromKey, repoFromKey] = fullOwner && fullRepo ? [fullOwner, fullRepo] : ['', '']
-  const owner = ownerFromKey || first(sess.owner, json.owner, args.owner)
-  const repo = repoFromKey || first(sess.repo, json.repo, args.repo)
+  const [keyOwner, keyRepo] = full && full.includes('/') ? full.split('/') : ['', '']
+  const owner = keyOwner || first(sess.owner, json.owner, args.owner)
+  const repo = keyRepo || first(sess.repo, json.repo, args.repo)
   const issue = Number(first(sess.issue_number, json.issue_number, sess.issue_id, json.issue_id, args.issue_number))
   return { owner, repo, issue_number: Number.isFinite(issue) && issue > 0 ? issue : 0 }
 }
@@ -145,7 +144,7 @@ export async function ensureNextNodeDispatched(json, args = {}, apiMod = api) {
     pending_dispatch: { agent: nextAgent, ...target, reason },
     dispatch: { status: 'pending', agent: nextAgent, seq: 0, warnings: [reason] },
   })
-  const platformWarnings = [base.warnings, sess.warnings, base.session?.warnings]
+  const platformWarnings = [base.warnings, sess.warnings]
     .flatMap((w) => (Array.isArray(w) ? w : (w ? [w] : [])))
   const blockers = platformWarnings.filter((w) => DISPATCH_BLOCKERS.test(String(w)))
   const skipped = Number(base.skipped_dispatches ?? sess.skipped_dispatches) || 0
