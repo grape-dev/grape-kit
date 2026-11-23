@@ -129,9 +129,13 @@ function priorityChecks() {
 
 const envChecks = () => {
   const f = readAuthChannel()
+  const c = resolveCredentials(process.env)
   const fileToken = f.exists && !f.parseError && f.cfg && f.cfg.token
   let tokenLine
-  if (process.env.GRAPE_API_TOKEN) tokenLine = 'ok（已设置，不回显）'
+  // QA 复审（合入后基线）可疑项：runtime 档已命中时 env/file 未命中不是失败——
+  // 否则同一屏「[!!] 未设置（FAIL）」与「[ok] 一次性命中」并存，与「没有 [!!] 即就绪」自相矛盾
+  if (c.token && c.sourceKind === 'runtime') tokenLine = 'note（未设置：runtime 档 GRAPE_API_TOKEN_ONCE 已命中，当前生效，不影响使用）'
+  else if (process.env.GRAPE_API_TOKEN) tokenLine = 'ok（已设置，不回显）'
   else if (fileToken) tokenLine = `ok（文件通道 ${f.authFile}）`
   else if (f.exists && f.parseError) tokenLine = `未设置（FAIL）：${f.authFile} 解析失败（内容不回显）`
   else tokenLine = '未设置（FAIL）：打开 https://www.grapedev.cn/app/#account/profile 生成用户级 API Key（自部署实例用「你的地址/app/#account/profile」），用环境变量或 ~/.grape/config.json 提供'
