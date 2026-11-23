@@ -12,12 +12,17 @@
 - `auth init` 子命令：凭据唯一写入入口，`--token grape_... [--base-url ...]`（TTY 下可交互），写入目标与解析目标严格一致（`GRAPE_AUTH_FILE` 已设置时写它，否则写 `GRAPE_HOME/config.json`），权限 600、剥 BOM（win32 无 600 权限位、按目录 ACL，文案平台分流），写盘后回读校验，并打印 env 通道设置命令与优先级说明；已设置更高优先级 env（`GRAPE_API_TOKEN_ONCE`/`GRAPE_API_TOKEN`）时提示冲突与让文件通道生效的处置指引，非 TTY 会话对 token 掩码回显（明文只落文件通道）；非 `grape_` 前缀直接拒绝。
 
 ### Changed
-
+- 内部重构（PR #13 三审 判断项 7）：各宿主卸载收敛为 `STEP` 具名常量 + `applyUninstallSteps`/`planUninstallSteps` 单一渲染层（原先 8 处 if/else 复制），文案差异由每宿主 `*_COPY` 描述；`DAMAGED_LINE` 改为随 `steps` 生成的 `damagedEntryLine()`；workbuddy 的 `skills` 目录回到 `workbuddyPaths()` 单源（去掉 `dirname(mcpJson)` 的第二份定义），`HOSTS.workbuddy.uninstall` 不再重复 rmSync；护栏证据与条目判定共用 `isGrapeCredentialShape()`；测试断言从掩码精确串改为行为断言（名称保留、值不出现）。
 - `doctor` 把单行「当前生效凭据来源」升级为**完整优先级视图**：逐档列出 runtime（`GRAPE_API_TOKEN_ONCE`）> env（`GRAPE_API_TOKEN`/`GRAPE_BASE_URL`）> file（`GRAPE_AUTH_FILE`/`GRAPE_HOME/config.json`）的命中/未命中及原因，仍不回显 token。渲染三态化：命中档 `[ok]`，未命中/被覆盖档 `[--]` 信息行（无修复动作），失败项 `[!!]`——不再出现「`[ok]` 行内写着未命中」的自相矛盾，runtime 档命中时凭据行也不再出现 `[!!]`；`doctor --target <宿主>` 的检查项不再重复打印。
 - `GRAPE_HOME` 覆盖点（默认 `~/.grape`）收敛到 `src/api.mjs` 单源实现（`grapeHome()`/`readAuthChannel()` 导出），安装器、版本检查缓存与文件通道解析共用；takeover 脚本 `skills/grape-remote/scripts/takeover/_lib.mjs` 同语义接入（无依赖 skill 副本，保留逐字一致表达式）。README 双语同步凭据优先级链与新命令用法。
 
 ### Fixed
-
+- QA 复审（PR #13 三审）硬违规 1：`GRAPE_AUTH_FILE` 的「凭据形态」判据比文档承诺宽松——`scanResidues` 把任意 `token` 字符串或任意 `base_url` 字段当凭据，`cleanGlobal` 直接删文件：实测 `GRAPE_AUTH_FILE=$HOME/myapp-settings.json`（`{"base_url":"https://api.stripe.com","retries":3}`）被标注为凭据文件并删除，同一内容放进 `GRAPE_HOME` 反而被护栏拒绝。现将「凭据形态」抽成单判据 `isGrapeCredentialShape()`（`token` 以 `grape_` 开头，或 `base_url` 命中 `grapedev.cn`），护栏的目录证据与 `GRAPE_AUTH_FILE` 的删除授权共用；非凭据形态走人工处理分支（残留提示与 `--clean-global` 均点名，不盲删）。补两条在该断言下 `ba5a402` 变红的回归（任意 `base_url`、非 `grape_` 前缀 token）与一条「两通道判据一致」回归。
+- QA 复审（PR #13 三审）判断项 1：`DAMAGED_LINE` 固定文案「（grape 自有 skill 仍会清理）」在 codearts/officeace 也打印，而这两个宿主没有 skill 副本处理——实测 codearts 损坏配置打印该句却无任何动作。现按宿主能力拼接：`steps.skills` 存在（opencode/workbuddy）才承诺 skill 清理。
+- QA 复审（PR #13 三审）判断项 3：rc 清理只认 `export`，`declare -x`（.bashrc）、`.bash_profile` 的 export、fish `set -x` 三种形态不清不掩，`--clean-global` 仍输出「未发现导出行（跳过）」。本轮扩范围（不另开 Issue）：扫描目标加 `.bash_profile` 与 `~/.config/fish/config.fish`，行判据统一为 `export` / `declare -x` / fish `set -x`，清理、掩码备份与残留提示共用同一 `credentialLineKey()`。
+- QA 复审（PR #13 三审）判断项 4：win32 `scanResidues` 把 `reg query` 非零退出一律当「不存在」——reg 不可用/拒绝访问时静默零残留，与「不再吞错」不符。新增 `src/registry.mjs` 的 `classifyRegQuery()`：只有 exit 1 + 系统「找不到该项」文案判 absent，其余（拒绝访问、reg 缺失、被信号终止、退出码不可判定）判 error，登记 `regErrors` 并在残留提示/预览/清理中如实上报「请人工核对」。
+- QA 复审（PR #13 三审）判断项 5：`--dry-run` 注释仍写「宿主条目/skill/备份同样只列不删」，而预览不列备份——注释与 README 对齐（备份只由真实执行生成）。
+- QA 复审（PR #13 三审）判断项 6：护栏拒绝文案把「无强证据」与「存在非 grape 条目」并成一句且未给判据。现拒绝信息分「原因 / 判定依据 / 放行办法」三行；空目录、无证据、存在非 grape 条目各自点名，判定依据列出凭据形态与 grape 专属文件、`workers`/`worker-*` 仅作伴随条目，放行办法给出可执行动作。
 - QA 复审（合入后 dev 基线，修复 PR）硬违规 1：`GRAPE_AUTH_FILE` 指向的凭据文件在 `auth init` 写入后既不检测也不清理，默认 uninstall 谎报零残留、同屏 doctor 仍报该文件生效——`GRAPE_AUTH_FILE` 纳入 `scanResidues` 单一扫描：残留提示点名路径，`--clean-global` 删除该文件，`--dry-run` 预览同步；非凭据形态目标拒删并提示人工处理。
 - QA 复审（同批）硬违规 2：`--dry-run` 仍执行宿主卸载/删 skill/写备份（与 README/CHANGELOG「不动盘」矛盾），测试还把该行为固化为断言——dry-run 全程不动盘，宿主卸载改为各宿主 `plan()` 预览（与 uninstall 同路径判定），错误断言测试同步修正；不带 `--clean-global` 时不再静默忽略。
 - QA 复审（同批）硬违规 3：误删护栏可被路径形态绕过——`GRAPE_HOME=$HOME/.config`（普通 config.json 误判特征）整删 `.config`、`GRAPE_HOME=$HOME/.grape/..` 清空 HOME。护栏改为 resolve/realpath 归一化后与 HOME/根/祖先比较；特征收窄为已知 grape 产物 + 凭据形态 config.json，所有自定义路径均要求全部条目为 grape 产物；空目录拒删；`--dry-run` 预览与执行同护栏；拒绝信息给出解析后的绝对路径。
