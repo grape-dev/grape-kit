@@ -427,3 +427,20 @@ test('QA doctor --target opencode 检查项只打印一次（双打印回归）'
   const occurrences = r.stdout.split('\n').filter((l) => l.includes('node >= 20')).length
   assert.equal(occurrences, 1, `同一检查项只允许出现一次，实际出现 ${occurrences} 次:\n${r.stdout}`)
 })
+
+/* ── QA 复审（合入后 dev 基线）可疑项 1：runtime-only 时凭据行不得 [!!] ── */
+
+test('QA#可疑1 doctor runtime-only（仅 GRAPE_API_TOKEN_ONCE）：凭据检查行无 [!!]，GRAPE_API_TOKEN 为 [--] 信息行', () => {
+  const h = home()
+  const r = run(['doctor'], h, {
+    ...cleanCredEnv, GRAPE_HOME: join(h, 'grapehome'), GRAPE_API_TOKEN_ONCE: 'grape_once_secret',
+    GRAPE_KIT_SKIP_UPDATE_CHECK: '1',
+  })
+  assert.equal(r.status, 0, r.stderr)
+  for (const l of r.stdout.split('\n').filter((x) => x.includes('GRAPE_API_TOKEN'))) {
+    assert.doesNotMatch(l, /\[!!\]/, `runtime 凭据已命中，凭据行不得 [!!]（与「没有 [!!] 即就绪」矛盾）: ${l}`)
+  }
+  assert.match(r.stdout, /\[--\] GRAPE_API_TOKEN:/, 'GRAPE_API_TOKEN 行应渲染 [--] 信息行（runtime 档覆盖，不影响使用）')
+  assert.match(r.stdout, /\[ok\][^\n]*一次性 env GRAPE_API_TOKEN_ONCE/, 'runtime 命中档保持 [ok]')
+  assert.doesNotMatch(r.stdout, /grape_once_secret/, '不得回显 token')
+})
