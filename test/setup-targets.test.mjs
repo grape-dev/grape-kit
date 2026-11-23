@@ -582,6 +582,41 @@ test('Issue #20 uninstall --clean-global 零残留且不影响其他 npx 缓存'
   assert.ok(existsSync(s.other), '其他包缓存必须保留')
 })
 
+test('Issue #20 clean-global 护栏：GRAPE_HOME=用户主目录本身拒绝删除并退出非零', skipOnWin, () => {
+  const h = home()
+  const s = seedResidue(h)
+  assert.equal(run(['install', '--target', 'opencode'], h).status, 0)
+  // GRAPE_HOME 指向隔离 HOME 本身——护栏必须拒绝且目录无损
+  const r = run(['uninstall', '--target', 'opencode', '--clean-global'], h, { GRAPE_HOME: h })
+  assert.notEqual(r.status, 0, '指向主目录必须非零退出')
+  assert.match(r.stderr, /拒绝/)
+  assert.ok(existsSync(s.grapeHome), '真实 ~/.grape 不得被连带删除')
+  assert.ok(existsSync(join(h, '.bashrc')), 'HOME 内容必须无损')
+})
+
+test('Issue #20 clean-global 护栏：自定义路径无 grape 特征拒删', skipOnWin, () => {
+  const h = home()
+  // 假装用户把 GRAPE_HOME 指向一个有普通文件的目录
+  const wrong = join(h, 'mydata')
+  mkdirSync(wrong, { recursive: true })
+  writeFileSync(join(wrong, 'photos.txt'), 'family')
+  const r = run(['uninstall', '--target', 'opencode', '--clean-global'], h, { GRAPE_HOME: wrong })
+  assert.notEqual(r.status, 0, '无 grape 特征的自定义目录必须拒删')
+  assert.match(r.stderr, /拒绝/)
+  assert.ok(existsSync(join(wrong, 'photos.txt')), '用户文件不得被删')
+})
+
+test('Issue #20 clean-global 护栏：自定义路径含 grape 产物特征继续清理（仅警告）', skipOnWin, () => {
+  const h = home()
+  const custom = join(h, 'grape-alt')
+  mkdirSync(custom, { recursive: true })
+  writeFileSync(join(custom, 'config.json'), JSON.stringify({ token: 'x' }))
+  const r = run(['uninstall', '--target', 'opencode', '--clean-global'], h, { GRAPE_HOME: custom })
+  assert.equal(r.status, 0, r.stderr)
+  assert.match(r.stdout, /警告/)
+  assert.ok(!existsSync(custom), '含产物特征的自定义路径应按配置清理')
+})
+
 test('Issue #20 默认 uninstall 仅提示残留与清理命令，不执行删除', skipOnWin, () => {
   const h = home()
   const s = seedResidue(h)

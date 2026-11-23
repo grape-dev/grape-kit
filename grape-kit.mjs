@@ -1218,11 +1218,39 @@ function cleanNpxCache() {
   }
 }
 
+/** --clean-global 误删护栏（QA 硬违规修复）：GRAPE_HOME 指向可疑路径时拒删退出。
+ * 规则：
+ * 1. 基名非 .grape 且等于用户 HOME 本身 → 一律拒绝（多半是 GRAPE_HOME 配错）；
+ * 2. 基名非 .grape 但内容含 grape 产物特征（config.json/worker-*）→ 仅警告提示确认；
+ * 3. 基名 .grape → 正常删（默认/惯用形态）。 */
+function assertSafeGrapeHome(home) {
+  const base = basename(String(home).replace(/[\\/]$/, ''))
+  const userHome = String(homedir()).replace(/[\\/]$/, '')
+  if (String(home).replace(/[\\/]$/, '') === userHome || base === '' ) {
+    console.error(`  [拒绝] GRAPE_HOME 指向用户主目录本身（${home}）——疑似配置错误，已拒绝删除。`)
+    console.error(`  如确要清理，请先把 GRAPE_HOME 指向专用子目录（如 ~/.grape）再执行 --clean-global。`)
+    process.exit(1)
+  }
+  if (base !== '.grape') {
+    // 自定义路径：只有目录内容呈现 grape 产物特征才继续，否则要求显式确认
+    let items = []
+    try { items = readdirSync(home) } catch { /* 读不了按空处理 */ }
+    const looksGrape = items.some(x => x === 'config.json' || x.startsWith('worker-') || x === '.grape-takeover-token')
+    if (items.length && !looksGrape) {
+      console.error(`  [拒绝] GRAPE_HOME=${home} 基名非 .grape 且内容无 grape 产物特征（${items.slice(0,5).join(', ')}…）——疑似误指真实目录，已拒绝删除。`)
+      console.error(`  确认要删请改用 --clean-global --dry-run 先核对，或将 GRAPE_HOME 改回 ~/.grape。`)
+      process.exit(1)
+    }
+    console.log(`  [警告] GRAPE_HOME 为自定义路径 ${home}（非 .grape），内容含 grape 产物特征，按配置继续清理。`)
+  }
+}
+
 /** --clean-global：整删 GRAPE_HOME（文件通道 + worker 注册产物）+ 用户级 env + 本包 npx 缓存 */
 function cleanGlobal() {
   console.log('\n[clean-global] 清理全局凭据与使用痕迹')
   const home = grapeHome()
   if (existsSync(home)) {
+    assertSafeGrapeHome(home)
     let items = []
     try { items = readdirSync(home) } catch { /* 读不了也按存在处理 */ }
     console.log(`  将删除目录: ${home}${items.length ? `（${items.join(', ')}）` : ''}`)
