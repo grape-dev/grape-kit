@@ -303,7 +303,11 @@ test('#19 平台已派发（handoff_seq>0）：不重复派发', async () => {
     assert.match(out, /seq=42/)
   } finally { stub.restore() }
 })
-/* ── PR #10 QA 复审（S1–S6）：判据隔离 / 派发目标 / 兜底范围 / 待派发可查询 ── */
+/* ── 待派发标记：判据隔离 / 派发目标 / 兜底范围 / 可查询性 ──
+ * 可查询性依据（平台 mgmt 路由源码实测）：POST progress 对已结束会话一律 409 not_active
+ * （「接管会话已结束（finished）」），finish 在服务端同步关会话——交回后补写 progress 必然失败。
+ * 因此待派发标记不再走 task_messages，改由会话记录（next_agent + handoff_seq=0）派生，
+ * grape_takeover_status 对 finished 会话仍可查（GET 无状态门），渲染给出目标/原因/补发指引。 */
 
 const sessOf = (over = {}) => ({
   id: 'tkos_19', agent_type: 'coding', repo_key: 'gitcode:acme/demo', issue_number: 62, handoff_seq: 0, ...over,
@@ -402,7 +406,7 @@ test('#19/S3 场景链不再推导 vod→issue：非 coding 节点无 next_agent
   } finally { stub.restore() }
 })
 
-test('#19/S4 待派发标记经 takeover_progress 落 task_message（会话结束后可查）', async () => {
+test('#19/S4 平台拒绝向已结束会话写 progress（409 not_active）：待派发流程不再发起必败写入', async () => {
   const t = finishTool()
   const stub = await stubFinish({
     finish: {
@@ -411,34 +415,67 @@ test('#19/S4 待派发标记经 takeover_progress 落 task_message（会话结�
       session: sessOf(),
     },
     trigger: { seq: 99, agent: 'qa', status: 'running' },
+    progress: { written: 1 },
   })
   try {
     const j = await t.native({ session_id: 'tkos_19', summary: '完成' })
-    const pg = stub.progresses()
-    assert.equal(pg.length, 1, '待派发必须落一条进度，否则只有本次返回值、事后无从核查')
-    assert.equal(pg[0][1], 'tkos_19', '进度写回本接管会话')
-    const msg = (pg[0][2] || []).join('\n')
-    assert.match(msg, /待派发/)
-    assert.match(msg, /qa/)
-    assert.equal(j.pending_dispatch.recorded, true)
-    assert.match(t.render(j), /已写入接管会话进度/)
+    assert.equal(j.dispatch.status, 'pending')
+    assert.equal(stub.progresses().length, 0, 'finish 在服务端同步关会话，事后再写 progress 必 409 not_active——不得发起该写入')
+    assert.equal('recorded' in (j.pending_dispatch || {}), false, '不再有 recorded 持久化承诺（task_messages 通道对已结束会话不可用）')
+    assert.equal(j.pending_dispatch.agent, 'qa')
+    assert.match(j.pending_dispatch.reason, /remote_may_still_run/)
   } finally { stub.restore() }
 })
 
-test('#19/S4 progress 写入失败不影响交回结果：降级为仅返回态并明示', async () => {
+test('#19/S4 takeover_status 从会话记录派生待派发标记：finished+next_agent+handoff_seq=0 可查目标/原因/指引', () => {
+  const t = findTool('grape_takeover_status')
+  const out = t.render({
+    ok: true,
+    session: {
+      id: 'tkos_19', status: 'finished', agent_type: 'coding', next_agent: 'qa', handoff_seq: 0,
+      repo_key: 'gitcode:acme/demo', issue_id: '#62', task_id: 't_x',
+      warnings_json: '["remote_may_still_run"]', skipped_dispatches: 0, summary: '已完成',
+    },
+  })
+  assert.match(out, /待派发/, 'finished 会话缺派发指针必须可查出待派发标记')
+  assert.match(out, /qa/, '标记必须带目标节点')
+  assert.match(out, /acme\/demo/, '标记必须带目标仓库')
+  assert.match(out, /#62/, '标记必须带 issue')
+  assert.match(out, /handoff_seq=0/, '必须披露派发指针缺失的依据')
+  assert.match(out, /remote_may_still_run/, '会话警告作为待派发原因必须可查')
+  assert.match(out, /grape_trigger_pipeline\(agent=qa\)/, '必须给可执行补发指引')
+  assert.match(out, /grape_get_issue_events/, '补发前必须先核实事件，防止兜底已成功时重复派发')
+})
+
+test('#19/S4 takeover_status：skipped_dispatches 与已派发会话不误告警', () => {
+  const t = findTool('grape_takeover_status')
+  const skipped = t.render({ ok: true, session: { id: 'tkos_19', status: 'finished', next_agent: 'qa', handoff_seq: 0, repo_key: 'gitcode:acme/demo', issue_id: '#62', skipped_dispatches: 2 } })
+  assert.match(skipped, /skipped_dispatches=2/, '平台跳过派发的会话必须渲染为待派发')
+  const dispatched = t.render({ ok: true, session: { id: 'tkos_19', status: 'finished', next_agent: 'qa', handoff_seq: 37, repo_key: 'gitcode:acme/demo', issue_id: '#62' } })
+  assert.doesNotMatch(dispatched, /待派发/, '平台已写入派发指针（handoff_seq>0）不得再告待派发')
+  const active = t.render({ ok: true, session: { id: 'tkos_19', status: 'active', next_agent: '', handoff_seq: 0 } })
+  assert.doesNotMatch(active, /待派发/, '进行中会话不适用待派发标记')
+})
+
+test('#19/S4 finish 待派发渲染：不再宣称写入会话进度，改为会话记录可查口径', async () => {
   const t = finishTool()
   const stub = await stubFinish({
-    finish: { ok: true, changed: true, next_agent: 'qa', session: sessOf({ skipped_dispatches: 1 }) },
+    finish: {
+      ok: true, changed: true, next_agent: 'qa',
+      warnings: ['remote_may_still_run: 云端 worker 可能已推送分支'],
+      session: sessOf({ skipped_dispatches: 1 }),
+    },
     trigger: { seq: 99, agent: 'qa', status: 'running' },
-    progress: new Error('403: takeover session finished'),
   })
   try {
     const j = await t.native({ session_id: 'tkos_19', summary: '完成' })
-    assert.equal(j.dispatch.status, 'pending', '进度落盘失败不得掩盖待派发结论')
-    assert.equal(j.pending_dispatch.recorded, false)
     const out = t.render(j)
     assert.match(out, /待派发/)
-    assert.match(out, /仅随本次返回/, '落盘失败时须说明标记不持久化')
+    assert.match(out, /grape_trigger_pipeline\(agent=qa\)/)
+    assert.match(out, /grape_takeover_status/, '必须给事后复查通道')
+    assert.doesNotMatch(out, /已写入接管会话进度/, 'progress 对已结束会话 409，不得宣称已写入')
+    assert.doesNotMatch(out, /task_messages/, '同上')
+    assert.doesNotMatch(out, /无需手动 trigger/)
   } finally { stub.restore() }
 })
 
