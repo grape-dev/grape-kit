@@ -178,7 +178,7 @@ Full release notes: [CHANGELOG.md](CHANGELOG.md) — 19 条发布记录（含 0.
 
 ## Design principles
 
-- **Trigger, observe, advance, take over — nothing more**: A2A orchestration is server-driven; the plugin never interferes with node hand-offs; takeovers use session primitives for atomic hand-over and hand-back
+- **Trigger, observe, advance, take over — nothing more**: A2A orchestration is server-driven by default; the one client-side fallback is takeover_finish re-dispatching coding→qa when the platform's hand-back response carries no dispatch pointer (`next_seq=0`) — beyond that scope the platform's original hand-off behavior stands; takeovers use session primitives for atomic hand-over and hand-back
 - **Scope is the first gate**: of the 219 contract commands, the 28 session-only ones (git-repo etc.) always 403 for external tokens — excluded outright; `tko_` takeover credentials are repo_session-only and revoked on completion
 - **Agent-native output**: tool responses are Markdown tables / node chains / event timelines; `wait_task` polls with stage summaries and timeout hints
 
