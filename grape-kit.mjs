@@ -12,7 +12,7 @@
  *   node setup.mjs uninstall --target opencode
  *   node setup.mjs doctor [--probe]
  */
-import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync, readdirSync, statSync, rmdirSync, chmodSync } from 'node:fs'
+import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync, readdirSync, statSync, rmdirSync, chmodSync, realpathSync } from 'node:fs'
 import { createInterface } from 'node:readline'
 import { homedir, tmpdir } from 'node:os'
 import { join, dirname, resolve, basename } from 'node:path'
@@ -1219,29 +1219,54 @@ function cleanNpxCache() {
 }
 
 /** --clean-global 误删护栏（QA 硬违规修复）：GRAPE_HOME 指向可疑路径时拒删退出。
- * 规则：
- * 1. 基名非 .grape 且等于用户 HOME 本身 → 一律拒绝（多半是 GRAPE_HOME 配错）；
- * 2. 基名非 .grape 但内容含 grape 产物特征（config.json/worker-*）→ 仅警告提示确认；
- * 3. 基名 .grape → 正常删（默认/惯用形态）。 */
+ *  规则（QA 复审：护栏必须做 resolve/realpath 归一化，特征文件名收窄）：
+ *  1. 路径先 resolve（处理 .. 穿越与相对形态）再 realpath（处理符号链接），与 HOME/根/祖先比较——
+ *     `GRAPE_HOME=$HOME`、`$HOME/.grape/..`、HOME 父目录、根一律拒绝；
+ *  2. 基名 .grape → 正常删（默认/惯用形态）；
+ *  3. 自定义路径必须有 grape 产物证据才继续：已知产物文件名（收窄，通用名不再单独构成特征），
+ *     或内容为 grape 凭据形态（token grape_ 前缀 / 合法 base_url）的 config.json；
+ *     HOME 直接子目录额外要求全部条目都是 grape 产物（防 $HOME/.config 整删）；空目录无证据同样拒绝。 */
+const GRAPE_ARTIFACT_NAMES = new Set(['grape-kit-update-check.json', '.grape-takeover-token', 'workers'])
+const isGrapeArtifactName = (x) => GRAPE_ARTIFACT_NAMES.has(x) || /^worker-/.test(x)
+function grapeShapedConfig(dir) {
+  try {
+    const cfg = JSON.parse(readFileSync(join(dir, 'config.json'), 'utf8').replace(/^\uFEFF/, ''))
+    if (cfg && typeof cfg === 'object') {
+      if (typeof cfg.token === 'string' && cfg.token.startsWith('grape_')) return true
+      const b = cfg.base_url || cfg.baseUrl
+      if (typeof b === 'string' && /^https?:\/\//.test(b)) return true
+    }
+  } catch { /* 非凭据形态：不构成证据 */ }
+  return false
+}
+function normalizeForGuard(p) {
+  let r = resolve(String(p))
+  try { r = realpathSync(r) } catch { /* 目标不存在/不可达：保留 resolve 结果参与比较 */ }
+  return r
+}
 function assertSafeGrapeHome(home) {
-  const base = basename(String(home).replace(/[\\/]$/, ''))
-  const userHome = String(homedir()).replace(/[\\/]$/, '')
-  if (String(home).replace(/[\\/]$/, '') === userHome || base === '' ) {
-    console.error(`  [拒绝] GRAPE_HOME 指向用户主目录本身（${home}）——疑似配置错误，已拒绝删除。`)
-    console.error(`  如确要清理，请先把 GRAPE_HOME 指向专用子目录（如 ~/.grape）再执行 --clean-global。`)
+  const resolved = normalizeForGuard(home)
+  const userHome = normalizeForGuard(homedir())
+  const sep = process.platform === 'win32' ? '\\' : '/'
+  const isRoot = process.platform === 'win32' ? /^[a-zA-Z]:\\?$/.test(resolved) : resolved === '/'
+  if (resolved === userHome || isRoot || userHome.startsWith(resolved + sep)) {
+    console.error(`  [拒绝] GRAPE_HOME=${home} 解析后为 ${resolved}——指向用户主目录本身/其祖先/根，疑似配置错误，已拒绝删除。`)
+    console.error(`  如确要清理，请把 GRAPE_HOME 指向专用子目录（如 ${join(userHome, '.grape')}）再执行 --clean-global。`)
     process.exit(1)
   }
+  const base = basename(resolved)
   if (base !== '.grape') {
-    // 自定义路径：只有目录内容呈现 grape 产物特征才继续，否则要求显式确认
     let items = []
-    try { items = readdirSync(home) } catch { /* 读不了按空处理 */ }
-    const looksGrape = items.some(x => x === 'config.json' || x.startsWith('worker-') || x === '.grape-takeover-token')
-    if (items.length && !looksGrape) {
-      console.error(`  [拒绝] GRAPE_HOME=${home} 基名非 .grape 且内容无 grape 产物特征（${items.slice(0,5).join(', ')}…）——疑似误指真实目录，已拒绝删除。`)
-      console.error(`  确认要删请改用 --clean-global --dry-run 先核对，或将 GRAPE_HOME 改回 ~/.grape。`)
+    try { items = readdirSync(resolved) } catch { /* 读不了按空处理 */ }
+    const evidence = items.some(isGrapeArtifactName) || grapeShapedConfig(resolved)
+    const allGrape = items.length > 0 && items.every((x) => isGrapeArtifactName(x) || (x === 'config.json' && grapeShapedConfig(resolved)))
+    const directChildOfHome = dirname(resolved) === userHome
+    if (!items.length || !evidence || (directChildOfHome && !allGrape)) {
+      console.error(`  [拒绝] GRAPE_HOME=${home}（解析为 ${resolved}）非 .grape 且无 grape 产物证据${items.length ? `（内容: ${items.slice(0, 5).join(', ')}…）` : '（空目录）'}——疑似误指真实目录，已拒绝删除。`)
+      console.error(`  确认要删请先核对目录内容，或把 GRAPE_HOME 改回默认 ${join(userHome, '.grape')}。`)
       process.exit(1)
     }
-    console.log(`  [警告] GRAPE_HOME 为自定义路径 ${home}（非 .grape），内容含 grape 产物特征，按配置继续清理。`)
+    console.log(`  [警告] GRAPE_HOME 为自定义路径 ${home}（解析为 ${resolved}），含 grape 产物证据，按配置继续清理。`)
   }
 }
 
@@ -1264,12 +1289,14 @@ function cleanGlobal() {
 }
 
 /** --clean-global --dry-run：只预览将清理项，不执行任何删除（AGENTS.md 危险操作门精神）。
- *  预览与清理共用 scanResidues 单一扫描，保证「所见即所删」。 */
+ *  预览与清理共用 scanResidues 单一扫描 + 同一护栏（assertSafeGrapeHome）——
+ *  预览给出的「将删除目录」必须与实际执行同一判定（QA 判断项：预览不跑护栏时两者不一致）。 */
 function cleanGlobalPlan() {
   console.log('\n[clean-global --dry-run] 预览将清理的凭据/使用痕迹（未执行任何删除）：')
   const s = scanResidues()
   let any = false
   if (s.grapeHome) {
+    assertSafeGrapeHome(s.grapeHome.path)
     console.log(`  将删除目录: ${s.grapeHome.path}${s.grapeHome.items.length ? `（${s.grapeHome.items.join(', ')}）` : ''}`)
     any = true
   }
