@@ -566,3 +566,22 @@ test('#19/S5 文档措辞与实现一致：判据 next_seq / 兜底回填 next_s
   const skill = readFileSync(new URL('../skills/grape-remote/SKILL.md', import.meta.url), 'utf8')
   assert.match(skill, /next_seq/, 'skill 副本应说明派发指针是 next_seq')
 })
+
+test('#19 README 双语设计原则：不再宣称「永不干预」，如实写明客户端兜底范围', () => {
+  const en = readFileSync(new URL('../README.md', import.meta.url), 'utf8')
+  const zh = readFileSync(new URL('../README.zh.md', import.meta.url), 'utf8')
+  assert.doesNotMatch(en, /never interferes with node hand-offs/, '交回路径已有 coding→qa 客户端兜底，不得再宣称 never interferes')
+  assert.doesNotMatch(zh, /永不干预节点交接/, '同上（中文）')
+  for (const txt of [en, zh]) {
+    assert.match(txt, /默认服务端驱动|server-driven by default/, '必须写明默认仍是服务端驱动')
+    assert.match(txt, /coding→qa/, '必须写明客户端兜底范围仅 coding→qa')
+  }
+  assert.match(en, /takeover[\s\S]{0,80}coding→qa[\s\S]{0,200}fallback|fallback[\s\S]{0,200}coding→qa/i, '英文版应说明 takeover 交回漏派时客户端兜底')
+  assert.match(zh, /兜底/, '中文版应写「兜底」')
+})
+
+test('#19 CHANGELOG 登记 finish 新增可选入参（§7 工具面/参数变化）', () => {
+  const cl = readFileSync(new URL('../CHANGELOG.md', import.meta.url), 'utf8')
+  const unreleased = cl.split('## Unreleased')[1]?.split('## 0.3.9')[0] || ''
+  assert.match(unreleased, /新增可选[^\n]*owner\/repo\/issue_number[^\n]*(兜底派发|用于兜底)/, 'Unreleased Fixed 应含一句可选入参说明')
+})
