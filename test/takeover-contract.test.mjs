@@ -479,6 +479,36 @@ test('#19/S4 finish 待派发渲染：不再宣称写入会话进度，改为会
   } finally { stub.restore() }
 })
 
+test('#19 阻塞判据只认稳定告警码：散文「远端无冲突」不误阻塞，branch_conflict 码阻塞', async () => {
+  const t = finishTool()
+  const stub = await stubFinish({
+    finish: {
+      ok: true, changed: true, next_agent: 'qa',
+      warnings: ['branch_sync: 远端无冲突'],
+      session: sessOf(),
+    },
+    trigger: { seq: 71, agent: 'qa', status: 'running' },
+  })
+  try {
+    const j = await t.native({ session_id: 'tkos_19', summary: '完成' })
+    assert.equal(j.dispatch.status, 'dispatched', '「远端无冲突」是散文，不是冲突告警码，不得误阻塞派发')
+    assert.equal(stub.triggers().length, 1)
+  } finally { stub.restore() }
+  const stub2 = await stubFinish({
+    finish: {
+      ok: true, changed: true, next_agent: 'qa',
+      warnings: ['branch_conflict: 目标分支存在未解决冲突'],
+      session: sessOf(),
+    },
+    trigger: { seq: 99, agent: 'qa', status: 'running' },
+  })
+  try {
+    const j2 = await t.native({ session_id: 'tkos_19', summary: '完成' })
+    assert.equal(j2.dispatch.status, 'pending', 'branch_conflict 稳定码必须阻塞派发')
+    assert.match(j2.dispatch.warnings.join('\n'), /branch_conflict/)
+  } finally { stub2.restore() }
+})
+
 test('#19/S6 next_step 只认整串 agent 名：散文不解析，靠场景链兜底', async () => {
   const t = finishTool()
   const stub = await stubFinish({
