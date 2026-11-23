@@ -22,6 +22,7 @@
 - QA 复审（PR #11）硬违规：`--clean-global` 的 rc 备份曾保留完整 `export GRAPE_API_TOKEN=…` 明文行且残留检测不扫备份，卸载后打印「未检测到残留」实为假象——备份只保留非凭据行，旧版本留下的含凭据 `.bak-grapemcp-*` 备份纳入残留检测并由 `--clean-global` 清零。
 - QA 复审（PR #11）主命令不可达：`uninstall --clean-global` 不带 `--target` 时曾先走宿主自动解析，无宿主痕迹即 exit 1、清理从未执行——见 Added（全局清理前置于宿主解析）。
 - 测试可移植性：600 权限位与 rc 删除断言按平台分流，破坏性清理用例在 win32 skip（`HOME` 隔离对 win32 `homedir()` 无效）；win32 行为由 Windows 11 实机回归覆盖。
+- `grape_takeover_finish`（`request_only=false` 正式交回）交回后不再静默停在下一节点：平台已派发（`handoff_seq`/`next_seq` > 0）时不重复派发；平台漏派时按场景链**兜底补发**（coding→qa，复用 trigger 同源 A2A 通道）并回填 `next_seq`；因 `remote_may_still_run` 阻塞、会话缺仓库标识或补发失败时返回**显式告警 + `pending_dispatch` 待派发标记**（附 `grape_trigger_pipeline(agent=…)` 补发指引）。工具描述与真实行为对齐，「链不断」承诺不再与静默 grace 相悖。
 
 ## 0.3.9 (2026-11-23)
 

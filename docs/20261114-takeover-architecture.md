@@ -64,6 +64,10 @@ sequenceDiagram
     A->>S: finish（request_only=false，用户授权语义）
     S->>S: 事件终态 completed + structured_output 落 events<br/>+ tko_ 吊销 + stage 推进
     S->>N: a2a 派发下一节点（如 coding→qa）
+    opt 平台未派发（handoff_seq=0，Issue #19 实测）
+        A->>S: kit 兜底：a2a 派发下一节点（复用 trigger 同源通道）
+        S-->>N: 下一节点事件（next_seq 回填到交回结果）
+    end
     Note over N: 链从断点继续——无 cancel 整链、无 trigger 重触发、无 context 口述
 
     alt 中途放弃
@@ -96,6 +100,18 @@ sequenceDiagram
 | ③ 正式交回 | `POST /sessions/{id}/finish` | **用户级凭据 `grape_`** | 403（能力边界，非权限配置错误） |
 
 因此：接管期间的 tko_ 凭据不能自行推进流水线；finish 必须由持有用户级凭据的会话（用户自己的 agent / 平台）执行。kit 侧在 `hintFor(403)` 对该路径给出上述语义提示，避免用户被带向「申请更多权限」。
+
+### 3.2 交回后的下一节点派发（Issue #19）
+
+平台 `finish` 返回 `next_agent=qa` 但 `handoff_seq=0`（#62 实测：事件终态 completed、qa 无事件、`stall_state=grace`）时，链会静默停住。kit 侧 `grape_takeover_finish` 现在对交回结果做三态收口，保证「链不断」不只是一句描述：
+
+| 交回结果 | kit 行为 | 渲染 |
+|---|---|---|
+| `handoff_seq`/`next_seq` > 0 | 平台已派发，**不重复派发** | `未重复派发（seq=N）` |
+| 无 handoff、有 `next_agent`（或按 agent_type 推导的场景链下一节点），且无阻塞 | **兜底补发**一次 A2A（复用 trigger 同源 `/api/a2a`），回填 `next_seq` | `已自动派发（seq=N）` |
+| `remote_may_still_run` 等警告、`skipped_dispatches>0`、缺 owner/repo/issue 标识、补发失败 | 不瞎派，返回 `dispatch.status=pending` + `pending_dispatch{agent,owner,repo,issue_number,reason}` | 显式告警 + `grape_trigger_pipeline(agent=…)` 补发指引 |
+
+会话未带仓库标识时可用 `owner`/`repo`/`issue_number` 入参补齐；场景链尾（如 sre）返回 `no_next_node`，属正常收尾。
 
 ## 4. 验证矩阵（全部真机）
 

@@ -192,7 +192,7 @@ Full release notes: [CHANGELOG.md](CHANGELOG.md) — 19 条发布记录（含 0.
 
 ```bash
 npm install
-npm test        # 177 unit tests (fake-grape stand-in, no real server needed)
+npm test        # 189 unit tests (fake-grape stand-in, no real server needed)
 npm run smoke   # real stdio JSON-RPC round-trip: initialize → tools/list → tools/call
 ```
 
