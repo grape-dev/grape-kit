@@ -72,7 +72,12 @@ function credentialSourceCheck() {
           : ''
   return ['当前生效凭据来源', c.token ? `ok（${label}；base_url=${c.baseUrl}，不回显 token）` : '未配置（FAIL）：看上一行修复动作']
 }
-/** base_url 展示：与 getBaseUrl() 同源，并标注来源（env / 文件通道 / 默认），避免只读 env 的假阳性 FAIL */
+/**
+ * base_url 展示：值取自 getBaseUrl()（唯一事实源），此处只「补一份来源标签」——env / 文件通道 / 默认。
+ * 刻意重复读一次配置文件：getBaseUrl() 只返回值，用户看不到优先级命中哪一条，doctor 必须把来源显式打印，
+ * 否则只配文件通道会被误判 FAIL。文件通道解析逻辑与 src/api.mjs 保持一致（剥 BOM、base_url/baseUrl 两键）；
+ * 若要改优先级，改 src/api.mjs 的 getBaseUrl()，这里只跟随，不要各写一套。
+ */
 function baseUrlInfo() {
   const base = getBaseUrl()
   if (process.env.GRAPE_BASE_URL) return { base, source: '环境变量 GRAPE_BASE_URL' }
@@ -1032,6 +1037,9 @@ if (cmd === 'intro') {
   }
   if (installed) printInstallGuide()
 } else {
-  console.log(`用法: node setup.mjs install|uninstall|doctor|intro [--target ${SUPPORTED_TARGETS.join('|')}] [--probe]`)
+  // intro 不吃 --target（只读本地凭据状态，重看能力地图与宿主无关）：与 install/uninstall/doctor 拆行，
+  // 否则用户会以为 `grape-kit intro --target codearts` 能指定宿主
+  console.log(`用法: node setup.mjs install|uninstall|doctor [--target ${SUPPORTED_TARGETS.join('|')}] [--probe]`)
+  console.log('      node setup.mjs intro                   重看安装后能力地图（与宿主无关，随时可用）')
   for (const [name, host] of Object.entries(HOSTS)) console.log(`  --target ${name.padEnd(10)} ${host.label}`)
 }
