@@ -128,23 +128,12 @@ function dispatchContext(json, nextAgent) {
 }
 
 /**
- * 待派发标记落盘：写一条 task_message（可经 grape_takeover_status / 会话进度复查），
- * 否则标记只活在本次返回值里、会话结束后无从核查（QA 复审 S4）。
- * 写入失败不影响交回结论——降级为「仅返回态」，并在渲染里明示。
+ * 待派发标记的持久化依据：finish 在服务端**同步关会话**（status→finished），
+ * 之后再向该会话写 progress 必被 409 not_active「接管会话已结束」拒绝（平台 mgmt 路由实测）——
+ * task_messages 通道对交回后的标记不可用。标记因此不靠事后写入，而由**会话记录本身**承载：
+ * finished + next_agent 有值 + handoff_seq=0 即「交回已写、派发指针缺失」，
+ * grape_takeover_status 对已结束会话仍可查（GET 无状态门），渲染据此派生目标/原因/补发指引。
  */
-async function recordPendingDispatch(result, sessionId, apiMod) {
-  const pd = result.pending_dispatch || {}
-  const sid = String(sessionId || '').trim()
-  if (!sid) return { ...result, pending_dispatch: { ...pd, recorded: false } }
-  const target = pd.owner && pd.repo ? `${pd.owner}/${pd.repo}#${pd.issue_number}` : '标识不全'
-  const msg = `待派发：下一节点 ${pd.agent || '-'} 未派发（${pd.reason}）；目标 ${target}；确认后可用 grape_trigger_pipeline(agent=${pd.agent || '…'}) 补发`
-  try {
-    await apiMod.takeoverProgress(sid, [msg], `待派发标记：${pd.agent || '-'}`)
-    return { ...result, pending_dispatch: { ...pd, recorded: true } }
-  } catch {
-    return { ...result, pending_dispatch: { ...pd, recorded: false } }
-  }
-}
 
 /**
  * 交回后确保下一节点被派发：平台已派发不重复；平台漏派时客户端兜底补发；
@@ -188,14 +177,14 @@ export async function ensureNextNodeDispatched(json, args = {}, apiMod = api) {
   const unconfirmed = handoffSeq > 0
     ? `handoff_seq=${handoffSeq} 仅为交回事件序号、未见派发指针 next_seq：按「交回已写、派发未证实」兜底补发`
     : ''
-  // 无法派发时一律落到「待派发」：显式告警 + 落盘标记，替代静默 grace
-  const pending = (reason) => recordPendingDispatch({
+  // 无法派发时一律落到「待派发」：显式告警；标记随交回结果返回，事后经会话记录可查（见 pending 注释）
+  const pending = (reason) => ({
     ...base,
     next_agent: nextAgent,
     next_seq: 0,
     pending_dispatch: { agent: nextAgent, ...target, reason },
     dispatch: { status: 'pending', agent: nextAgent, seq: 0, warnings: [reason] },
-  }, sess.id || base.session_id || args.session_id, apiMod)
+  })
   const platformWarnings = [base.warnings, sess.warnings]
     .flatMap((w) => (Array.isArray(w) ? w : (w ? [w] : [])))
   const blockers = platformWarnings.filter((w) => DISPATCH_BLOCKERS.test(String(w)))
@@ -902,7 +891,8 @@ export const TOOLS = [
     name: 'grape_takeover_status',
     description:
       '查看接管会话状态/列表（不改变任何状态）。可查单条（含 renew 续期凭据）或列仓库/issue 的活跃会话。' +
-      '接管中途断连后用本工具找回 session_id 与最新进度。',
+      '接管中途断连后用本工具找回 session_id 与最新进度。已结束会话可查待派发标记：' +
+      'finished + next_agent 有值 + handoff_seq=0 即「交回已写、派发指针缺失」，渲染给出目标/原因/补发指引。',
     schema: {
       type: 'object',
       properties: {
@@ -936,6 +926,23 @@ export const TOOLS = [
       if (sess.token_expires_at) lines.push(`- 凭据到期 epoch: ${sess.token_expires_at}`)
       if (sess.summary) lines.push(`- 摘要: ${String(sess.summary).slice(0, 200)}`)
       if (sess.result_json) lines.push('', '**交回结果**', '', String(sess.result_json).slice(0, 2000))
+      /* 待派发标记从会话记录派生：交回在服务端同步关会话，事后写 progress 必 409 not_active，
+       * 已结束会话的 durable 事实只有会话字段本身——finished + next_agent + handoff_seq=0
+       * 即「交回已写、派发指针缺失」，据此给出可查的目标/原因/补发指引。 */
+      const nextA = String(sess.next_agent ?? '').trim()
+      const handoff = Number(sess.handoff_seq) || 0
+      if (String(sess.status).toLowerCase() === 'finished' && nextA && !handoff) {
+        const repoKey = String(sess.repo_key ?? '').split(':').pop()
+        const warns = Array.isArray(sess.warnings) ? sess.warnings
+          : (() => { try { return JSON.parse(sess.warnings_json || '[]') } catch { return [] } })()
+        const skipped = Number(sess.skipped_dispatches ?? json.skipped_dispatches) || 0
+        lines.push('', '**⚠️ 待派发标记（派发指针缺失）**', '')
+        lines.push(`- 下一节点 ${nextA} 未见平台侧派发指针（handoff_seq=0）：交回已写、派发未证实`)
+        if (repoKey) lines.push(`- 目标仓库: ${repoKey}${sess.issue_id ? ` · issue: ${sess.issue_id}` : ''}`)
+        if (warns.length) lines.push(`- 会话警告: ${warns.join('；')}`)
+        if (skipped > 0) lines.push(`- 平台跳过派发: skipped_dispatches=${skipped}`)
+        lines.push('', `_补发前先 grape_get_issue_events 确认下一节点无事件（客户端兜底补发成功时 handoff_seq 同样为 0），确认后 grape_trigger_pipeline(agent=${nextA}) 补发。_`)
+      }
       return lines.join('\n')
     },
   },
@@ -971,8 +978,9 @@ export const TOOLS = [
       '平台写入 events.structured_output（与 worker 同格式），并按场景链确保下一节点（coding→qa）被派发，链不断：' +
       '**派发指针是 `next_seq`**——`next_seq>0` 即平台已派发，不重复派发；`handoff_seq` 只是平台侧交回事件序号，不据此判已派发。' +
       '平台漏派（`next_seq=0`）时按场景链**兜底补发**（复用 trigger 同源 A2A 通道，兜底范围仅 coding→qa），并回填 `next_seq`；' +
-      '因 remote_may_still_run 等阻塞、缺仓库/issue 标识或补发失败时，返回**显式告警 + 待派发标记（pending_dispatch）**，' +
-      '标记同时经 takeover progress 落一条 task_message（写入失败则明示「仅返回态」），不再静默。' +
+      '因 remote_may_still_run 等警告码阻塞、缺仓库/issue 标识或补发失败时，返回**显式告警 + 待派发标记（pending_dispatch）**，' +
+      '标记随交回结果返回（平台对已结束会话拒绝 progress 写入——409 not_active，不走 task_messages），' +
+      '事后经 `grape_takeover_status` 复查会话记录同样可见派发指针缺失（next_agent + handoff_seq=0）与补发指引，不再静默。' +
       '下一节点推导顺序：平台 next_agent > 结构化 next_step（**整串** agent 名如 `qa`，散文如「qa：请复查 PR #10」不解析）> 场景链 coding→qa。' +
       '⚠️ 用户决策层动作：确认本地成果可交回后再调用。' +
       '两阶段确认流：先 request-finish（仅报告完成，等用户确认），用户确认后再本工具 finish。',
@@ -1040,10 +1048,8 @@ export const TOOLS = [
           lines.push('', '**⚠️ 下一节点未被派发（待派发，pending_dispatch）**', '')
           lines.push(`- 目标节点: ${d.agent || '-'}${pd.owner ? ` · 仓库: ${pd.owner}/${pd.repo}` : ''}${pd.issue_number ? ` · issue: #${pd.issue_number}` : ''}`)
           for (const w of (d.warnings || [])) lines.push(`- ${w}`)
-          lines.push(pd.recorded
-            ? '- 待派发标记已写入接管会话进度（task_messages），可经 `grape_takeover_status` 复查'
-            : '- 待派发标记仅随本次返回（无会话 id 或进度写入失败），请按本条记录人工补发')
-          lines.push('', `_链未自动接续：确认远端/节点状态后调 \`grape_trigger_pipeline(agent=${d.agent})\` 补发，或用 \`grape_takeover_status\` 复查会话。_`)
+          lines.push(`- 标记随本次交回结果返回；事后用 grape_takeover_status 复查会话（finished + next_agent=${d.agent || '-'} + handoff_seq=0 即派发指针缺失）`)
+          lines.push('', `_链未自动接续：先 grape_get_issue_events 确认下一节点无事件，再调 \`grape_trigger_pipeline(agent=${d.agent})\` 补发。_`)
         } else {
           // 无 dispatch 字段：旧平台/CLI 回退通道的响应形状，按平台原样披露
           lines.push('', '_流水线从断点继续，无需 context 口述、无需 trigger 重触发。_')
