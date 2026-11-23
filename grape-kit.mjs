@@ -19,7 +19,7 @@ import { join, dirname, resolve, basename } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
 import { checkUpdateStatus, formatUpdateNotice } from './src/update-check.mjs'
-import { resolveCredentials, getBaseUrl, grapeHome, readAuthChannel } from './src/api.mjs'
+import { resolveCredentials, getBaseUrl, grapeHome, readAuthChannel, npxCacheRoot } from './src/api.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const DEFAULT_SCRIPT = resolve(HERE, 'grape-kit-mcp.mjs')
@@ -67,13 +67,15 @@ const cliCheck = () => {
   // v0.3.0 起原生 HTTP 直连，CLI 仅 401 回退通道——缺失降级为提示而非 FAIL
   return [`grape CLI（${bin}，可选回退通道）`, which.status === 0 ? `ok（${String(which.stdout).trim()}）` : '未安装（可选：pip install git+https://gitcode.com/grape-dev/grape-cli.git）']
 }
-/** 当前生效凭据来源：env > 一次性 env > 文件通道；用户看不到优先级结果，doctor 必须显式给出 */
+/** 当前生效凭据来源：env > 一次性 env > 文件通道；用户看不到优先级结果，doctor 必须显式给出。
+ *  判定用 resolveCredentials 的结构化 sourceKind（runtime/env/file），不做 source 字符串反推
+ *  （QA 判断项：与 priorityChecks 的 sourceKind 并存两套判定属 Primitive Obsession）。 */
 function credentialSourceCheck() {
   const c = resolveCredentials(process.env)
   const label =
-    c.source === 'env:GRAPE_API_TOKEN' ? '环境变量 GRAPE_API_TOKEN'
-      : c.source === 'env:GRAPE_API_TOKEN_ONCE' ? '一次性 env GRAPE_API_TOKEN_ONCE'
-        : String(c.source).startsWith('file:') ? `文件 ${String(c.source).slice('file:'.length)}`
+    c.sourceKind === 'runtime' ? '一次性 env GRAPE_API_TOKEN_ONCE'
+      : c.sourceKind === 'env' ? '环境变量 GRAPE_API_TOKEN'
+        : c.sourceKind === 'file' ? `文件 ${String(c.source).slice('file:'.length)}`
           : ''
   return ['当前生效凭据来源', c.token ? `ok（${label}；base_url=${c.baseUrl}，不回显 token）` : '未配置（FAIL）：看上一行修复动作']
 }
@@ -1144,7 +1146,15 @@ function scanResidues() {
     } catch { shaped = false }
     out.authFileOverride = { path: authOverride, ...(shaped ? {} : { notCredentials: true }) }
   }
-  for (const k of CREDENTIAL_ENV_KEYS) if (process.env[k]) out.envKeys.push(k)
+  for (const k of CREDENTIAL_ENV_KEYS) {
+    if (process.env[k]) { out.envKeys.push(k); continue }
+    // QA 复审 win32 盲区：setx 写入 HKCU\Environment 的用户级变量旧进程不可见（process.env 读不到），
+    // 不查注册表会让默认 uninstall 在 Windows 假零残留。reg query 仅 win32 执行（实机回归覆盖）。
+    if (process.platform === 'win32') {
+      const q = spawnSync('reg', ['query', 'HKCU\\Environment', '/v', k], { encoding: 'utf8' })
+      if (q.status === 0) out.envKeys.push(k)
+    }
+  }
   if (process.platform !== 'win32') {
     for (const name of RC_FILES) {
       const rc = join(homedir(), name)
@@ -1160,13 +1170,15 @@ function scanResidues() {
       }
     }
   }
-  const npxRoot = join(homedir(), '.npm', '_npx')
+  const npxRoot = npxCacheRoot()
   if (existsSync(npxRoot)) {
     try {
       for (const e of readdirSync(npxRoot)) {
         const dir = join(npxRoot, e)
         try { if (!statSync(dir).isDirectory()) continue } catch { continue }
-        if (existsSync(join(dir, 'node_modules', '@grape-dev'))) out.npxHits.push(e)
+        // QA 判断项：「本包」口径收窄到 node_modules/@grape-dev/grape-kit 实体——
+        // 按 @grape-dev scope 判定会把仅含 @grape-dev/grape-card 的条目一并删掉
+        if (existsSync(join(dir, 'node_modules', '@grape-dev', 'grape-kit'))) out.npxHits.push(e)
       }
     } catch { /* 忽略 */ }
   }
@@ -1256,13 +1268,19 @@ async function authInit() {
 }
 
 /** 删除用户级环境变量：POSIX 精确删 rc 中的 export 行，Windows 用 reg delete。
- *  备份只保留非凭据行——含凭据的备份等于换个文件名把 token 留盘（QA 硬违规 2）；
- *  旧版本留下的含凭据 .bak-grapemcp-* 备份一并删除（本工具备份命名空间，可安全清理）。 */
+ *  备份取「原文但凭据行掩码」（QA 判断项：备份=剔除凭据后的全文与清理结果逐字节相同，无回滚价值）：
+ *  非凭据行原样保留可回滚，凭据行以注释掩码标注位置（名称保留、值与等号不出现——
+ *  含凭据的备份等于换个文件名把 token 留盘）；旧版本留下的含凭据 .bak-grapemcp-* 备份一并删除。 */
 function cleanEnvVars() {
   if (process.platform === 'win32') {
+    // QA 判断项：reg delete 非零退出不能一律渲染「未发现（跳过）」——先用 reg query 区分
+    // 「值不存在」与「删除失败」，后者必须可见，吞错会掩盖真实故障。
     for (const name of CREDENTIAL_ENV_KEYS) {
-      const r = spawnSync('reg', ['delete', 'HKCU\\Environment', '/v', name, '/f'], { encoding: 'utf8' })
-      console.log(r.status === 0 ? `  已删除用户环境变量: ${name}` : `  未发现用户环境变量: ${name}（跳过）`)
+      const q = spawnSync('reg', ['query', 'HKCU\\Environment', '/v', name], { encoding: 'utf8' })
+      if (q.status !== 0) { console.log(`  未发现用户环境变量: ${name}（跳过）`); continue }
+      const d = spawnSync('reg', ['delete', 'HKCU\\Environment', '/v', name, '/f'], { encoding: 'utf8' })
+      if (d.status === 0) console.log(`  已删除用户环境变量: ${name}`)
+      else console.warn(`  删除用户环境变量 ${name} 失败（reg exit=${d.status}），请人工处理`)
     }
     console.log('  提示：已运行中的宿主会话读不到删除结果，需重启宿主/终端后生效。')
     return
@@ -1270,11 +1288,12 @@ function cleanEnvVars() {
   const s = scanResidues()
   let changed = false
   for (const hit of s.rcHits) {
-    const kept = readFileSync(hit.path, 'utf8').split('\n').filter((line) => !EXPORT_RE.test(line))
-    // 备份传入「剔除凭据行后的文本」：回滚保护只针对误删的非凭据内容，凭据本身必须归零
-    const backup = backupOf(hit.path, kept.join('\n'))
+    const lines = readFileSync(hit.path, 'utf8').split('\n')
+    const kept = lines.filter((line) => !EXPORT_RE.test(line))
+    const masked = lines.map((line) => (EXPORT_RE.test(line) ? `# [grape-kit --clean-global 已移除凭据行] ${/^export\s+(GRAPE_\w+)/.exec(line)?.[1] || 'GRAPE_*'}` : line))
+    const backup = backupOf(hit.path, masked.join('\n'))
     writeFileSync(hit.path, kept.join('\n'))
-    console.log(`  已从 ${hit.path} 删除 ${hit.hits} 行 GRAPE_* 导出（备份不含凭据行: ${backup}）`)
+    console.log(`  已从 ${hit.path} 删除 ${hit.hits} 行 GRAPE_* 导出（备份保留非凭据原文+凭据行掩码: ${backup}）`)
     changed = true
   }
   for (const b of s.rcCredentialBackups) {
@@ -1285,12 +1304,13 @@ function cleanEnvVars() {
   if (!changed) console.log('  未在 shell 配置文件发现 GRAPE_API_TOKEN/GRAPE_BASE_URL 导出行（跳过）')
 }
 
-/** 清理本包 npx 缓存：仅认 node_modules/@grape-dev 实体（scanResidues 白名单）；失败只告警不中断 */
+/** 清理本包 npx 缓存：仅认 node_modules/@grape-dev/grape-kit 实体（scanResidues 白名单，
+ *  QA 判断项：scope 级匹配会把仅含 @grape-dev 其他包的条目一并误删）；失败只告警不中断 */
 function cleanNpxCache() {
-  const root = join(homedir(), '.npm', '_npx')
+  const root = npxCacheRoot()
   if (!existsSync(root)) { console.log('  未找到 npm _npx 缓存（跳过）'); return }
   const hits = scanResidues().npxHits
-  if (!hits.length) { console.log('  未发现含 node_modules/@grape-dev 的 _npx 缓存（跳过）'); return }
+  if (!hits.length) { console.log('  未发现含 node_modules/@grape-dev/grape-kit 的 _npx 缓存（跳过）'); return }
   for (const e of hits) {
     try {
       rmSync(join(root, e), { recursive: true, force: true })

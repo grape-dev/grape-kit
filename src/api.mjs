@@ -46,6 +46,19 @@ export function grapeHome(env = process.env) {
 }
 
 /**
+ * npm _npx 缓存根目录（按平台分流）：Windows 的 npm 缓存在 %LocalAppData%\npm-cache\_npx
+ * （QA 复审：实现只扫 ~/.npm/_npx 在 Windows 是残留盲区）；POSIX/macOS 保持 ~/.npm/_npx。
+ * 供 grape-kit.mjs 的残留扫描与清理共用（单源，防扫描/清理各写一份后漂移）。
+ */
+export function npxCacheRoot(env = process.env, platform = process.platform) {
+  if (platform === 'win32') {
+    const base = String(env.LOCALAPPDATA || '').trim() || join(homedir(), 'AppData', 'Local')
+    return join(base, 'npm-cache', '_npx')
+  }
+  return join(homedir(), '.npm', '_npx')
+}
+
+/**
  * 文件通道单源解析（QA P2：config.json 解析此前四处各写一份）：
  * 返回 { authFile, exists, parseError, cfg }，doctor 优先级视图与 auth init 共用。
  * 解析失败只置 parseError 标志、不携带 e.message——JSON.parse 的报错消息会带出
