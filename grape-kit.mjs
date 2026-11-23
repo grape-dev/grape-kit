@@ -1119,13 +1119,14 @@ function scanResidues() {
 }
 
 /**
- * `auth init`：凭据唯一写入入口。写文件通道 GRAPE_HOME/config.json（600），
- * 并打印 env 通道设置命令与优先级说明——解析语义复用 src/api.mjs，不另造一套。
+ * `auth init`：凭据唯一写入入口。写入目标与 resolveCredentials 的解析目标严格一致——
+ * `GRAPE_AUTH_FILE` 已设置时写它，否则写 GRAPE_HOME/config.json（QA P1：两处不一致
+ * 会让「写入成功但生效凭据仍是旧值」，单入口形同虚设）。写盘后回读校验（QA P2 建议）。
  */
 async function authInit() {
   const rawToken = arg('token')
   let token = typeof rawToken === 'string' ? rawToken.replace(/^\uFEFF/, '').trim() : ''
-  const rawBase = arg('base-url', arg('baseUrl', arg('base')))
+  const rawBase = arg('base-url')
   let base = typeof rawBase === 'string' ? rawBase.trim() : ''
 
   if (!token && process.stdin.isTTY) {
@@ -1149,8 +1150,10 @@ async function authInit() {
     process.exit(1)
   }
 
-  mkdirSync(grapeHome(), { recursive: true })
-  const cfgPath = configPath()
+  // 写入目标 = 解析目标：readFileConfig 优先 GRAPE_AUTH_FILE，这里必须同序（QA P1）
+  const authFileOverride = String(process.env.GRAPE_AUTH_FILE || '').trim()
+  const cfgPath = authFileOverride || configPath()
+  mkdirSync(dirname(cfgPath), { recursive: true })
   let cfg = {}
   if (existsSync(cfgPath)) {
     try { cfg = JSON.parse(readFileSync(cfgPath, 'utf8').replace(/^\uFEFF/, '')) || {} } catch { cfg = {} }
@@ -1158,10 +1161,22 @@ async function authInit() {
   cfg.token = token
   cfg.base_url = base
   delete cfg.baseUrl
+  // 凭据文件刻意不走 backupOf：备份会含旧 token 明文（QA 硬违规 2 同类问题）；
+  // 写安全改由「写后回读校验」保证（QA P2 建议）。
   writeFileSync(cfgPath, JSON.stringify(cfg, null, 2) + '\n', { mode: 0o600 })
   try { chmodSync(cfgPath, 0o600) } catch { /* Windows 权限位不适用 */ }
+  // 回读校验：半写/损坏盘面下「写成功」必须是验证过的事实，不是 writeFileSync 的返回值
+  let readBack
+  try { readBack = JSON.parse(readFileSync(cfgPath, 'utf8').replace(/^\uFEFF/, '')) } catch {
+    console.error(`写入后回读校验失败（${cfgPath} 不可解析），请检查磁盘与权限后重试`)
+    process.exit(1)
+  }
+  if (readBack.token !== token || String(readBack.base_url || '') !== base) {
+    console.error('写入后回读校验失败：内容与预期不一致，请重试')
+    process.exit(1)
+  }
 
-  console.log(`已写入文件通道: ${cfgPath}（权限 600，已剥 BOM）`)
+  console.log(`已写入文件通道: ${cfgPath}${authFileOverride ? '（GRAPE_AUTH_FILE 指定）' : ''}（权限 600，已剥 BOM）`)
   if (process.platform === 'win32') {
     console.log('环境变量通道（Windows：setx 只对新进程生效，需重启宿主会话）：')
     console.log(`  setx GRAPE_BASE_URL "${base}"`)

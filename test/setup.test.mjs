@@ -280,6 +280,30 @@ test('Issue #20 auth init 拒绝非 grape_ 前缀 token 且不落盘', () => {
   assert.ok(!existsSync(join(grapeHome, 'config.json')), '拒绝时不得写入文件通道')
 })
 
+/* ── QA 复审（PR #11）P1：auth init 写入目标必须与 resolveCredentials 解析目标一致 ── */
+
+test('QA#P1 auth init 尊重 GRAPE_AUTH_FILE：写入目标=解析目标，一次写入后文件通道即生效', () => {
+  const h = home()
+  const grapeHome = join(h, 'grapehome')
+  const authFile = join(h, 'custom-auth.json')
+  // 预置旧凭据：旧实现只写 GRAPE_HOME/config.json，resolveCredentials 读 GRAPE_AUTH_FILE 旧值——单入口不成立
+  writeFileSync(authFile, JSON.stringify({ token: 'grape_old_secret', base_url: 'https://old.example' }))
+  const r = run(['auth', 'init', '--token', 'grape_new_secret', '--base-url', 'https://new.example'], h,
+    { ...cleanCredEnv, GRAPE_HOME: grapeHome, GRAPE_AUTH_FILE: authFile })
+  assert.equal(r.status, 0, r.stderr)
+  const written = JSON.parse(readFileSync(authFile, 'utf8'))
+  assert.equal(written.token, 'grape_new_secret', '应写入 GRAPE_AUTH_FILE 指向的文件')
+  assert.equal(written.base_url, 'https://new.example')
+  assert.ok(!existsSync(join(grapeHome, 'config.json')), 'GRAPE_AUTH_FILE 已设置时不得另写 GRAPE_HOME/config.json')
+  // 写入目标与解析目标一致：doctor 生效来源=文件通道 authFile，base_url 取新值（不回显 token）
+  const d = run(['doctor'], h, {
+    ...cleanCredEnv, GRAPE_HOME: grapeHome, GRAPE_AUTH_FILE: authFile, GRAPE_KIT_SKIP_UPDATE_CHECK: '1',
+  })
+  assert.equal(d.status, 0, d.stderr)
+  assert.match(d.stdout, new RegExp(`当前生效凭据来源[^\\n]*文件 ${authFile}`), '生效凭据来源应命中 GRAPE_AUTH_FILE')
+  assert.match(d.stdout, /https:\/\/new\.example/, '生效 base_url 应为新写入值')
+})
+
 test('Issue #20 doctor 展示 runtime > env > file 完整优先级链且不回显 token', () => {
   const h = home()
   const grapeHome = join(h, 'grapehome')
