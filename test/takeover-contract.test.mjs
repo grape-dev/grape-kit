@@ -303,6 +303,32 @@ test('#19 平台已派发（handoff_seq>0）：不重复派发', async () => {
     assert.match(out, /seq=42/)
   } finally { stub.restore() }
 })
+test('#19 handoff 为对象（平台侧派发失败）：透出 error 原文并给手动补发指引，不渲染 [object Object]', async () => {
+  const t = finishTool()
+  const stub = await stubFinish({
+    finish: {
+      ok: true, changed: true, next_agent: 'qa',
+      handoff: { ok: false, error: 'HTTP 405: Method Not Allowed' },
+      session: sessOf({}),
+    },
+    trigger: new Error('502: upstream unavailable'),
+  })
+  try {
+    const j = await t.native({ session_id: 'tkos_19', summary: '完成' })
+    const out = t.render(j)
+    assert.doesNotMatch(out, /\[object Object\]/, 'handoff 对象不得直接插值')
+    assert.match(out, /HTTP 405: Method Not Allowed/, '平台 handoff 失败原文必须透出')
+    assert.match(out, /handoff=结构化/, '对象按结构化口径渲染，不把对象本身插进模板串')
+    assert.match(out, /grape_trigger_pipeline\(agent=qa\)/, 'handoff 失败时给出手动补发指引')
+  } finally { stub.restore() }
+})
+
+test('#19 handoff 为字符串：原样作为渲染标签', () => {
+  const t = finishTool()
+  const out = t.render({ ok: true, next_agent: 'qa', handoff: 'a2a', dispatch: { status: 'dispatched', agent: 'qa', seq: 71 } })
+  assert.match(out, /handoff=a2a/)
+})
+
 /* ── 待派发标记：判据隔离 / 派发目标 / 兜底范围 / 可查询性 ──
  * 可查询性依据（平台 mgmt 路由源码实测）：POST progress 对已结束会话一律 409 not_active
  * （「接管会话已结束（finished）」），finish 在服务端同步关会话——交回后补写 progress 必然失败。
