@@ -594,3 +594,34 @@ test('Issue #20 _npx 白名单：名字相似但不在 @grape-dev 下的条目�
   assert.equal(r.status, 0, r.stderr)
   assert.ok(existsSync(fake), '非 @grape-dev 实体不得删除')
 })
+
+/* ── QA 复审（PR #11）P1：--clean-global 主路径不得被宿主解析短路 ── */
+
+test('QA#P1 uninstall --clean-global 不带 --target：零宿主痕迹时也照跑全局清理（exit 0）', () => {
+  const h = home()
+  const s = seedResidue(h)
+  // seedResidue 不建任何宿主痕迹：旧实现先走 resolveTargetAuto()，非 TTY 下 exit 1，
+  // cleanGlobal 从未运行（README 与残留提示推荐的主命令不可达）
+  const r = run(['uninstall', '--clean-global'], h)
+  assert.equal(r.status, 0, `应 exit 0，实际:\n${r.stderr}\n${r.stdout}`)
+  assert.ok(!existsSync(s.grapeHome), 'GRAPE_HOME 应被整目录删除')
+  assert.ok(!existsSync(s.own), '含 node_modules/@grape-dev 的 _npx 条目应删除')
+  assert.ok(existsSync(s.other), '其他包缓存必须保留')
+  if (process.platform !== 'win32') {
+    const bashrc = readFileSync(join(h, '.bashrc'), 'utf8')
+    assert.doesNotMatch(bashrc, /GRAPE_API_TOKEN=/, 'rc 中凭据导出行应删除')
+  }
+})
+
+test('QA#P1 uninstall --clean-global 不带 --target：有宿主痕迹时卸载宿主并执行全局清理', () => {
+  const h = home()
+  const s = seedResidue(h)
+  assert.equal(run(['install', '--target', 'opencode'], h).status, 0)
+  const r = run(['uninstall', '--clean-global'], h)
+  assert.equal(r.status, 0, `应 exit 0，实际:\n${r.stderr}\n${r.stdout}`)
+  // 宿主条目与全局痕迹都要清理
+  const cfgPath = join(h, '.config', 'opencode', 'opencode.jsonc')
+  assert.ok(!JSON.parse(readFileSync(cfgPath, 'utf8')).mcp?.grape, '宿主 mcp.grape 条目应被卸载')
+  assert.ok(!existsSync(s.grapeHome), 'GRAPE_HOME 应被整目录删除')
+  assert.ok(!existsSync(s.own), '本包 _npx 缓存应被删除')
+})

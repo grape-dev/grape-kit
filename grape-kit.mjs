@@ -1245,9 +1245,27 @@ if (cmd === 'intro') {
   }
 } else if (cmd === 'install' || cmd === 'uninstall' || cmd === 'doctor') {
   let installed = false
+  const cleanGlobalWanted = cmd === 'uninstall' && process.argv.includes('--clean-global')
   // doctor 未显式指定 --target 时汇总全部宿主；install/uninstall 仍默认 opencode
   if (cmd === 'doctor' && !process.argv.slice(2).some((a) => a === '--target' || a.startsWith('--target='))) {
     doctorAll(!!arg('probe'))
+  } else if (cleanGlobalWanted && !targetExplicit) {
+    // QA 复审 P1（#20）：`uninstall --clean-global` 是 README 与残留提示推荐的主命令，
+    // 全局清理不得被宿主解析短路——无宿主痕迹时 resolveTargetAuto() 会 exit 1，清理从未执行。
+    // 宿主卸载与 resolveTargetAuto 同语义：单痕迹卸该宿主、多痕迹全卸、零痕迹跳过宿主卸载。
+    const found = detectHosts()
+    if (!found.length) {
+      console.log('未检测到宿主 agent 痕迹，跳过宿主卸载，直接执行全局清理')
+    } else {
+      const names = found.length === 1 ? found : SUPPORTED_TARGETS
+      if (names.length > 1) console.log(`检测到多个宿主痕迹，全部卸载: ${names.join(' + ')}`)
+      for (const n of names) {
+        console.log(`
+===== ${n} =====`)
+        HOSTS[n].uninstall()
+      }
+    }
+    cleanGlobal()
   } else {
     if (!targetExplicit && cmd !== 'doctor') target = await resolveTargetAuto()
     const t = resolveTarget()
@@ -1270,10 +1288,11 @@ if (cmd === 'intro') {
     }
   }
   if (installed) printInstallGuide()
-  // uninstall 生命周期收尾：--clean-global 显式触发破坏性清理；否则仅提示残留
+  // uninstall 生命周期收尾：--clean-global 显式触发破坏性清理；否则仅提示残留。
+  // 无 --target 分支已在上面执行过 cleanGlobal，此处只兜显式 --target 的收尾。
   if (cmd === 'uninstall') {
-    if (process.argv.includes('--clean-global')) cleanGlobal()
-    else printResidualHint()
+    if (cleanGlobalWanted && targetExplicit) cleanGlobal()
+    else if (!cleanGlobalWanted) printResidualHint()
   }
 } else {
   // intro 不吃 --target（只读本地凭据状态，重看能力地图与宿主无关）：与 install/uninstall/doctor 拆行，
