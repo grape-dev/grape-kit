@@ -72,7 +72,7 @@ npx -y @grape-dev/grape-kit doctor     # shows the full runtime > env > file cha
 
 A plain `uninstall` removes only the host entry and reports any leftover credentials (even with no host traces it still prints the residue list and the cleanup command). Add `--clean-global` to delete `~/.grape` (file channel + worker artifacts), the credential file pointed to by `GRAPE_AUTH_FILE` (non-credential-shaped targets are never blind-deleted — they are named for manual handling), the user-level `GRAPE_API_TOKEN`/`GRAPE_BASE_URL` (POSIX: the exact `export` lines are removed from rc files and the backup keeps the non-credential lines verbatim with credential lines masked — a backup holding credentials would just be the token under a different name; Windows uses `reg delete`), and only those `_npx` cache entries that contain `node_modules/@grape-dev/grape-kit` (Windows npm cache lives under `%LocalAppData%\npm-cache\_npx`). `--clean-global` works with or without `--target` (with no host traces it still runs the global cleanup).
 
-`--dry-run` is a full preview: host entry removal, skill deletion and backups are listed too — nothing on disk is touched, with or without `--clean-global`. The global-cleanup path is guarded: `GRAPE_HOME` is normalized (`resolve`/realpath) before comparison, so pointing it at `$HOME`, `$HOME/.config`, a `..` traversal, or any ancestor of `$HOME` is refused; custom paths need actual grape artifacts as evidence (a generic `config.json` no longer counts), and the preview runs the same guard as the real run:
+`--dry-run` is a full preview: host entry removal and skill deletion are listed too — nothing on disk is touched, with or without `--clean-global` (configuration backups are created only by the real run). The global-cleanup path is guarded: `GRAPE_HOME` is normalized (`resolve`/realpath) before comparison, so pointing it at `$HOME`, `$HOME/.config`, a `..` traversal, or any ancestor of `$HOME` is refused; custom paths need actual grape artifacts as evidence — a `config.json` must be credential-shaped (a `grape_` token or a known grape base_url, not just any `http(s)` URL), `workers/` alone never qualifies, and every entry in the directory must be a grape artifact. The preview runs the same guard as the real run:
 
 ```bash
 npx -y @grape-dev/grape-kit uninstall --target opencode --dry-run  # preview host uninstall
@@ -195,7 +195,7 @@ Full release notes: [CHANGELOG.md](CHANGELOG.md) — 19 条发布记录（含 0.
 
 ```bash
 npm install
-npm test        # 201 unit tests (fake-grape stand-in, no real server needed)
+npm test        # 206 unit tests (fake-grape stand-in, no real server needed)
 npm run smoke   # real stdio JSON-RPC round-trip: initialize → tools/list → tools/call
 ```
 

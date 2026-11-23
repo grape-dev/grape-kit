@@ -284,35 +284,45 @@ function installWorkbuddy() {
   return true
 }
 
-function uninstallWorkbuddy() {
+/** workbuddy 卸载共享步骤判定（预览 = 真实执行同源）。 */
+function inspectUninstallWorkbuddy() {
   const p = workbuddyPaths()
-  if (existsSync(p.mcpJson)) {
-    const originalText = readFileSync(p.mcpJson, 'utf8')
-    let cfg
-    try { cfg = JSON.parse(originalText) } catch { cfg = null }
-    if (cfg && cfg.mcpServers && cfg.mcpServers['grape-kit']) {
-      delete cfg.mcpServers['grape-kit']
-      const backup = writeValidated(p.mcpJson, JSON.stringify(cfg, null, 2) + String.fromCharCode(10), originalText)
-      console.log(`已移除 mcpServers.grape-kit（备份: ${backup}）`)
-    } else if (cfg) {
-      console.log('未安装条目')
-    }
-  } else {
-    console.log('未找到 ~/.workbuddy/mcp.json，无需卸载')
-  }
-  // skill 清理：删 grape-remote 目录 + receipt（.grape-kit-native.json）；skills 目录空则一并移除
   const skillsRoot = join(dirname(p.mcpJson), 'skills')
-  const skillDir = join(skillsRoot, 'grape-remote')
-  if (existsSync(skillDir)) {
-    rmSync(skillDir, { recursive: true, force: true })
-    console.log(`skill 已删除: ${skillDir}`)
+  const steps = {
+    path: p.mcpJson, exists: existsSync(p.mcpJson), status: 'absent', beforeText: null, nextText: null,
+    skillsRoot, skillDir: join(skillsRoot, 'grape-remote'), receipt: join(skillsRoot, RECEIPT),
   }
-  const receipt = join(skillsRoot, RECEIPT)
-  if (existsSync(receipt)) {
-    rmSync(receipt, { force: true })
-    console.log(`receipt 已删除: ${receipt}`)
+  if (!steps.exists) return steps
+  const text = readFileSync(p.mcpJson, 'utf8')
+  let cfg
+  try { cfg = JSON.parse(text) } catch { steps.status = 'damaged'; return steps }
+  if (cfg && cfg.mcpServers && cfg.mcpServers['grape-kit']) {
+    delete cfg.mcpServers['grape-kit']
+    steps.status = 'remove'
+    steps.beforeText = text
+    steps.nextText = JSON.stringify(cfg, null, 2) + String.fromCharCode(10)
   }
-  try { rmdirSync(skillsRoot); console.log(`空目录已清理: ${skillsRoot}`) } catch { /* skills 目录非空（其他插件）则保留 */ }
+  return steps
+}
+
+function uninstallWorkbuddy() {
+  const steps = inspectUninstallWorkbuddy()
+  if (!steps.exists) console.log('未找到 ~/.workbuddy/mcp.json，无需卸载')
+  else if (steps.status === 'remove') {
+    const backup = writeValidated(steps.path, steps.nextText, steps.beforeText)
+    console.log(`已移除 mcpServers.grape-kit（备份: ${backup}）`)
+  } else if (steps.status === 'damaged') console.log(DAMAGED_LINE(steps.path))
+  else console.log('未安装条目')
+  // skill 清理：删 grape-remote 目录 + receipt（.grape-kit-native.json）；skills 目录空则一并移除
+  if (existsSync(steps.skillDir)) {
+    rmSync(steps.skillDir, { recursive: true, force: true })
+    console.log(`skill 已删除: ${steps.skillDir}`)
+  }
+  if (existsSync(steps.receipt)) {
+    rmSync(steps.receipt, { force: true })
+    console.log(`receipt 已删除: ${steps.receipt}`)
+  }
+  try { rmdirSync(steps.skillsRoot); console.log(`空目录已清理: ${steps.skillsRoot}`) } catch { /* skills 目录非空（其他插件）则保留 */ }
 }
 
 /** 检出 workbuddy 条目（doctor 与汇总自检共用同一判定） */
@@ -322,14 +332,13 @@ function detectWorkbuddy() {
 
 /** workbuddy 卸载预览（--dry-run）：与 uninstallWorkbuddy 同一路径/判定，只列不删 */
 function planUninstallWorkbuddy() {
-  const p = workbuddyPaths()
+  const steps = inspectUninstallWorkbuddy()
   const lines = []
-  const found = detectWorkbuddy()
-  if (found.ok) lines.push(`将移除 mcpServers.grape-kit（${found.path}）`)
-  else if (found.error) lines.push(`配置损坏（${found.path}）：执行卸载会报错，请先修复`)
-  if (existsSync(join(p.skillsDir, 'grape-remote'))) lines.push(`将删除 skill 目录 ${join(p.skillsDir, 'grape-remote')}`)
-  const receipt = join(p.skillsDir, RECEIPT)
-  if (existsSync(receipt)) lines.push(`将删除 receipt ${receipt}`)
+  if (!steps.exists) lines.push('未找到 ~/.workbuddy/mcp.json，无需卸载')
+  else if (steps.status === 'remove') lines.push(`将移除 mcpServers.grape-kit（${steps.path}）`)
+  else if (steps.status === 'damaged') lines.push(DAMAGED_LINE(steps.path))
+  if (existsSync(steps.skillDir)) lines.push(`将删除 skill 目录 ${steps.skillDir}`)
+  if (existsSync(steps.receipt)) lines.push(`将删除 receipt ${steps.receipt}`)
   return lines
 }
 
@@ -406,14 +415,26 @@ function installCodearts() {
   console.log('凭据走环境变量（GRAPE_BASE_URL / GRAPE_API_TOKEN），不要写进宿主配置')
 }
 
-function uninstallCodearts() {
+/** codearts 卸载共享步骤判定（预览 = 真实执行同源）。 */
+function inspectUninstallCodearts() {
   const cfgPath = codeartsConfigPath()
-  if (!existsSync(cfgPath)) { console.log(`未找到码道 MCP 配置 ${cfgPath}，无需卸载`); return }
+  const steps = { path: cfgPath, exists: existsSync(cfgPath), status: 'absent', beforeText: null, nextText: null }
+  if (!steps.exists) return steps
   const text = readFileSync(cfgPath, 'utf8')
+  try { parseLoose(text) } catch { steps.status = 'damaged'; return steps }
   const removed = removeEntry(text, 'grape-kit')
-  if (removed === null) { console.log('未发现 grape-kit 条目，跳过'); return }
-  const backup = writeValidated(cfgPath, removed, text)
-  console.log(`已移除 mcp.grape-kit 条目（备份: ${backup}）`)
+  if (removed !== null) { steps.status = 'remove'; steps.beforeText = text; steps.nextText = removed }
+  return steps
+}
+
+function uninstallCodearts() {
+  const steps = inspectUninstallCodearts()
+  if (!steps.exists) { console.log(`未找到码道 MCP 配置 ${steps.path}，无需卸载`); return }
+  if (steps.status === 'remove') {
+    const backup = writeValidated(steps.path, steps.nextText, steps.beforeText)
+    console.log(`已移除 mcp.grape-kit 条目（备份: ${backup}）`)
+  } else if (steps.status === 'damaged') console.log(DAMAGED_LINE(steps.path))
+  else console.log('未发现 grape-kit 条目，跳过')
 }
 
 /** 检出 codearts 条目（与 install 共用同一路径与成员判定）；结构损坏显式返回 error */
@@ -429,10 +450,11 @@ function detectCodearts() {
 
 /** codearts 卸载预览（--dry-run）：与 uninstallCodearts 同一路径/判定，只列不删 */
 function planUninstallCodearts() {
-  const found = detectCodearts()
+  const steps = inspectUninstallCodearts()
   const lines = []
-  if (found.ok) lines.push(`将移除 mcp.grape-kit 条目（${found.path}）`)
-  else if (found.error) lines.push(`配置损坏（${found.path}）：执行卸载会报错，请先修复`)
+  if (!steps.exists) lines.push(`未找到码道 MCP 配置 ${steps.path}，无需卸载`)
+  else if (steps.status === 'remove') lines.push(`将移除 mcp.grape-kit 条目（${steps.path}）`)
+  else if (steps.status === 'damaged') lines.push(DAMAGED_LINE(steps.path))
   return lines
 }
 
@@ -486,20 +508,32 @@ function installOfficeace() {
   console.log('凭据走环境变量（GRAPE_BASE_URL / GRAPE_API_TOKEN），不要写进连接器配置')
 }
 
-function uninstallOfficeace() {
+/** officeace 卸载共享步骤判定（预览 = 真实执行同源）。 */
+function inspectUninstallOfficeace() {
   const { manifest } = officeacePaths()
-  if (!existsSync(manifest)) { console.log(`未找到 ${manifest}，无需卸载`); return }
+  const steps = { path: manifest, exists: existsSync(manifest), status: 'absent', beforeText: null, nextText: null }
+  if (!steps.exists) return steps
+  const text = readFileSync(manifest, 'utf8')
   let cfg
-  try { cfg = JSON.parse(readFileSync(manifest, 'utf8')) } catch (e) {
-    console.error(`${manifest} 解析失败（${e.message}），跳过`)
-    return
+  try { cfg = JSON.parse(text) } catch { steps.status = 'damaged'; return steps }
+  if (cfg && cfg.mcpServers && cfg.mcpServers['grape-kit']) {
+    delete cfg.mcpServers['grape-kit']
+    steps.status = 'remove'
+    steps.beforeText = text
+    steps.nextText = JSON.stringify(cfg, null, 2) + '\n'
   }
-  if (!cfg.mcpServers || !cfg.mcpServers['grape-kit']) { console.log('未发现 grape-kit 连接器，跳过'); return }
-  const originalText = readFileSync(manifest, 'utf8')
-  delete cfg.mcpServers['grape-kit']
-  const backup = writeValidated(manifest, JSON.stringify(cfg, null, 2) + '\n', originalText)
-  console.log(`已移除 mcpServers.grape-kit（备份: ${backup}）`)
-  console.log('⚠️ 果办OfficeAce 侧还需在「扩展 → 连接器 → 我的连接器」中手动删除该连接器')
+  return steps
+}
+
+function uninstallOfficeace() {
+  const steps = inspectUninstallOfficeace()
+  if (!steps.exists) { console.log(`未找到 ${steps.path}，无需卸载`); return }
+  if (steps.status === 'remove') {
+    const backup = writeValidated(steps.path, steps.nextText, steps.beforeText)
+    console.log(`已移除 mcpServers.grape-kit（备份: ${backup}）`)
+    console.log('⚠️ 果办OfficeAce 侧还需在「扩展 → 连接器 → 我的连接器」中手动删除该连接器')
+  } else if (steps.status === 'damaged') console.log(DAMAGED_LINE(steps.path))
+  else console.log('未发现 grape-kit 连接器，跳过')
 }
 
 /** 检出 officeace 清单条目（与 install 共用同一路径） */
@@ -509,11 +543,13 @@ function detectOfficeace() {
 
 /** officeace 卸载预览（--dry-run）：与 uninstallOfficeace 同一路径/判定，只列不删 */
 function planUninstallOfficeace() {
-  const found = detectOfficeace()
+  const steps = inspectUninstallOfficeace()
   const lines = []
-  if (found.ok) lines.push(`将移除 mcpServers.grape-kit（${found.path}）`)
-  else if (found.error) lines.push(`清单损坏（${found.path}）：执行卸载会报错，请先修复`)
-  lines.push('果办OfficeAce 侧的连接器仍需在客户端「扩展 → 连接器」中手动删除')
+  if (!steps.exists) lines.push(`未找到 ${steps.path}，无需卸载`)
+  else if (steps.status === 'remove') {
+    lines.push(`将移除 mcpServers.grape-kit（${steps.path}）`)
+    lines.push('果办OfficeAce 侧的连接器仍需在客户端「扩展 → 连接器」中手动删除')
+  } else if (steps.status === 'damaged') lines.push(DAMAGED_LINE(steps.path))
   return lines
 }
 
@@ -881,16 +917,20 @@ function copySkillWorkbuddy() {
   console.log(`skill 已安装: ${dst}`)
 }
 
-function uninstallSkill() {
-  const p = opencodePaths()
-  const receiptPath = join(p.skillsDir, RECEIPT)
+/** 宿主 skill 卸载的共享步骤判定：dry-run 预览与真实执行同源，防预览/执行漂移。
+ *  无 receipt 时沿用历史默认 `grape-remote`（无文件删除为 no-op）。 */
+function skillUninstallSteps(skillsDir) {
+  const receiptPath = join(skillsDir, RECEIPT)
   let skills = ['grape-remote']
   if (existsSync(receiptPath)) {
     try { skills = JSON.parse(readFileSync(receiptPath, 'utf8')).skills || skills } catch { /* 用默认 */ }
   }
-  for (const s of skills) rmSync(join(p.skillsDir, s), { recursive: true, force: true })
-  rmSync(receiptPath, { force: true })
-  console.log(`skill 已卸载: ${skills.join(', ')}`)
+  return { skillsDir, skills, receipt: existsSync(receiptPath) ? receiptPath : null }
+}
+function applySkillUninstall(steps) {
+  for (const s of steps.skills) rmSync(join(steps.skillsDir, s), { recursive: true, force: true })
+  if (steps.receipt) rmSync(steps.receipt, { force: true })
+  console.log(`skill 已卸载: ${steps.skills.join(', ')}`)
 }
 
 /** doctor「版本更新」行：拆开有新版本/已提示过/已最新/检测不可用/已关闭，避免误报「已是最新」 */
@@ -954,36 +994,42 @@ Promise.all([
 
 /* ---------- 宿主注册表（install / uninstall / doctor 共用同一份路径定义，防「装了检不出」） ---------- */
 
-function uninstallOpencode() {
+/** opencode 卸载共享步骤判定（预览 = 真实执行同源）：status =
+ *  remove（有条目，附 before/nextText）/ absent（无条目）/ damaged（配置损坏，跳过条目移除）。 */
+function inspectUninstallOpencode() {
   const p = opencodePaths()
   const cfgPath = existsSync(p.config) ? p.config : p.configAlt
-  if (existsSync(cfgPath)) {
-    const text = readFileSync(cfgPath, 'utf8')
-    const removed = removeEntry(text, 'grape')
-    if (removed !== null) {
-      const backup = writeValidated(cfgPath, removed, text)
-      console.log(`已移除 mcp.grape 条目（备份: ${backup}）`)
-    } else {
-      console.log('未发现 grape 条目，跳过')
-    }
+  const steps = { path: cfgPath, status: 'absent', beforeText: null, nextText: null, ...skillUninstallSteps(p.skillsDir) }
+  if (!existsSync(cfgPath)) return steps
+  const text = readFileSync(cfgPath, 'utf8')
+  try { parseLoose(text) } catch { steps.status = 'damaged'; return steps }
+  const removed = removeEntry(text, 'grape')
+  if (removed !== null) { steps.status = 'remove'; steps.beforeText = text; steps.nextText = removed }
+  return steps
+}
+const DAMAGED_LINE = (path) => `配置损坏（${path}）：跳过条目移除，请先修复（grape 自有 skill 仍会清理）`
+
+function uninstallOpencode() {
+  const steps = inspectUninstallOpencode()
+  if (steps.status === 'remove') {
+    const backup = writeValidated(steps.path, steps.nextText, steps.beforeText)
+    console.log(`已移除 mcp.grape 条目（备份: ${backup}）`)
+  } else if (steps.status === 'damaged') {
+    console.log(DAMAGED_LINE(steps.path))
+  } else {
+    console.log('未发现 grape 条目，跳过')
   }
-  uninstallSkill()
+  applySkillUninstall(steps)
 }
 
-/** opencode 卸载预览（--dry-run）：与 uninstallOpencode 同一路径/判定，只列不删 */
+/** opencode 卸载预览（--dry-run）：与 uninstallOpencode 共用 inspectUninstallOpencode，只列不删 */
 function planUninstallOpencode() {
-  const p = opencodePaths()
-  const found = detectOpencode()
+  const steps = inspectUninstallOpencode()
   const lines = []
-  if (found.ok) lines.push(`将移除 mcp.grape 条目（${found.path}）`)
-  else if (found.error) lines.push(`配置损坏（${found.path}）：执行卸载会报错，请先修复`)
-  const receiptPath = join(p.skillsDir, RECEIPT)
-  let skills = ['grape-remote']
-  if (existsSync(receiptPath)) {
-    try { skills = JSON.parse(readFileSync(receiptPath, 'utf8')).skills || skills } catch { /* 与 uninstallSkill 同默认 */ }
-  }
-  for (const s of skills) if (existsSync(join(p.skillsDir, s))) lines.push(`将删除 skill 目录 ${join(p.skillsDir, s)}`)
-  if (existsSync(receiptPath)) lines.push(`将删除 receipt ${receiptPath}`)
+  if (steps.status === 'remove') lines.push(`将移除 mcp.grape 条目（${steps.path}）`)
+  else if (steps.status === 'damaged') lines.push(DAMAGED_LINE(steps.path))
+  for (const s of steps.skills) if (existsSync(join(steps.skillsDir, s))) lines.push(`将删除 skill 目录 ${join(steps.skillsDir, s)}`)
+  if (steps.receipt) lines.push(`将删除 receipt ${steps.receipt}`)
   return lines
 }
 
@@ -1273,14 +1319,14 @@ async function authInit() {
  *  含凭据的备份等于换个文件名把 token 留盘）；旧版本留下的含凭据 .bak-grapemcp-* 备份一并删除。 */
 function cleanEnvVars() {
   if (process.platform === 'win32') {
-    // QA 判断项：reg delete 非零退出不能一律渲染「未发现（跳过）」——先用 reg query 区分
-    // 「值不存在」与「删除失败」，后者必须可见，吞错会掩盖真实故障。
+    // QA 判断项：win32 不得自行 reg query，必须读 scanResidues() 单一扫描结果（与残留提示同源）。
+    // 扫描已包含「process.env 命中」与「HKCU\Environment 注册表命中」；删除失败必须可见，不吞错。
+    const s = scanResidues()
     for (const name of CREDENTIAL_ENV_KEYS) {
-      const q = spawnSync('reg', ['query', 'HKCU\\Environment', '/v', name], { encoding: 'utf8' })
-      if (q.status !== 0) { console.log(`  未发现用户环境变量: ${name}（跳过）`); continue }
+      if (!s.envKeys.includes(name)) { console.log(`  未发现用户环境变量: ${name}（跳过）`); continue }
       const d = spawnSync('reg', ['delete', 'HKCU\\Environment', '/v', name, '/f'], { encoding: 'utf8' })
       if (d.status === 0) console.log(`  已删除用户环境变量: ${name}`)
-      else console.warn(`  删除用户环境变量 ${name} 失败（reg exit=${d.status}），请人工处理`)
+      else console.warn(`  删除用户环境变量 ${name} 失败（reg exit=${d.status}，可能仅存在于当前会话环境），请人工处理`)
     }
     console.log('  提示：已运行中的宿主会话读不到删除结果，需重启宿主/终端后生效。')
     return
@@ -1326,22 +1372,39 @@ function cleanNpxCache() {
  *  1. 路径先 resolve（处理 .. 穿越与相对形态）再 realpath（处理符号链接），与 HOME/根/祖先比较——
  *     `GRAPE_HOME=$HOME`、`$HOME/.grape/..`、HOME 父目录、根一律拒绝；
  *  2. 基名 .grape → 正常删（默认/惯用形态）；
- *  3. 自定义路径必须有 grape 产物证据才继续：已知产物文件名（收窄，通用名不再单独构成特征），
- *     或内容为 grape 凭据形态（token grape_ 前缀 / 合法 base_url）的 config.json；
- *     HOME 直接子目录额外要求全部条目都是 grape 产物（防 $HOME/.config 整删）；空目录无证据同样拒绝。 */
-const GRAPE_ARTIFACT_NAMES = new Set(['grape-kit-update-check.json', '.grape-takeover-token', 'workers'])
-const isGrapeArtifactName = (x) => GRAPE_ARTIFACT_NAMES.has(x) || /^worker-/.test(x)
+ *  3. 自定义路径必须有 grape 产物证据才继续：grape 专属文件名，或内容为 grape 凭据形态
+ *     （token grape_ 前缀 / base_url 命中已知 grape 域）的 config.json——任意 http(s) base_url
+ *     的普通 config.json 不再构成证据（QA#PR13 硬违规 1：会把 $HOME/tool 整删）；
+ *     `workers`/`worker-*` 名字过于通用，只能作为伴随条目，不能单独当证据；
+ *     自定义路径一律要求**全部条目**都是 grape 产物（不再只限 HOME 直接子目录），空目录同样拒绝。 */
+const GRAPE_ARTIFACT_NAMES = new Set(['grape-kit-update-check.json', '.grape-takeover-token'])
+const KNOWN_GRAPE_HOSTS = ['grapedev.cn']
+/** base_url 是否命中已知 grape 域（自部署实例由 grape_ token 识别，不靠域名放宽） */
+function isKnownGrapeBaseUrl(b) {
+  if (typeof b !== 'string') return false
+  try {
+    const u = new URL(b)
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return false
+    const host = u.hostname.toLowerCase()
+    return KNOWN_GRAPE_HOSTS.some((h) => host === h || host.endsWith('.' + h))
+  } catch { return false }
+}
 function grapeShapedConfig(dir) {
   try {
     const cfg = JSON.parse(readFileSync(join(dir, 'config.json'), 'utf8').replace(/^\uFEFF/, ''))
     if (cfg && typeof cfg === 'object') {
       if (typeof cfg.token === 'string' && cfg.token.startsWith('grape_')) return true
-      const b = cfg.base_url || cfg.baseUrl
-      if (typeof b === 'string' && /^https?:\/\//.test(b)) return true
+      return isKnownGrapeBaseUrl(cfg.base_url || cfg.baseUrl)
     }
   } catch { /* 非凭据形态：不构成证据 */ }
   return false
 }
+/** 自定义目录条目的「仅伴随」产物名：workers/worker-* 是 worker 注册产物目录，但名字通用，
+ *  只能在与强证据（凭据形态 config.json / grape 专属文件）同时出现时放行，不能单独构成证据。 */
+const isCompanionArtifactName = (x) => x === 'workers' || /^worker-/.test(x)
+const isGrapeArtifactEntry = (dir, x) => GRAPE_ARTIFACT_NAMES.has(x)
+  || (x === 'config.json' && grapeShapedConfig(dir))
+  || isCompanionArtifactName(x)
 function normalizeForGuard(p) {
   let r = resolve(String(p))
   try { r = realpathSync(r) } catch { /* 目标不存在/不可达：保留 resolve 结果参与比较 */ }
@@ -1361,11 +1424,12 @@ function assertSafeGrapeHome(home) {
   if (base !== '.grape') {
     let items = []
     try { items = readdirSync(resolved) } catch { /* 读不了按空处理 */ }
-    const evidence = items.some(isGrapeArtifactName) || grapeShapedConfig(resolved)
-    const allGrape = items.length > 0 && items.every((x) => isGrapeArtifactName(x) || (x === 'config.json' && grapeShapedConfig(resolved)))
-    const directChildOfHome = dirname(resolved) === userHome
-    if (!items.length || !evidence || (directChildOfHome && !allGrape)) {
-      console.error(`  [拒绝] GRAPE_HOME=${home}（解析为 ${resolved}）非 .grape 且无 grape 产物证据${items.length ? `（内容: ${items.slice(0, 5).join(', ')}…）` : '（空目录）'}——疑似误指真实目录，已拒绝删除。`)
+    // 强证据：凭据形态 config.json 或 grape 专属文件；workers/worker-* 只是伴随条目
+    const evidence = grapeShapedConfig(resolved) || items.some((x) => GRAPE_ARTIFACT_NAMES.has(x))
+    // 自定义路径一律要求全部条目均为 grape 产物（防把含用户文件的目录整删）
+    const allGrape = items.length > 0 && items.every((x) => isGrapeArtifactEntry(resolved, x))
+    if (!items.length || !evidence || !allGrape) {
+      console.error(`  [拒绝] GRAPE_HOME=${home}（解析为 ${resolved}）非 .grape 且内容未全部呈现 grape 产物证据${items.length ? `（内容: ${items.slice(0, 5).join(', ')}…）` : '（空目录）'}——疑似误指真实目录，已拒绝删除。`)
       console.error(`  确认要删请先核对目录内容，或把 GRAPE_HOME 改回默认 ${join(userHome, '.grape')}。`)
       process.exit(1)
     }
@@ -1427,7 +1491,7 @@ function cleanGlobalPlan() {
     any = true
   }
   for (const hit of s.rcHits) {
-    console.log(`  将从 ${hit.path} 删除 ${hit.hits} 行 GRAPE_* 导出（备份只留非凭据行）`)
+    console.log(`  将从 ${hit.path} 删除 ${hit.hits} 行 GRAPE_* 导出（备份保留非凭据原文、凭据行掩码）`)
     any = true
   }
   for (const b of s.rcCredentialBackups) {
@@ -1455,7 +1519,7 @@ function detectResiduals() {
   for (const k of s.envKeys) found.push(`环境变量 ${k}`)
   for (const hit of s.rcHits) found.push(`shell 配置 ${hit.path} 中 ${hit.hits} 行 GRAPE_* 导出`)
   for (const b of s.rcCredentialBackups) found.push(`含明文凭据的备份文件 ${b}（旧版清理所留，需删除）`)
-  if (s.npxHits.length) found.push(`npm _npx 缓存中 ${s.npxHits.length} 个含 @grape-dev 的条目`)
+  if (s.npxHits.length) found.push(`npm _npx 缓存中 ${s.npxHits.length} 个含 node_modules/@grape-dev/grape-kit 的条目`)
   return found
 }
 
