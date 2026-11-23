@@ -625,3 +625,36 @@ test('QA#P1 uninstall --clean-global 不带 --target：有宿主痕迹时卸载�
   assert.ok(!existsSync(s.grapeHome), 'GRAPE_HOME 应被整目录删除')
   assert.ok(!existsSync(s.own), '本包 _npx 缓存应被删除')
 })
+
+/* ── QA 复审（PR #11）硬违规 2：rc 备份不得含明文凭据，残留检测必须覆盖备份 ── */
+
+const isWin = process.platform === 'win32'
+
+test('QA#硬违规2 --clean-global 的 rc 备份不得含明文凭据行（凭据归零不得换文件名留盘）', { skip: isWin }, () => {
+  const h = home()
+  seedResidue(h)
+  const r = run(['uninstall', '--target', 'opencode', '--clean-global'], h)
+  assert.equal(r.status, 0, r.stderr)
+  // rc 改动允许留备份，但任何 .bak-grapemcp-* 里不得再出现凭据导出行
+  for (const text of backupContents(h)) {
+    assert.doesNotMatch(text, /GRAPE_API_TOKEN\s*=|GRAPE_BASE_URL\s*=/, `备份不得含凭据导出行，实际:\n${text}`)
+  }
+  assert.ok(backupsIn(h).some((f) => f.startsWith('.bashrc.bak-grapemcp-')), 'rc 改动前应留备份（不含凭据行）')
+})
+
+test('QA#硬违规2 含凭据的旧 .bak-grapemcp-* 备份：残留提示点名，--clean-global 清零后不谎报', { skip: isWin }, () => {
+  const h = home()
+  seedResidue(h)
+  // 模拟旧版 --clean-global 留下的含凭据备份（修复前 detectResiduals 不扫它 → 「未检测到残留」谎报）
+  writeFileSync(join(h, '.bashrc.bak-grapemcp-20200101000000'), 'export GRAPE_API_TOKEN=grape_stale_backup\n')
+  const hint = run(['uninstall', '--target', 'opencode'], h, { GRAPE_API_TOKEN: '', GRAPE_BASE_URL: '' })
+  assert.equal(hint.status, 0, hint.stderr)
+  assert.match(hint.stdout, /\.bak-grapemcp-20200101000000/, '残留提示必须点名含凭据备份文件')
+  const r = run(['uninstall', '--target', 'opencode', '--clean-global'], h)
+  assert.equal(r.status, 0, r.stderr)
+  assert.ok(!existsSync(join(h, '.bashrc.bak-grapemcp-20200101000000')), '含凭据备份应被 --clean-global 删除')
+  // 清零后再次默认 uninstall：必须报告真零残留（不得因检测盲区谎报）
+  const after = run(['uninstall', '--target', 'opencode'], h, { GRAPE_API_TOKEN: '', GRAPE_BASE_URL: '' })
+  assert.equal(after.status, 0, after.stderr)
+  assert.match(after.stdout, /未检测到[^\n]*残留/, `清理后应真零残留，实际:\n${after.stdout}`)
+})

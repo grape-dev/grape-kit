@@ -15,7 +15,7 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync, readdirSync, statSync, rmdirSync, chmodSync } from 'node:fs'
 import { createInterface } from 'node:readline'
 import { homedir, tmpdir } from 'node:os'
-import { join, dirname, resolve } from 'node:path'
+import { join, dirname, resolve, basename } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
 import { checkUpdateStatus, formatUpdateNotice } from './src/update-check.mjs'
@@ -1066,8 +1066,57 @@ async function resolveTargetAuto() {
 /* ---------- 凭据写入单入口 / 全局清理（Issue #20） ---------- */
 
 const CREDENTIAL_ENV_KEYS = ['GRAPE_API_TOKEN', 'GRAPE_BASE_URL']
-const RC_FILES = ['.zshrc', '.bashrc', '.bash_profile', '.profile']
+const RC_FILES = ['.zshrc', '.bashrc', '.profile']
 const EXPORT_RE = /^\s*export\s+(GRAPE_API_TOKEN|GRAPE_BASE_URL)\s*=/
+
+/** rc 文件的 .bak-grapemcp-* 备份清单（本工具备份命名空间，与 rc 同目录同名前缀） */
+function rcBackupPathsOf(rcPath) {
+  const dir = dirname(rcPath)
+  const prefix = `${basename(rcPath)}.bak-grapemcp-`
+  try { return readdirSync(dir).filter((f) => f.startsWith(prefix)).map((f) => join(dir, f)) } catch { return [] }
+}
+
+/**
+ * 残留扫描单一 collector：默认 uninstall 的残留提示与 --clean-global 的三路清理
+ * 共用同一扫描结果，杜绝「清理了却检测不到」的漂移（QA 硬违规 2 的根因：
+ * cleanEnvVars 写 .bak 备份、detectResiduals 不扫备份 → 谎报零残留）。
+ */
+function scanResidues() {
+  const out = { grapeHome: null, envKeys: [], rcHits: [], rcCredentialBackups: [], npxHits: [] }
+  const home = grapeHome()
+  if (existsSync(home)) {
+    let items = []
+    try { items = readdirSync(home) } catch { /* 读不了也按存在处理 */ }
+    out.grapeHome = { path: home, items }
+  }
+  for (const k of CREDENTIAL_ENV_KEYS) if (process.env[k]) out.envKeys.push(k)
+  if (process.platform !== 'win32') {
+    for (const name of RC_FILES) {
+      const rc = join(homedir(), name)
+      if (!existsSync(rc)) continue
+      let lines
+      try { lines = readFileSync(rc, 'utf8').split('\n') } catch { continue }
+      const hits = lines.filter((line) => EXPORT_RE.test(line)).length
+      if (hits) out.rcHits.push({ path: rc, hits })
+      for (const b of rcBackupPathsOf(rc)) {
+        try {
+          if (readFileSync(b, 'utf8').split('\n').some((line) => EXPORT_RE.test(line))) out.rcCredentialBackups.push(b)
+        } catch { /* 忽略 */ }
+      }
+    }
+  }
+  const npxRoot = join(homedir(), '.npm', '_npx')
+  if (existsSync(npxRoot)) {
+    try {
+      for (const e of readdirSync(npxRoot)) {
+        const dir = join(npxRoot, e)
+        try { if (!statSync(dir).isDirectory()) continue } catch { continue }
+        if (existsSync(join(dir, 'node_modules', '@grape-dev'))) out.npxHits.push(e)
+      }
+    } catch { /* 忽略 */ }
+  }
+  return out
+}
 
 /**
  * `auth init`：凭据唯一写入入口。写文件通道 GRAPE_HOME/config.json（600），
@@ -1125,7 +1174,9 @@ async function authInit() {
   console.log('优先级：GRAPE_API_TOKEN_ONCE（runtime）> GRAPE_API_TOKEN（env）> GRAPE_AUTH_FILE / GRAPE_HOME/config.json（file）')
 }
 
-/** 删除用户级环境变量：POSIX 精确删 rc 中的 export 行（改前备份），Windows 用 reg delete */
+/** 删除用户级环境变量：POSIX 精确删 rc 中的 export 行，Windows 用 reg delete。
+ *  备份只保留非凭据行——含凭据的备份等于换个文件名把 token 留盘（QA 硬违规 2）；
+ *  旧版本留下的含凭据 .bak-grapemcp-* 备份一并删除（本工具备份命名空间，可安全清理）。 */
 function cleanEnvVars() {
   if (process.platform === 'win32') {
     for (const name of CREDENTIAL_ENV_KEYS) {
@@ -1135,40 +1186,38 @@ function cleanEnvVars() {
     console.log('  提示：已运行中的宿主会话读不到删除结果，需重启宿主/终端后生效。')
     return
   }
+  const s = scanResidues()
   let changed = false
-  for (const f of RC_FILES.map((name) => join(homedir(), name))) {
-    if (!existsSync(f)) continue
-    let text
-    try { text = readFileSync(f, 'utf8') } catch { continue }
-    const lines = text.split('\n')
-    const kept = lines.filter((line) => !EXPORT_RE.test(line))
-    if (kept.length === lines.length) continue
-    const backup = backupOf(f)
-    writeFileSync(f, kept.join('\n'))
-    console.log(`  已从 ${f} 删除 GRAPE_API_TOKEN/GRAPE_BASE_URL 导出行（备份: ${backup}）`)
+  for (const hit of s.rcHits) {
+    const kept = readFileSync(hit.path, 'utf8').split('\n').filter((line) => !EXPORT_RE.test(line))
+    // 备份传入「剔除凭据行后的文本」：回滚保护只针对误删的非凭据内容，凭据本身必须归零
+    const backup = backupOf(hit.path, kept.join('\n'))
+    writeFileSync(hit.path, kept.join('\n'))
+    console.log(`  已从 ${hit.path} 删除 ${hit.hits} 行 GRAPE_* 导出（备份不含凭据行: ${backup}）`)
+    changed = true
+  }
+  for (const b of s.rcCredentialBackups) {
+    rmSync(b, { force: true })
+    console.log(`  已删除含凭据的旧备份: ${b}`)
     changed = true
   }
   if (!changed) console.log('  未在 shell 配置文件发现 GRAPE_API_TOKEN/GRAPE_BASE_URL 导出行（跳过）')
 }
 
-/** 清理本包 npx 缓存：仅认 node_modules/@grape-dev 实体；非命中一律跳过，失败只告警不中断 */
+/** 清理本包 npx 缓存：仅认 node_modules/@grape-dev 实体（scanResidues 白名单）；失败只告警不中断 */
 function cleanNpxCache() {
   const root = join(homedir(), '.npm', '_npx')
   if (!existsSync(root)) { console.log('  未找到 npm _npx 缓存（跳过）'); return }
-  let removed = 0
-  for (const entry of readdirSync(root)) {
-    const dir = join(root, entry)
-    try { if (!statSync(dir).isDirectory()) continue } catch { continue }
-    if (!existsSync(join(dir, 'node_modules', '@grape-dev'))) continue
+  const hits = scanResidues().npxHits
+  if (!hits.length) { console.log('  未发现含 node_modules/@grape-dev 的 _npx 缓存（跳过）'); return }
+  for (const e of hits) {
     try {
-      rmSync(dir, { recursive: true, force: true })
-      removed += 1
-      console.log(`  已清理本包 _npx 缓存: ${entry}`)
-    } catch (e) {
-      console.warn(`  清理 _npx 条目 ${entry} 失败（跳过）: ${e.message}`)
+      rmSync(join(root, e), { recursive: true, force: true })
+      console.log(`  已清理本包 _npx 缓存: ${e}`)
+    } catch (err) {
+      console.warn(`  清理 _npx 条目 ${e} 失败（跳过）: ${err.message}`)
     }
   }
-  if (!removed) console.log('  未发现含 node_modules/@grape-dev 的 _npx 缓存（跳过）')
 }
 
 /** --clean-global：整删 GRAPE_HOME（文件通道 + worker 注册产物）+ 用户级 env + 本包 npx 缓存 */
@@ -1188,34 +1237,15 @@ function cleanGlobal() {
   cleanNpxCache()
 }
 
-/** 残留检测：默认 uninstall 只提示，不静默执行破坏性清理 */
+/** 残留检测：默认 uninstall 只提示，不静默执行破坏性清理。扫描与清理同源（scanResidues） */
 function detectResiduals() {
+  const s = scanResidues()
   const found = []
-  const home = grapeHome()
-  if (existsSync(home)) {
-    let items = []
-    try { items = readdirSync(home) } catch { /* 忽略 */ }
-    found.push(`目录 ${home}${items.length ? `（${items.join(', ')}）` : ''}`)
-  }
-  for (const k of CREDENTIAL_ENV_KEYS) if (process.env[k]) found.push(`环境变量 ${k}`)
-  if (process.platform !== 'win32') {
-    for (const f of RC_FILES.map((name) => join(homedir(), name))) {
-      if (!existsSync(f)) continue
-      try {
-        if (readFileSync(f, 'utf8').split('\n').some((line) => EXPORT_RE.test(line))) {
-          found.push(`shell 配置 ${f} 中的 GRAPE_* 导出行`)
-        }
-      } catch { /* 忽略 */ }
-    }
-  }
-  const npxRoot = join(homedir(), '.npm', '_npx')
-  if (existsSync(npxRoot)) {
-    let hits = 0
-    try {
-      for (const e of readdirSync(npxRoot)) if (existsSync(join(npxRoot, e, 'node_modules', '@grape-dev'))) hits += 1
-    } catch { /* 忽略 */ }
-    if (hits) found.push(`npm _npx 缓存中 ${hits} 个含 @grape-dev 的条目`)
-  }
+  if (s.grapeHome) found.push(`目录 ${s.grapeHome.path}${s.grapeHome.items.length ? `（${s.grapeHome.items.join(', ')}）` : ''}`)
+  for (const k of s.envKeys) found.push(`环境变量 ${k}`)
+  for (const hit of s.rcHits) found.push(`shell 配置 ${hit.path} 中 ${hit.hits} 行 GRAPE_* 导出`)
+  for (const b of s.rcCredentialBackups) found.push(`含明文凭据的备份文件 ${b}（旧版清理所留，需删除）`)
+  if (s.npxHits.length) found.push(`npm _npx 缓存中 ${s.npxHits.length} 个含 @grape-dev 的条目`)
   return found
 }
 
