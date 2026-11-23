@@ -1118,14 +1118,27 @@ function rcBackupPathsOf(rcPath) {
  * 残留扫描单一 collector：默认 uninstall 的残留提示与 --clean-global 的三路清理
  * 共用同一扫描结果，杜绝「清理了却检测不到」的漂移（QA 硬违规 2 的根因：
  * cleanEnvVars 写 .bak 备份、detectResiduals 不扫备份 → 谎报零残留）。
+ * QA 复审（合入后基线）硬违规 1：GRAPE_AUTH_FILE 指向的凭据文件必须纳入同一扫描——
+ * auth init 的写入目标若是它，清理不删它、检测不扫它 = 凭据留盘 + 「零残留」谎报。
  */
 function scanResidues() {
-  const out = { grapeHome: null, envKeys: [], rcHits: [], rcCredentialBackups: [], npxHits: [] }
+  const out = { grapeHome: null, authFileOverride: null, envKeys: [], rcHits: [], rcCredentialBackups: [], npxHits: [] }
   const home = grapeHome()
   if (existsSync(home)) {
     let items = []
     try { items = readdirSync(home) } catch { /* 读不了也按存在处理 */ }
     out.grapeHome = { path: home, items }
+  }
+  const authOverride = String(process.env.GRAPE_AUTH_FILE || '').trim()
+  if (authOverride && resolve(authOverride) !== resolve(join(home, 'config.json')) && existsSync(authOverride)) {
+    // 只把「凭据形态」（可解析且含 token/base_url 字段）的文件当凭据残留：
+    // GRAPE_AUTH_FILE 可被指向任意路径，检测/删除都必须先证明它是凭据文件，否则要求人工处理
+    let shaped = false
+    try {
+      const cfg = JSON.parse(readFileSync(authOverride, 'utf8').replace(/^\uFEFF/, ''))
+      shaped = !!(cfg && typeof cfg === 'object' && (typeof cfg.token === 'string' || typeof (cfg.base_url || cfg.baseUrl) === 'string'))
+    } catch { shaped = false }
+    out.authFileOverride = { path: authOverride, ...(shaped ? {} : { notCredentials: true }) }
   }
   for (const k of CREDENTIAL_ENV_KEYS) if (process.env[k]) out.envKeys.push(k)
   if (process.platform !== 'win32') {
@@ -1323,7 +1336,9 @@ function assertSafeGrapeHome(home) {
   }
 }
 
-/** --clean-global：整删 GRAPE_HOME（文件通道 + worker 注册产物）+ 用户级 env + 本包 npx 缓存 */
+/** --clean-global：整删 GRAPE_HOME（文件通道 + worker 注册产物）+ GRAPE_AUTH_FILE 凭据文件 + 用户级 env + 本包 npx 缓存。
+ *  GRAPE_AUTH_FILE 指向的凭据文件一并删除（QA 硬违规 1：它是 auth init 的写入目标之一，
+ *  不删它 = 凭据换个文件名留盘）；非凭据形态（不可解析/无凭据字段）不盲删，点名要求人工处理。 */
 function cleanGlobal() {
   console.log('\n[clean-global] 清理全局凭据与使用痕迹')
   const home = grapeHome()
@@ -1336,6 +1351,15 @@ function cleanGlobal() {
     console.log(`  已删除: ${home}`)
   } else {
     console.log(`  目录不存在（跳过）: ${home}`)
+  }
+  const s = scanResidues()
+  if (s.authFileOverride) {
+    if (s.authFileOverride.notCredentials) {
+      console.log(`  [提示] GRAPE_AUTH_FILE=${s.authFileOverride.path} 不是凭据形态（不可解析/无 token、base_url 字段），不盲删——请人工确认后处理`)
+    } else {
+      rmSync(s.authFileOverride.path, { force: true })
+      console.log(`  已删除 GRAPE_AUTH_FILE 凭据文件: ${s.authFileOverride.path}`)
+    }
   }
   cleanEnvVars()
   cleanNpxCache()
@@ -1351,6 +1375,14 @@ function cleanGlobalPlan() {
   if (s.grapeHome) {
     assertSafeGrapeHome(s.grapeHome.path)
     console.log(`  将删除目录: ${s.grapeHome.path}${s.grapeHome.items.length ? `（${s.grapeHome.items.join(', ')}）` : ''}`)
+    any = true
+  }
+  if (s.authFileOverride) {
+    if (s.authFileOverride.notCredentials) {
+      console.log(`  [提示] GRAPE_AUTH_FILE=${s.authFileOverride.path} 不是凭据形态，不盲删——执行时将要求人工处理`)
+    } else {
+      console.log(`  将删除凭据文件（GRAPE_AUTH_FILE）: ${s.authFileOverride.path}`)
+    }
     any = true
   }
   if (s.envKeys.length) {
@@ -1378,6 +1410,11 @@ function detectResiduals() {
   const s = scanResidues()
   const found = []
   if (s.grapeHome) found.push(`目录 ${s.grapeHome.path}${s.grapeHome.items.length ? `（${s.grapeHome.items.join(', ')}）` : ''}`)
+  if (s.authFileOverride) {
+    found.push(s.authFileOverride.notCredentials
+      ? `GRAPE_AUTH_FILE 指向的文件 ${s.authFileOverride.path}（非凭据形态，请人工确认是否残留）`
+      : `GRAPE_AUTH_FILE 凭据文件 ${s.authFileOverride.path}`)
+  }
   for (const k of s.envKeys) found.push(`环境变量 ${k}`)
   for (const hit of s.rcHits) found.push(`shell 配置 ${hit.path} 中 ${hit.hits} 行 GRAPE_* 导出`)
   for (const b of s.rcCredentialBackups) found.push(`含明文凭据的备份文件 ${b}（旧版清理所留，需删除）`)
