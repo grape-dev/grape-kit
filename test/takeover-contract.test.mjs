@@ -183,6 +183,75 @@ test('#19 平台不给 next_agent 时按会话节点推导场景链（coding→q
   } finally { stub.restore() }
 })
 
+test('#19 remote_may_still_run 阻塞：显式告警 + 待派发标记，不静默 grace', async () => {
+  const t = finishTool()
+  const stub = await stubFinish({
+    finish: {
+      ok: true, changed: true, next_agent: 'qa',
+      warnings: ['remote_may_still_run: 云端 worker 在被杀前可能已推送分支并开 MR'],
+      session: { id: 'tkos_19', agent_type: 'coding', repo_key: 'gitcode:acme/demo', issue_number: 62, handoff_seq: 0, skipped_dispatches: 0 },
+    },
+    trigger: { seq: 99, agent: 'qa', status: 'running' },
+  })
+  try {
+    const j = await t.native({ session_id: 'tkos_19', summary: '完成' })
+    assert.equal(stub.triggers().length, 0, '平台警告远端仍在跑时不得立即派发')
+    assert.equal(j.dispatch.status, 'pending')
+    assert.equal(j.pending_dispatch.agent, 'qa')
+    assert.match(j.dispatch.warnings.join('\n'), /remote_may_still_run/)
+    const out = t.render(j)
+    assert.match(out, /待派发/)
+    assert.match(out, /remote_may_still_run/)
+    assert.match(out, /grape_trigger_pipeline/)
+    assert.doesNotMatch(out, /无需手动 trigger/, '待派发时不得再宣称无需 trigger')
+  } finally { stub.restore() }
+})
+
+test('#19 补发失败：pending_dispatch 携带失败原因（不静默）', async () => {
+  const t = finishTool()
+  const stub = await stubFinish({
+    finish: {
+      ok: true, changed: true, next_agent: 'qa',
+      session: { id: 'tkos_19', agent_type: 'coding', repo_key: 'gitcode:acme/demo', issue_number: 62, handoff_seq: 0 },
+    },
+    trigger: new Error('502: upstream unavailable'),
+  })
+  try {
+    const j = await t.native({ session_id: 'tkos_19', summary: '完成' })
+    assert.equal(j.dispatch.status, 'pending')
+    assert.match(String(j.pending_dispatch.reason), /502/)
+    const out = t.render(j)
+    assert.match(out, /待派发/)
+    assert.match(out, /502/)
+  } finally { stub.restore() }
+})
+
+test('#19 会话缺仓库标识：不瞎派，返回待派发标记并提示可用入参补齐', async () => {
+  const t = finishTool()
+  const stub = await stubFinish({
+    finish: { ok: true, changed: true, next_agent: 'qa', session: { id: 'tkos_19', agent_type: 'coding', handoff_seq: 0 } },
+    trigger: { seq: 99, agent: 'qa', status: 'running' },
+  })
+  try {
+    const j = await t.native({ session_id: 'tkos_19', summary: '完成' })
+    assert.equal(stub.triggers().length, 0, '缺少 owner/repo/issue 时不得发出错派')
+    assert.equal(j.dispatch.status, 'pending')
+    assert.match(j.dispatch.warnings.join('\n'), /owner\/repo\/issue_number/)
+    // 入参补齐后同一路径可正常兜底派发
+    const j2 = await t.native({ session_id: 'tkos_19', summary: '完成', owner: 'acme', repo: 'demo', issue_number: 62 })
+    assert.deepEqual(stub.triggers()[0].slice(1, 4), ['acme', 'demo', 62])
+    assert.equal(j2.dispatch.status, 'dispatched')
+  } finally { stub.restore() }
+})
+
+test('#19 工具描述与行为一致：兜底补发 / 不重复 / 待派发告警', () => {
+  const d = finishTool().description
+  assert.match(d, /兜底|补发/)
+  assert.match(d, /不重复/)
+  assert.match(d, /待派发/)
+  assert.match(d, /remote_may_still_run/)
+})
+
 test('#19 平台已派发（handoff_seq>0）：不重复派发', async () => {
   const t = finishTool()
   const stub = await stubFinish({
