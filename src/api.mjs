@@ -164,16 +164,26 @@ export async function apiRequest(method, path, opts = {}) {
 /** A2A 节点枚举：与平台 pipelines.json 的 agent tag 对齐 */
 export const AGENT_TYPES = ['vod', 'issue', 'coding', 'qa', 'sre']
 
+/**
+ * agent 归一 + 枚举校验：native 与 CLI 回退通道共用同一份，两通道报错逐字一致。
+ * 缺省/空值回落 vod（不传即从流水线首节点起步）；非法值在发请求前就拒掉，
+ * 否则 CLI 通道会把非法 agent 静默交给服务端，等到平台侧才失败。
+ */
+export function normalizeTriggerAgent(agent) {
+  const a = agent === undefined || agent === null || agent === '' ? 'vod' : String(agent)
+  if (!AGENT_TYPES.includes(a)) {
+    throw new GrapeApiError(`非法 agent：${a}（可用值：${AGENT_TYPES.join(' / ')}）`, {
+      status: 400,
+      hint: '不传 agent 时缺省从 vod 起步；仅当上游节点已完成、需要断点续跑时才显式指定后续节点。',
+    })
+  }
+  return a
+}
+
 export const api = {
   // 流水线
   triggerPipeline: async (owner, repo, issueNumber, context = '', agent) => {
-    const a = agent === undefined || agent === null || agent === '' ? 'vod' : String(agent)
-    if (!AGENT_TYPES.includes(a)) {
-      throw new GrapeApiError(`非法 agent：${a}（可用值：${AGENT_TYPES.join(' / ')}）`, {
-        status: 400,
-        hint: '不传 agent 时缺省从 vod 起步；仅当上游节点已完成、需要断点续跑时才显式指定后续节点。',
-      })
-    }
+    const a = normalizeTriggerAgent(agent)
     return apiRequest('POST', '/api/a2a', { body: { agent: a, payload: { repository: `${owner}/${repo}`, account: owner, issue_number: Number(issueNumber), ...(context ? { context } : {}) } } })
   },
   taskStatus: (seq) => apiRequest('GET', `/api/events/detail/${seq}`),

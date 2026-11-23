@@ -14,7 +14,7 @@
 import * as R from './render.mjs'
 import { hostname } from 'node:os'
 import { fileURLToPath } from 'node:url'
-import { api, apiRequest, getBaseUrl, AGENT_TYPES, GrapeApiError } from './api.mjs'
+import { api, apiRequest, getBaseUrl, AGENT_TYPES, normalizeTriggerAgent, GrapeApiError } from './api.mjs'
 
 /** kit 安装根（发布包含 skills/，Node 版接管脚本随 skill 副本分发） */
 const KIT_ROOT = fileURLToPath(new URL('..', import.meta.url)).replace(/[\\/]+$/, '')
@@ -100,13 +100,15 @@ export const TOOLS = [
       required: ['owner', 'repo', 'issue_number'],
     },
     buildArgs(a) {
+      // CLI 回退通道与 native 共用 normalizeTriggerAgent：非法 agent 在本地就报错，不静默下发给服务端
+      const agent = normalizeTriggerAgent(a.agent)
       const payload = {
         repository: `${a.owner}/${a.repo}`,
         account: a.owner,
         issue_number: a.issue_number,
       }
       if (a.context) payload.context = a.context
-      return ['a2a', 'handoff', '--json', JSON.stringify({ agent: a.agent || 'vod', payload })]
+      return ['a2a', 'handoff', '--json', JSON.stringify({ agent, payload })]
     },
     async native(a) {
       const r = await api.triggerPipeline(a.owner, a.repo, a.issue_number, a.context || '', a.agent)
