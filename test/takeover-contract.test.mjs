@@ -313,7 +313,7 @@ const sessOf = (over = {}) => ({
   id: 'tkos_19', agent_type: 'coding', repo_key: 'gitcode:acme/demo', issue_number: 62, handoff_seq: 0, ...over,
 })
 
-test('#19/S1 handoff_seq>0 且 next_seq=0（交回事件已写、派发未证实）：兜底补发并告警', async () => {
+test('#19 handoff_seq>0 且 next_seq=0（交回事件已写、派发未证实）：兜底补发并告警', async () => {
   const t = finishTool()
   const stub = await stubFinish({
     finish: { ok: true, changed: true, next_agent: 'qa', session: sessOf({ handoff_seq: 42, next_seq: 0 }) },
@@ -334,7 +334,7 @@ test('#19/S1 handoff_seq>0 且 next_seq=0（交回事件已写、派发未证实
   } finally { stub.restore() }
 })
 
-test('#19/S1 next_seq>0 且 handoff_seq=0：派发指针成立，不重复派发', async () => {
+test('#19 next_seq>0 且 handoff_seq=0：派发指针成立，不重复派发', async () => {
   const t = finishTool()
   const stub = await stubFinish({
     finish: { ok: true, changed: true, next_agent: 'qa', session: sessOf({ handoff_seq: 0, next_seq: 77 }) },
@@ -351,7 +351,7 @@ test('#19/S1 next_seq>0 且 handoff_seq=0：派发指针成立，不重复派发
   } finally { stub.restore() }
 })
 
-test('#19/S2 issue_id 不得当 issue_number 兜底：仅带 issue_id 时宁可不派', async () => {
+test('#19 issue_id 不得当 issue_number 兜底：仅带 issue_id 时宁可不派', async () => {
   const t = finishTool()
   const stub = await stubFinish({
     finish: { ok: true, changed: true, next_agent: 'qa', session: sessOf({ issue_number: undefined, issue_id: 18808 }) },
@@ -366,7 +366,7 @@ test('#19/S2 issue_id 不得当 issue_number 兜底：仅带 issue_id 时宁可�
   } finally { stub.restore() }
 })
 
-test('#19/S2 派发目标取 issue_number（19）而非 issue_id（18808）', async () => {
+test('#19 派发目标取 issue_number（19）而非 issue_id（18808）', async () => {
   const t = finishTool()
   const stub = await stubFinish({
     finish: { ok: true, changed: true, next_agent: 'qa', session: sessOf({ issue_id: 18808, issue_number: 19 }) },
@@ -379,7 +379,7 @@ test('#19/S2 派发目标取 issue_number（19）而非 issue_id（18808）', as
   } finally { stub.restore() }
 })
 
-test('#19/S3 兜底范围收窄到 coding→qa：qa 交回不越界派发 sre', async () => {
+test('#19 兜底范围收窄到 coding→qa：qa 交回不越界派发 sre', async () => {
   const t = finishTool()
   const stub = await stubFinish({
     finish: { ok: true, changed: true, next_agent: 'sre', session: sessOf({ agent_type: 'qa' }) },
@@ -393,7 +393,7 @@ test('#19/S3 兜底范围收窄到 coding→qa：qa 交回不越界派发 sre', 
   } finally { stub.restore() }
 })
 
-test('#19/S3 场景链不再推导 vod→issue：非 coding 节点无 next_agent 时不派发', async () => {
+test('#19 场景链不再推导 vod→issue：非 coding 节点无 next_agent 时不派发', async () => {
   const t = finishTool()
   const stub = await stubFinish({
     finish: { ok: true, changed: true, session: sessOf({ agent_type: 'vod', next_agent: '' }) },
@@ -406,7 +406,7 @@ test('#19/S3 场景链不再推导 vod→issue：非 coding 节点无 next_agent
   } finally { stub.restore() }
 })
 
-test('#19/S4 平台拒绝向已结束会话写 progress（409 not_active）：待派发流程不再发起必败写入', async () => {
+test('#19 平台拒绝向已结束会话写 progress（409 not_active）：待派发流程不再发起必败写入', async () => {
   const t = finishTool()
   const stub = await stubFinish({
     finish: {
@@ -427,7 +427,7 @@ test('#19/S4 平台拒绝向已结束会话写 progress（409 not_active）：�
   } finally { stub.restore() }
 })
 
-test('#19/S4 takeover_status 从会话记录派生待派发标记：finished+next_agent+handoff_seq=0 可查目标/原因/指引', () => {
+test('#19 takeover_status 从会话记录派生待派发标记：finished+next_agent+handoff_seq=0 可查目标/原因/指引', () => {
   const t = findTool('grape_takeover_status')
   const out = t.render({
     ok: true,
@@ -447,7 +447,7 @@ test('#19/S4 takeover_status 从会话记录派生待派发标记：finished+nex
   assert.match(out, /grape_get_issue_events/, '补发前必须先核实事件，防止兜底已成功时重复派发')
 })
 
-test('#19/S4 takeover_status：skipped_dispatches 与已派发会话不误告警', () => {
+test('#19 takeover_status：skipped_dispatches 与已派发会话不误告警', () => {
   const t = findTool('grape_takeover_status')
   const skipped = t.render({ ok: true, session: { id: 'tkos_19', status: 'finished', next_agent: 'qa', handoff_seq: 0, repo_key: 'gitcode:acme/demo', issue_id: '#62', skipped_dispatches: 2 } })
   assert.match(skipped, /skipped_dispatches=2/, '平台跳过派发的会话必须渲染为待派发')
@@ -457,7 +457,7 @@ test('#19/S4 takeover_status：skipped_dispatches 与已派发会话不误告警
   assert.doesNotMatch(active, /待派发/, '进行中会话不适用待派发标记')
 })
 
-test('#19/S4 finish 待派发渲染：不再宣称写入会话进度，改为会话记录可查口径', async () => {
+test('#19 finish 待派发渲染：不再宣称写入会话进度，改为会话记录可查口径', async () => {
   const t = finishTool()
   const stub = await stubFinish({
     finish: {
@@ -530,6 +530,24 @@ test('#19 派发指针取值单一口径：session 优先、顶层 0 不遮蔽�
   } finally { stub.restore() }
 })
 
+test('#19 会话缺 agent_type：即便平台给 next_agent=qa 也按 out_of_scope 处理，渲染如实披露', async () => {
+  const t = finishTool()
+  const stub = await stubFinish({
+    finish: {
+      ok: true, changed: true, next_agent: 'qa',
+      session: { id: 'tkos_19', repo_key: 'gitcode:acme/demo', issue_number: 62, handoff_seq: 0 },
+    },
+    trigger: { seq: 99, agent: 'qa', status: 'running' },
+  })
+  try {
+    const j = await t.native({ session_id: 'tkos_19', summary: '完成' })
+    // 无当前节点标识就无法确认兜底范围（coding→qa）：宁可不派、由渲染披露，不静默
+    assert.equal(stub.triggers().length, 0)
+    assert.equal(j.dispatch.status, 'out_of_scope')
+    assert.match(t.render(j), /仅 coding→qa/)
+  } finally { stub.restore() }
+})
+
 test('#19 模块导出面收敛：派发收口为内部实现，外部仍只有 TOOLS/TOOL_NAMES/findTool/toolDefs', async () => {
   const mod = await import('../src/tools.mjs')
   for (const name of ['resolveNextAgent', 'resolveDispatchTarget', 'ensureNextNodeDispatched']) {
@@ -540,7 +558,7 @@ test('#19 模块导出面收敛：派发收口为内部实现，外部仍只有 
   }
 })
 
-test('#19/S6 next_step 只认整串 agent 名：散文不解析，靠场景链兜底', async () => {
+test('#19 next_step 只认整串 agent 名：散文不解析，靠场景链兜底', async () => {
   const t = finishTool()
   const stub = await stubFinish({
     finish: {
@@ -558,7 +576,7 @@ test('#19/S6 next_step 只认整串 agent 名：散文不解析，靠场景链�
   } finally { stub.restore() }
 })
 
-test('#19/S5 文档措辞与实现一致：判据 next_seq / 兜底回填 next_seq / 待派发可查询', () => {
+test('#19 文档措辞与实现一致：判据 next_seq / 兜底回填 next_seq / 待派发可查询', () => {
   const doc = readFileSync(new URL('../docs/20261114-takeover-architecture.md', import.meta.url), 'utf8')
   assert.match(doc, /`next_seq`[^\n]*派发指针|派发指针[^\n]*`next_seq`/, 'docs 3.2 应写明以 next_seq 为派发指针判据')
   assert.match(doc, /回填[^\n]*`next_seq`/, 'docs 3.2 应写明兜底路径只回填 next_seq')
