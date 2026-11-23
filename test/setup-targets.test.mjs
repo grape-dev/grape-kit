@@ -721,6 +721,32 @@ test('Issue #20 _npx 白名单：名字相似但不在 @grape-dev 下的条目�
   assert.ok(existsSync(fake), '非 @grape-dev 实体不得删除')
 })
 
+/* ── QA 复审（合入后 dev 基线）判断项：_npx 口径收窄 + rc 备份可回滚价值 ── */
+
+test('QA#判断项 _npx 白名单收窄到本包实体：仅 @grape-dev/grape-kit 命中，同 scope 其他包不删', skipOnWin, () => {
+  const h = home()
+  const npx = join(h, '.npm', '_npx')
+  const card = join(npx, 'dddddddd')
+  mkdirSync(join(card, 'node_modules', '@grape-dev', 'grape-card'), { recursive: true })
+  writeFileSync(join(card, 'package.json'), '{}')
+  const r = run(['uninstall', '--target', 'opencode', '--clean-global'], h)
+  assert.equal(r.status, 0, r.stderr)
+  assert.ok(existsSync(card), '仅含 @grape-dev/grape-card 的条目不得删除（「本包」口径 = grape-kit）')
+})
+
+test('QA#判断项 rc 备份保留非凭据原文与凭据行掩码标注（有回滚价值，凭据不落备份）', { skip: isWin }, () => {
+  const h = home()
+  seedResidue(h)
+  const r = run(['uninstall', '--target', 'opencode', '--clean-global'], h)
+  assert.equal(r.status, 0, r.stderr)
+  const bak = backupsIn(h).find((f) => f.startsWith('.bashrc.bak-grapemcp-'))
+  assert.ok(bak, 'rc 改动前应留备份')
+  const text = readFileSync(join(h, bak), 'utf8')
+  assert.match(text, /export PATH=\$PATH:\/bin/, '非凭据行必须在备份中原样保留（可回滚）')
+  assert.doesNotMatch(text, /grape_secret_env/, '备份不得含凭据明文')
+  assert.match(text, /GRAPE_API_TOKEN/, '凭据行位置应在备份中掩码标注（区别于清理后文件，才有回滚价值）')
+})
+
 /* ── QA 复审（PR #11）P1：--clean-global 主路径不得被宿主解析短路 ── */
 
 test('QA#P1 uninstall --clean-global 不带 --target：零宿主痕迹时也照跑全局清理（exit 0）', skipOnWin, () => {
