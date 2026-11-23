@@ -86,6 +86,17 @@ const asAgentType = (v) => {
 const seqOf = (json, key) => Number(json?.session?.[key] ?? json?.[key]) || 0
 
 /**
+ * issue 展示口径：`issue_number` 是单号，`issue_id` 是平台内部主键（#19 实测 18808）——
+ * 两者不得互换，缺单号时内部主键必须显式标注，避免读者把它当单号对外引用。
+ */
+const issueLabel = (r = {}) => {
+  const num = Number(r.issue_number ?? r.number) || 0
+  if (num > 0) return `#${num}`
+  const id = String(r.issue_id ?? '').trim()
+  return id ? `id=${id}（内部主键）` : ''
+}
+
+/**
  * 平台 `handoff` 字段的渲染口径：字符串直接当标签；对象一律按结构化口径描述，
  * 不得把对象插进模板串——否则渲染成 `handoff=[object Object]`，
  * 平台失败原文（实测形状 `{"ok":false,"error":"HTTP 405: ..."}`）随之丢失。
@@ -115,6 +126,11 @@ function resultJsonOf(json = {}) {
 /**
  * 下一节点：平台 next_agent > 结构化 next_step（**整串** agent 名，如 `qa`）> 兜底范围内的场景链推导。
  * next_step 不做自然语言解析：真实形如「qa：请复查 PR #10」的散文推导为空，交给场景链兜底。
+ *
+ * ⚠️ 与 `seqOf` 的优先级相反（这里顶层优先）是刻意的语义差异，不要为「统一」而互换：
+ * `next_agent` 是离散标签，顶层代表**本次交回**平台刚给出的决定，session 快照可能还停在旧值；
+ * 而 `next_seq`/`handoff_seq` 是计数器，交回响应顶层常被置 0 或缺省（0 是缺省值而非事实），
+ * 必须让 session 记录先说话。两处各自取「最新且可靠的那一份」。
  */
 function resolveNextAgent(json = {}) {
   const sess = json.session || {}
@@ -163,7 +179,7 @@ function dispatchContext(json, nextAgent) {
  * 待派发标记的持久化依据：finish 在服务端**同步关会话**（status→finished），
  * 之后再向该会话写 progress 必被 409 not_active「接管会话已结束」拒绝（平台 mgmt 路由实测）——
  * task_messages 通道对交回后的标记不可用。标记因此不靠事后写入，而由**会话记录本身**承载：
- * finished + next_agent 有值 + handoff_seq=0 即「交回已写、派发指针缺失」，
+ * finished + next_agent 有值 + 派发指针 next_seq=0 即「交回已写、派发未证实」，
  * grape_takeover_status 对已结束会话仍可查（GET 无状态门），渲染据此派生目标/原因/补发指引。
  */
 
@@ -924,7 +940,7 @@ export const TOOLS = [
     description:
       '查看接管会话状态/列表（不改变任何状态）。可查单条（含 renew 续期凭据）或列仓库/issue 的活跃会话。' +
       '接管中途断连后用本工具找回 session_id 与最新进度。已结束会话可查待派发标记：' +
-      'finished + next_agent 有值 + handoff_seq=0 即「交回已写、派发指针缺失」，渲染给出目标/原因/补发指引。',
+      'finished + next_agent 有值 + 派发指针 next_seq=0 即「交回已写、派发未证实」（仅有 handoff_seq 时同样不判已派发），渲染给出目标/原因/补发指引。',
     schema: {
       type: 'object',
       properties: {
@@ -947,7 +963,7 @@ export const TOOLS = [
         const rows = (json.sessions || json).map((r) => r.session || r)
         return R.mdTable(R.asArray(rows) || [], [
           { h: '会话', v: (r) => r.id ?? r.session_id ?? '' },
-          { h: 'issue', v: (r) => r.issue_id ?? r.issue_number ?? '' },
+          { h: 'issue', v: (r) => issueLabel(r) },
           { h: '节点', v: (r) => r.agent_type ?? '' },
           { h: '状态', v: (r) => r.status ?? '' },
           { h: '到期(epoch)', v: (r) => String(r.token_expires_at ?? '').slice(0, 16) },
@@ -959,21 +975,32 @@ export const TOOLS = [
       if (sess.summary) lines.push(`- 摘要: ${String(sess.summary).slice(0, 200)}`)
       if (sess.result_json) lines.push('', '**交回结果**', '', String(sess.result_json).slice(0, 2000))
       /* 待派发标记从会话记录派生：交回在服务端同步关会话，事后写 progress 必 409 not_active，
-       * 已结束会话的 durable 事实只有会话字段本身——finished + next_agent + handoff_seq=0
-       * 即「交回已写、派发指针缺失」，据此给出可查的目标/原因/补发指引。 */
+       * 已结束会话的 durable 事实只有会话字段本身。判据与 finish 同口径——**派发指针是 next_seq**：
+       * next_seq>0 即已派发；next_seq=0 时 handoff_seq 只是平台侧「交回事件序号」，不作派发证据，
+       * 仅有 handoff_seq 时措辞降级为「交回事件已写、派发未证实，请核实事件」。 */
       const nextA = String(sess.next_agent ?? '').trim()
-      const handoff = Number(sess.handoff_seq) || 0
-      if (String(sess.status).toLowerCase() === 'finished' && nextA && !handoff) {
+      const nextSeq = Number(sess.next_seq ?? json.next_seq) || 0
+      const handoffSeq = Number(sess.handoff_seq ?? json.handoff_seq) || 0
+      const finished = String(sess.status).toLowerCase() === 'finished'
+      const issue = issueLabel(sess)
+      if (finished && nextA && nextSeq > 0) {
+        lines.push('', `- 下一节点 ${nextA} 已派发（next_seq=${nextSeq}）：派发指针成立`)
+      }
+      if (finished && nextA && !nextSeq) {
         const repoKey = String(sess.repo_key ?? '').split(':').pop()
         const warns = Array.isArray(sess.warnings) ? sess.warnings
           : (() => { try { return JSON.parse(sess.warnings_json || '[]') } catch { return [] } })()
         const skipped = Number(sess.skipped_dispatches ?? json.skipped_dispatches) || 0
-        lines.push('', '**⚠️ 待派发标记（派发指针缺失）**', '')
-        lines.push(`- 下一节点 ${nextA} 未见平台侧派发指针（handoff_seq=0）：交回已写、派发未证实`)
-        if (repoKey) lines.push(`- 目标仓库: ${repoKey}${sess.issue_id ? ` · issue: ${sess.issue_id}` : ''}`)
+        lines.push('', handoffSeq
+          ? '**⚠️ 待派发标记（派发未证实）**'
+          : '**⚠️ 待派发标记（派发指针缺失）**', '')
+        lines.push(handoffSeq
+          ? `- 下一节点 ${nextA} 仅有交回事件 handoff_seq=${handoffSeq}、未见派发指针 next_seq=0：交回事件已写、派发未证实，请核实下一节点是否已有事件`
+          : `- 下一节点 ${nextA} 未见派发指针（next_seq=0、handoff_seq=0）：交回已写、派发未证实`)
+        if (repoKey) lines.push(`- 目标仓库: ${repoKey}${issue ? ` · issue: ${issue}` : ''}`)
         if (warns.length) lines.push(`- 会话警告: ${warns.join('；')}`)
         if (skipped > 0) lines.push(`- 平台跳过派发: skipped_dispatches=${skipped}`)
-        lines.push('', `_补发前先 grape_get_issue_events 确认下一节点无事件（客户端兜底补发成功时 handoff_seq 同样为 0），确认后 grape_trigger_pipeline(agent=${nextA}) 补发。_`)
+        lines.push('', `_补发前先 grape_get_issue_events 确认下一节点无事件（客户端兜底补发不会回填会话里的 next_seq），确认后 grape_trigger_pipeline(agent=${nextA}) 补发。_`)
       }
       return lines.join('\n')
     },
@@ -1012,7 +1039,7 @@ export const TOOLS = [
       '平台漏派（`next_seq=0`）时按场景链**兜底补发**（复用 trigger 同源 A2A 通道，兜底范围仅 coding→qa），并回填 `next_seq`；' +
       '因 remote_may_still_run 等警告码阻塞、缺仓库/issue 标识或补发失败时，返回**显式告警 + 待派发标记（pending_dispatch）**，' +
       '标记随交回结果返回（平台对已结束会话拒绝 progress 写入——409 not_active，不走 task_messages），' +
-      '事后经 `grape_takeover_status` 复查会话记录同样可见派发指针缺失（next_agent + handoff_seq=0）与补发指引，不再静默。' +
+      '事后经 `grape_takeover_status` 复查会话记录同样可见派发指针缺失（next_agent + next_seq=0，仅 handoff_seq 不算已派发）与补发指引，不再静默。' +
       '下一节点推导顺序：平台 next_agent > 结构化 next_step（**整串** agent 名如 `qa`，散文如「qa：请复查 PR #10」不解析）> 场景链 coding→qa。' +
       '⚠️ 用户决策层动作：确认本地成果可交回后再调用。' +
       '两阶段确认流：先 request-finish（仅报告完成，等用户确认），用户确认后再本工具 finish。',
@@ -1083,7 +1110,7 @@ export const TOOLS = [
           lines.push('', '**⚠️ 下一节点未被派发（待派发，pending_dispatch）**', '')
           lines.push(`- 目标节点: ${d.agent || '-'}${pd.owner ? ` · 仓库: ${pd.owner}/${pd.repo}` : ''}${pd.issue_number ? ` · issue: #${pd.issue_number}` : ''}`)
           for (const w of (d.warnings || [])) lines.push(`- ${w}`)
-          lines.push(`- 标记随本次交回结果返回；事后用 grape_takeover_status 复查会话（finished + next_agent=${d.agent || '-'} + handoff_seq=0 即派发指针缺失）`)
+          lines.push(`- 标记随本次交回结果返回；事后用 grape_takeover_status 复查会话（finished + next_agent=${d.agent || '-'} + next_seq=0 即派发未证实）`)
           lines.push('', `_链未自动接续：先 grape_get_issue_events 确认下一节点无事件，再调 \`grape_trigger_pipeline(agent=${d.agent})\` 补发。_`)
         } else if (ho.failure) {
           // 无 dispatch 字段但平台已明确 handoff 失败：不得再宣称「无需 trigger」
