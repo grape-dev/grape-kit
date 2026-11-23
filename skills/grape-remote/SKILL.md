@@ -35,7 +35,7 @@ description: |
 3. 完成后两阶段交回（**第二阶段 finish 必须用用户级凭据**）：
    - **① request-finish**：`grape_takeover_finish(request_only=true, …)` 只报告完成与结构化产物，用 tko_ 接管凭据即可。
    - **② 用户授权**：把结论 + 证据原样呈现给用户，在**对话中**取得明确确认。平台不提供任何 UI 确认按钮，不要指路 WebUI/前端页面。
-   - **③ finish**：用户确认后，由**用户级凭据（`grape_`）**的会话调用 `grape_takeover_finish(request_only=false, …)` 正式交回（结构化产物，coding→qa 自动接力；平台已派发则不重复，平台漏派时 kit 兜底补发，返回 `pending_dispatch` 待派发标记时按提示 `grape_trigger_pipeline(agent=…)` 补发）。tko_ 仅 repo_session 能力、不推进流水线，用它调 finish 会 403——这是凭据语义边界，不是权限不足。
+   - **③ finish**：用户确认后，由**用户级凭据（`grape_`）**的会话调用 `grape_takeover_finish(request_only=false, …)` 正式交回（结构化产物，coding→qa 自动接力；判据只看派发指针 `next_seq`——`next_seq>0` 平台已派发则不重复，`next_seq=0` 时 kit 兜底补发并回填 `next_seq`；返回 `pending_dispatch` 待派发标记时按提示 `grape_trigger_pipeline(agent=…)` 补发，该标记同时落一条 takeover 进度）。tko_ 仅 repo_session 能力、不推进流水线，用它调 finish 会 403——这是凭据语义边界，不是权限不足。
 4. 中途放弃：`grape_takeover_abort(session_id, redispatch=true)` —— 当前节点重新派发回云端引擎，已完成的节点保留。
 5. 断连恢复：`grape_takeover_status(owner, repo, number)` 找回 session_id；单条查询带 `renew=true` 续期凭据。
 

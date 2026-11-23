@@ -103,15 +103,20 @@ sequenceDiagram
 
 ### 3.2 交回后的下一节点派发（Issue #19）
 
-平台 `finish` 返回 `next_agent=qa` 但 `handoff_seq=0`（#62 实测：事件终态 completed、qa 无事件、`stall_state=grace`）时，链会静默停住。kit 侧 `grape_takeover_finish` 现在对交回结果做三态收口，保证「链不断」不只是一句描述：
+平台 `finish` 返回 `next_agent=qa` 但 `handoff_seq=0`（#62 实测：事件终态 completed、qa 无事件、`stall_state=grace`）时，链会静默停住。kit 侧 `grape_takeover_finish` 对交回结果做三态收口，保证「链不断」不只是一句描述。
+
+**判据唯一**：派发指针是 `next_seq`（指向平台已写入的下一节点派发事件）。`handoff_seq` 是平台侧交回/handoff 事件序号，只作披露、**不作为「已派发」证据**——`handoff_seq>0` 而 `next_seq=0` 按「交回已写、派发未证实」兜底补发并留 ⚠️ 告警。
 
 | 交回结果 | kit 行为 | 渲染 |
 |---|---|---|
-| `handoff_seq`/`next_seq` > 0 | 平台已派发，**不重复派发** | `未重复派发（seq=N）` |
-| 无 handoff、有 `next_agent`（或按 agent_type 推导的场景链下一节点），且无阻塞 | **兜底补发**一次 A2A（复用 trigger 同源 `/api/a2a`），回填 `next_seq` | `已自动派发（seq=N）` |
-| `remote_may_still_run` 等警告、`skipped_dispatches>0`、缺 owner/repo/issue 标识、补发失败 | 不瞎派，返回 `dispatch.status=pending` + `pending_dispatch{agent,owner,repo,issue_number,reason}` | 显式告警 + `grape_trigger_pipeline(agent=…)` 补发指引 |
+| `next_seq` > 0 | 平台已派发，**不重复派发** | `已由平台派发（next_seq=N）` |
+| `next_seq=0` 且 `next_agent=qa`（或当前节点 `coding` 推导 coding→qa），无阻塞 | **兜底补发**一次 A2A（复用 trigger 同源 `/api/a2a`），回填 `next_seq` | `已自动派发（seq=N）` |
+| `next_seq=0` 且目标不在 coding→qa 范围（vod/issue/qa 等节点） | 不改其它节点派发行为（Spec Out of Scope），只如实披露 | `兜底范围仅 coding→qa` |
+| `remote_may_still_run` 等警告、`skipped_dispatches>0`、缺 owner/repo/issue_number 标识、补发失败 | 不瞎派：`dispatch.status=pending` + `pending_dispatch{agent,owner,repo,issue_number,reason,recorded}`，**同时经 `takeover progress` 落一条 task_message**，可用 `grape_takeover_status` 复查；进度写入失败时 `recorded=false` 并明示「仅本次返回」 | 显式告警 + `grape_trigger_pipeline(agent=…)` 补发指引 |
 
-会话未带仓库标识时可用 `owner`/`repo`/`issue_number` 入参补齐；场景链尾（如 sre）返回 `no_next_node`，属正常收尾。
+**派发目标口径**：`issue_number` 才是单号；平台 `/tasks` 的 `issue.id`（#19 实测 `18808`）是内部主键，**不能**当 `issue_number` 兜底，否则派发会打到错误 issue。会话未带仓库标识时用 `owner`/`repo`/`issue_number` 入参补齐；平台未给下一节点且不在兜底范围（如 qa 交回、非 coding 节点）返回 `no_next_node` 或 `out_of_scope`，属正常收尾。
+
+**验收口径修正**：兜底路径只回填 `next_seq`，`handoff_seq` 由平台写入、本工具不写——AC 中「`handoff_seq`/`next_seq` 非 0」按「派发指针 `next_seq` 非 0」读取。`next_step` 仅整串 agent 名（如 `qa`）命中，散文（如「qa：请复查 PR #10」）不解析，由场景链 coding→qa 兜底。
 
 ## 4. 验证矩阵（全部真机）
 
