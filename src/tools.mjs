@@ -77,6 +77,14 @@ const asAgentType = (v) => {
   return AGENT_TYPES.includes(s) ? s : ''
 }
 
+/**
+ * 交回响应派发相关字段的唯一取值口径：**session 优先、仅 nullish 回落顶层**。
+ * session 是会话记录的权威形态；判据（next_seq/handoff_seq/skipped_dispatches）、
+ * 渲染与补发 context 必须共用本 getter——顶层出现 0/空值时不得遮蔽 session 里的真实指针，
+ * 否则同一字段两处取值会得出「判据说未派发、渲染说已派发」的互斥结论。
+ */
+const seqOf = (json, key) => Number(json?.session?.[key] ?? json?.[key]) || 0
+
 /** 交回结果里的结构化输出（session.result_json 平台给对象或 JSON 文本两种形态） */
 function resultJsonOf(json = {}) {
   const raw = json.result_json ?? json.session?.result_json
@@ -125,8 +133,8 @@ export function resolveDispatchTarget(json = {}, args = {}) {
 /** 补发时的 A2A context：说清上一节点已完成，避免下一节点重复实现 */
 function dispatchContext(json, nextAgent) {
   const sid = String(json.session?.id || json.session_id || '').trim()
-  const handoff = Number(json.session?.handoff_seq ?? json.handoff_seq) || 0
-  // 无会话 id 时不留「接管会话  正式交回」的空指代（QA 复审 nit）
+  const handoff = seqOf(json, 'handoff_seq')
+  // 无会话 id 时不留「接管会话  正式交回」的空指代
   const who = sid ? `接管会话 ${sid} 已正式交回` : '本地接管成果已正式交回'
   const ref = handoff ? `（交回侧事件 seq=${handoff}）` : ''
   return `${who}${ref}，按场景链派发下一节点 ${nextAgent}；上一节点已完成，勿重复实现。`
@@ -153,8 +161,8 @@ export async function ensureNextNodeDispatched(json, args = {}, apiMod = api) {
   const sess = base.session || {}
   const nextAgent = resolveNextAgent(base)
   const current = asAgentType(sess.agent_type) || asAgentType(base.agent_type)
-  const nextSeq = Number(base.next_seq ?? sess.next_seq) || 0
-  const handoffSeq = Number(base.handoff_seq ?? sess.handoff_seq) || 0
+  const nextSeq = seqOf(base, 'next_seq')
+  const handoffSeq = seqOf(base, 'handoff_seq')
   if (nextSeq > 0) {
     // next_seq 指向平台已写入的下一节点派发事件：重复派发会重跑下一节点，跳过
     return {
@@ -193,7 +201,7 @@ export async function ensureNextNodeDispatched(json, args = {}, apiMod = api) {
   const platformWarnings = [base.warnings, sess.warnings]
     .flatMap((w) => (Array.isArray(w) ? w : (w ? [w] : [])))
   const blockers = platformWarnings.filter((w) => DISPATCH_BLOCKER_CODES.has(warningCode(w)))
-  const skipped = Number(base.skipped_dispatches ?? sess.skipped_dispatches) || 0
+  const skipped = seqOf(base, 'skipped_dispatches')
   if (blockers.length) {
     return pending(`next_node_pending_dispatch: 平台警告「${blockers.join('；')}」，未立即派发 ${nextAgent}，需人工裁决后补发`)
   }
@@ -1033,7 +1041,7 @@ export const TOOLS = [
         if (json.next_agent) lines.push(`- 下一节点: ${json.next_agent}（handoff=${json.handoff ?? 'a2a'}）`)
         if (json.issue_stage) lines.push(`- issue 阶段: ${json.issue_stage}`)
         if (json.event_status) lines.push(`- 事件终态: ${json.event_status}`)
-        const handoffSeq = json.session?.handoff_seq ?? json.handoff_seq
+        const handoffSeq = seqOf(json, 'handoff_seq')
         if (handoffSeq) {
           // handoff_seq 只是平台侧交回事件序号；是否已派发一律看 next_seq（判据唯一，避免措辞互斥）
           lines.push(`- 平台 handoff_seq=${handoffSeq}（交回侧事件序号，不作为派发证据）`)
