@@ -14,7 +14,7 @@
 import * as R from './render.mjs'
 import { hostname } from 'node:os'
 import { fileURLToPath } from 'node:url'
-import { api } from './api.mjs'
+import { api, apiRequest, getBaseUrl, AGENT_TYPES, GrapeApiError } from './api.mjs'
 
 /** kit 安装根（发布包含 skills/，Node 版接管脚本随 skill 副本分发） */
 const KIT_ROOT = fileURLToPath(new URL('..', import.meta.url)).replace(/[\\/]+$/, '')
@@ -74,7 +74,7 @@ export const TOOLS = [
         owner: str('owner'),
         repo: str('repo'),
         issue_number: num('issue 编号'),
-        agent: { type: 'string', description: '目标节点 agent，默认 vod', default: 'vod' },
+        agent: { type: 'string', enum: AGENT_TYPES, description: '起始节点 agent（默认 vod）。指定后跳过已完成的上游节点，用于 cascade 断链续跑；可用值：vod/issue/coding/qa/sre', default: 'vod' },
         context: str('任务上下文/补充说明（可选）'),
       },
       required: ['owner', 'repo', 'issue_number'],
@@ -89,7 +89,7 @@ export const TOOLS = [
       return ['a2a', 'handoff', '--json', JSON.stringify({ agent: a.agent || 'vod', payload })]
     },
     async native(a) {
-      const r = await api.triggerPipeline(a.owner, a.repo, a.issue_number, a.context || '')
+      const r = await api.triggerPipeline(a.owner, a.repo, a.issue_number, a.context || '', a.agent)
       return { seq: r.seq ?? r.event_seq, agent: r.agent ?? 'vod', status: r.status ?? 'running' }
     },
     render: R.renderTrigger,

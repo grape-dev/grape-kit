@@ -118,3 +118,22 @@ test('worker_onboard 渲染出可见安装命令', () => {
   assert.match(out, /```bash/)
   assert.match(out, /--token RTA/)
 })
+
+/* ── Issue #17：trigger 工具 agent 枚举 + native 透传 ── */
+
+test('trigger 工具 schema 声明 agent 枚举并在 native 透传', async () => {
+  const { api } = await import('../src/api.mjs')
+  const t = findTool('grape_trigger_pipeline')
+  assert.deepEqual(t.schema.properties.agent.enum, ['vod', 'issue', 'coding', 'qa', 'sre'])
+  assert.equal(t.schema.properties.agent.default, 'vod')
+  const args = t.buildArgs({ owner: 'acme', repo: 'demo', issue_number: 12, agent: 'qa' })
+  const body = JSON.parse(args[args.indexOf('--json') + 1])
+  assert.equal(body.agent, 'qa', 'CLI 通道同样透传 agent')
+  const orig = api.triggerPipeline
+  let seen = null
+  api.triggerPipeline = async (...a) => { seen = a; return { seq: 1 } }
+  try {
+    await t.native({ owner: 'acme', repo: 'demo', issue_number: 12, context: '续跑', agent: 'qa' })
+  } finally { api.triggerPipeline = orig }
+  assert.deepEqual(seen, ['acme', 'demo', 12, '续跑', 'qa'], 'native 必须把 agent 透传给 api.triggerPipeline')
+})
