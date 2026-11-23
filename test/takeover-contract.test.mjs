@@ -182,3 +182,25 @@ test('#19 平台不给 next_agent 时按会话节点推导场景链（coding→q
     assert.equal(j.next_agent, 'qa')
   } finally { stub.restore() }
 })
+
+test('#19 平台已派发（handoff_seq>0）：不重复派发', async () => {
+  const t = finishTool()
+  const stub = await stubFinish({
+    finish: {
+      ok: true, changed: true, next_agent: 'qa', session: {
+        id: 'tkos_19', agent_type: 'coding', repo_key: 'gitcode:acme/demo', issue_number: 62,
+        handoff_seq: 42, next_seq: 42,
+      },
+    },
+    trigger: { seq: 99, agent: 'qa', status: 'running' },
+  })
+  try {
+    const j = await t.native({ session_id: 'tkos_19', summary: '完成' })
+    assert.equal(stub.triggers().length, 0, '平台已写入指向 qa 的事件，不得重复派发')
+    assert.equal(j.dispatch.status, 'already_dispatched')
+    assert.equal(j.next_seq, 42, '已派发时 next_seq 应沿用平台事件 seq')
+    const out = t.render(j)
+    assert.match(out, /未重复派发/)
+    assert.match(out, /seq=42/)
+  } finally { stub.restore() }
+})
