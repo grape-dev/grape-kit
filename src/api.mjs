@@ -35,16 +35,37 @@ export function hostInfo() {
   return { host_os, host_arch: process.arch, host_shell }
 }
 
-/** 文件通道配置（剥 BOM；损坏文件按未配置处理） */
-function readFileConfig(env = process.env) {
-  const authFile = env.GRAPE_AUTH_FILE || join(homedir(), '.grape', 'config.json')
-  if (!existsSync(authFile)) return { authFile, cfg: null }
+/**
+ * 凭据/缓存根目录单源实现（默认 ~/.grape）：grape-kit.mjs、update-check 缓存路径与本模块
+ * 的文件通道共用同一表达式（QA P2：此前三处各写一份已现漂移风险；takeover _lib.mjs 为无依赖
+ * skill 副本，保留逐字一致的本地表达式并注释同源）。
+ * GRAPE_HOME 覆盖点既是测试隔离前提，也是自部署容器的共用配置入口。
+ */
+export function grapeHome(env = process.env) {
+  return String(env.GRAPE_HOME || '').trim() || join(homedir(), '.grape')
+}
+
+/**
+ * 文件通道单源解析（QA P2：config.json 解析此前四处各写一份）：
+ * 返回 { authFile, exists, parseError, cfg }，doctor 优先级视图与 auth init 共用。
+ * 解析失败只置 parseError 标志、不携带 e.message——JSON.parse 的报错消息会带出
+ * 文件原文片段，凭据文件会因此泄露 token（QA 安全回归）。
+ */
+export function readAuthChannel(env = process.env) {
+  const authFile = env.GRAPE_AUTH_FILE || join(grapeHome(env), 'config.json')
+  if (!existsSync(authFile)) return { authFile, exists: false, parseError: false, cfg: null }
   try {
     // 剥 BOM：Windows 记事本保存会带 UTF-8 BOM，JSON.parse 直接抛错（P2 实修，不只写文档）
-    return { authFile, cfg: JSON.parse(readFileSync(authFile, 'utf-8').replace(/^\uFEFF/, '')) }
+    return { authFile, exists: true, parseError: false, cfg: JSON.parse(readFileSync(authFile, 'utf-8').replace(/^\uFEFF/, '')) }
   } catch {
-    return { authFile, cfg: null }
+    return { authFile, exists: true, parseError: true, cfg: null }
   }
+}
+
+/** 文件通道配置（剥 BOM；损坏文件按未配置处理），readAuthChannel 的薄封装。 */
+function readFileConfig(env = process.env) {
+  const { authFile, cfg } = readAuthChannel(env)
+  return { authFile, cfg }
 }
 
 /**
@@ -63,18 +84,19 @@ export function resolveCredentials(env = process.env) {
   const baseUrl = getBaseUrl(env)
   // ① 一次性参数（进程内）
   if (env.GRAPE_API_TOKEN_ONCE) {
-    return { token: env.GRAPE_API_TOKEN_ONCE, baseUrl, source: 'env:GRAPE_API_TOKEN_ONCE' }
+    return { token: env.GRAPE_API_TOKEN_ONCE, baseUrl, source: 'env:GRAPE_API_TOKEN_ONCE', sourceKind: 'runtime' }
   }
   // ② env（标准路径）
   if (env.GRAPE_API_TOKEN) {
-    return { token: env.GRAPE_API_TOKEN, baseUrl, source: 'env:GRAPE_API_TOKEN' }
+    return { token: env.GRAPE_API_TOKEN, baseUrl, source: 'env:GRAPE_API_TOKEN', sourceKind: 'env' }
   }
   // ③ 文件通道（hermes 等 env 清洗场景 + GRAPE_AUTH_FILE 显式指向）
   const { authFile, cfg } = readFileConfig(env)
   if (cfg && cfg.token) {
-    return { token: cfg.token, baseUrl, source: `file:${authFile}` }
+    // sourceKind 结构化标注命中档：doctor 优先级视图据此渲染，不做 source 字符串反推（QA 判断项）
+    return { token: cfg.token, baseUrl, source: `file:${authFile}`, sourceKind: 'file' }
   }
-  return { token: '', baseUrl, source: '' }
+  return { token: '', baseUrl, source: '', sourceKind: '' }
 }
 
 /**

@@ -11,10 +11,23 @@
 - `install --target dsh`（DeepSeek Harness）：以 **MCP stdio 托管 patch** 模式把 grape-kit 接入 dsh web profile —— 在 `$DSH_HOME/profiles/web/cordis.patch.yml`（`$DSH_HOME` 缺省 `~/.dsh`）写入带标记的 `insert` 托管块（`id: grape-kit` / `name: '@deepseek-ai/dsh-mcp-client'` / `transport: stdio`），MCP 入口本地脚本优先、解析不到回退 `npx`；`grape-remote` skill 落到 `$DSH_HOME/skills/`。39 工具零改动复用。
 - dsh 同族能力：`uninstall --target dsh` 只删托管块 + skill 副本（其余 patch 行与 profile 依赖不动），`doctor --target dsh` 给出托管块 / skill 副本 / `dsh-mcp-client` 三项检查，`detect` 把 `~/.dsh` 纳入宿主自动检测（零宿主菜单、`--target all` 与 `help` 用法随 `SUPPORTED_TARGETS` 自动覆盖）。
 - `install --target dsh` 的 `@deepseek-ai/dsh-mcp-client` 依赖安装为 best-effort：失败只打印手动指引（`npx @deepseek-ai/dsh plugin --profile web add …`，pnpm 缺失先 `corepack enable pnpm`），不阻塞装配、退出码仍为 0。
+- `uninstall --clean-global`：一键清理凭据与使用痕迹——整删 `~/.grape`（含文件通道 `config.json` 与 worker 注册产物）、删除用户级 `GRAPE_API_TOKEN`/`GRAPE_BASE_URL`（POSIX 精确删 rc 中的 `export` 行，备份只保留非凭据行；Windows 用 `reg delete HKCU\Environment`）、清理 `_npx` 中仅含 `node_modules/@grape-dev` 的条目（其他包缓存不动）。主命令不带 `--target` 也可用（无宿主痕迹时跳过宿主卸载、照跑全局清理）；残留提示与三路清理共用同一扫描（所见即所删）。新增 `--dry-run` 预览模式：只列出将删除项、不动盘。不带该选项时 `uninstall` 只列出残留项与清理命令，不静默删除。
+- `auth init` 子命令：凭据唯一写入入口，`--token grape_... [--base-url ...]`（TTY 下可交互），写入目标与解析目标严格一致（`GRAPE_AUTH_FILE` 已设置时写它，否则写 `GRAPE_HOME/config.json`），权限 600、剥 BOM，写盘后回读校验，并打印 env 通道设置命令与优先级说明；非 `grape_` 前缀直接拒绝。
 
 ### Changed
 
 - dsh 口径由「由 grape-dsh 独立插件承载」改为「MCP 最小路径 / 完整形态插件并存」：`--target` 未知宿主提示与 `SUPPORTED_TARGETS` 注释同步改口径；README 双语新增 dsh 宿主段、路线图条目改口径。
+- `doctor` 把单行「当前生效凭据来源」升级为**完整优先级视图**：逐档列出 runtime（`GRAPE_API_TOKEN_ONCE`）> env（`GRAPE_API_TOKEN`/`GRAPE_BASE_URL`）> file（`GRAPE_AUTH_FILE`/`GRAPE_HOME/config.json`）的命中/未命中及原因，仍不回显 token。渲染三态化：命中档 `[ok]`，未命中/被覆盖档 `[--]` 信息行（无修复动作），失败项 `[!!]`——不再出现「`[ok]` 行内写着未命中」的自相矛盾；`doctor --target <宿主>` 的检查项不再重复打印。
+- `GRAPE_HOME` 覆盖点（默认 `~/.grape`）收敛到 `src/api.mjs` 单源实现（`grapeHome()`/`readAuthChannel()` 导出），安装器、版本检查缓存与文件通道解析共用；takeover 脚本 `skills/grape-remote/scripts/takeover/_lib.mjs` 同语义接入（无依赖 skill 副本，保留逐字一致表达式）。README 双语同步凭据优先级链与新命令用法。
+
+### Fixed
+
+- QA 复审（PR #11）安全回归：`doctor` 文件通道解析失败时透传 `JSON.parse` 报错消息，会把 `config.json` 原文（含 token 片段）带进输出——改为固定文案「解析失败（内容不回显）」。
+- QA 复审（PR #11）硬违规：`--clean-global` 的 rc 备份曾保留完整 `export GRAPE_API_TOKEN=…` 明文行且残留检测不扫备份，卸载后打印「未检测到残留」实为假象——备份只保留非凭据行，旧版本留下的含凭据 `.bak-grapemcp-*` 备份纳入残留检测并由 `--clean-global` 清零。
+- QA 复审（PR #11）主命令不可达：`uninstall --clean-global` 不带 `--target` 时曾先走宿主自动解析，无宿主痕迹即 exit 1、清理从未执行——见 Added（全局清理前置于宿主解析）。
+- 测试可移植性：600 权限位与 rc 删除断言按平台分流，破坏性清理用例在 win32 skip（`HOME` 隔离对 win32 `homedir()` 无效）；win32 行为由 Windows 11 实机回归覆盖。
+- QA 复审（PR #12）dsh 写入安全：`install --target dsh` 在托管块不完整（有 start 缺 end）或 patch 顶层为映射形状时拒绝写入并给出修复指引——不再静默删除 start 之后的用户 patch 行，也不再写出 YAML 非法文件；`doctor` 对映射形状同样报配置损坏而非 ok。
+- QA 复审（PR #12）dsh 往返保真：无尾换行原文 `install→uninstall` 后逐字节还原（不再多出 1 字节分隔换行）；仅含托管块的新建 patch 卸载后删除空文件与仅含托管块的备份，不留 0 字节残留。
 
 ## 0.3.9 (2026-11-23)
 

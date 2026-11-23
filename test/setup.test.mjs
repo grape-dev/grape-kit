@@ -1,7 +1,7 @@
 import { test, after } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { mkdtempSync, readFileSync, writeFileSync, existsSync, rmSync, mkdirSync } from 'node:fs'
+import { mkdtempSync, readFileSync, writeFileSync, existsSync, rmSync, mkdirSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -247,4 +247,147 @@ test('Issue #17 仅 ~/.grape/config.json 配 base_url 时 doctor PASS 标注文�
   assert.equal(r.status, 0, r.stderr)
   assert.match(r.stdout, /\[ok\] GRAPE_BASE_URL: .*文件通道/, '文件通道必须 PASS 并标注来源')
   assert.match(r.stdout, /契约连通性/, '解析到地址后探针必须执行（不再依赖 env）')
+})
+
+/* ── Issue #20：auth init 单入口 + doctor 完整优先级视图 ── */
+
+const cleanCredEnv = {
+  GRAPE_AUTH_FILE: '', GRAPE_BASE_URL: '', GRAPE_API_TOKEN: '', GRAPE_API_TOKEN_ONCE: '',
+}
+
+test('Issue #20 auth init 写入 GRAPE_HOME/config.json（权限 600）并打印 env 通道命令', () => {
+  const h = home()
+  const grapeHome = join(h, 'grapehome')
+  const r = run(['auth', 'init', '--token', 'grape_fake_init', '--base-url', 'https://self.example'], h, { ...cleanCredEnv, GRAPE_HOME: grapeHome })
+  assert.equal(r.status, 0, r.stderr)
+  const cfgPath = join(grapeHome, 'config.json')
+  assert.ok(existsSync(cfgPath), `应写入 ${cfgPath}`)
+  const cfg = JSON.parse(readFileSync(cfgPath, 'utf8'))
+  assert.equal(cfg.token, 'grape_fake_init')
+  assert.equal(cfg.base_url, 'https://self.example')
+  // 权限位断言按平台分流（QA P2.8）：win32 无 600 权限位，chmod 为 no-op
+  if (process.platform !== 'win32') {
+    assert.equal(statSync(cfgPath).mode & 0o777, 0o600, '凭据文件权限应为 600')
+  }
+  // env 通道指引按平台分流：POSIX 打印 export，Windows 打印 setx（并提示需重启宿主）
+  if (process.platform === 'win32') {
+    assert.match(r.stdout, /setx GRAPE_API_TOKEN=/, 'Windows 应打印 setx 设置命令')
+    assert.match(r.stdout, /重启/, 'setx 只对新进程生效，应提示重启')
+  } else {
+    assert.match(r.stdout, /export GRAPE_API_TOKEN=/, 'POSIX 应打印 export 设置命令')
+  }
+  assert.match(r.stdout, /GRAPE_BASE_URL/)
+  assert.match(r.stdout, /GRAPE_API_TOKEN_ONCE[\s\S]*GRAPE_API_TOKEN[\s\S]*(GRAPE_AUTH_FILE|config\.json)/, '应说明优先级链')
+})
+
+test('Issue #20 auth init 拒绝非 grape_ 前缀 token 且不落盘', () => {
+  const h = home()
+  const grapeHome = join(h, 'grapehome')
+  const r = run(['auth', 'init', '--token', 'tko_nope'], h, { ...cleanCredEnv, GRAPE_HOME: grapeHome })
+  assert.notEqual(r.status, 0, '非 grape_ 前缀用户凭据应被拒绝')
+  assert.match(`${r.stderr}${r.stdout}`, /grape_/)
+  assert.ok(!existsSync(join(grapeHome, 'config.json')), '拒绝时不得写入文件通道')
+})
+
+/* ── QA 复审（PR #11）P1：auth init 写入目标必须与 resolveCredentials 解析目标一致 ── */
+
+test('QA#P1 auth init 尊重 GRAPE_AUTH_FILE：写入目标=解析目标，一次写入后文件通道即生效', () => {
+  const h = home()
+  const grapeHome = join(h, 'grapehome')
+  const authFile = join(h, 'custom-auth.json')
+  // 预置旧凭据：旧实现只写 GRAPE_HOME/config.json，resolveCredentials 读 GRAPE_AUTH_FILE 旧值——单入口不成立
+  writeFileSync(authFile, JSON.stringify({ token: 'grape_old_secret', base_url: 'https://old.example' }))
+  const r = run(['auth', 'init', '--token', 'grape_new_secret', '--base-url', 'https://new.example'], h,
+    { ...cleanCredEnv, GRAPE_HOME: grapeHome, GRAPE_AUTH_FILE: authFile })
+  assert.equal(r.status, 0, r.stderr)
+  const written = JSON.parse(readFileSync(authFile, 'utf8'))
+  assert.equal(written.token, 'grape_new_secret', '应写入 GRAPE_AUTH_FILE 指向的文件')
+  assert.equal(written.base_url, 'https://new.example')
+  assert.ok(!existsSync(join(grapeHome, 'config.json')), 'GRAPE_AUTH_FILE 已设置时不得另写 GRAPE_HOME/config.json')
+  // 写入目标与解析目标一致：doctor 生效来源=文件通道 authFile，base_url 取新值（不回显 token）
+  const d = run(['doctor'], h, {
+    ...cleanCredEnv, GRAPE_HOME: grapeHome, GRAPE_AUTH_FILE: authFile, GRAPE_KIT_SKIP_UPDATE_CHECK: '1',
+  })
+  assert.equal(d.status, 0, d.stderr)
+  assert.match(d.stdout, new RegExp(`当前生效凭据来源[^\\n]*文件 ${authFile}`), '生效凭据来源应命中 GRAPE_AUTH_FILE')
+  assert.match(d.stdout, /https:\/\/new\.example/, '生效 base_url 应为新写入值')
+})
+
+test('Issue #20 doctor 展示 runtime > env > file 完整优先级链且不回显 token', () => {
+  const h = home()
+  const grapeHome = join(h, 'grapehome')
+  mkdirSync(grapeHome, { recursive: true })
+  writeFileSync(join(grapeHome, 'config.json'), JSON.stringify({ token: 'grape_file_secret', base_url: 'https://file.example' }))
+  const r = run(['doctor'], h, {
+    ...cleanCredEnv, GRAPE_HOME: grapeHome, GRAPE_API_TOKEN: 'grape_env_secret', GRAPE_BASE_URL: 'https://env.example',
+    GRAPE_KIT_SKIP_UPDATE_CHECK: '1',
+  })
+  assert.equal(r.status, 0, r.stderr)
+  assert.match(r.stdout, /凭据优先级[^\n]*runtime/, '应列出 runtime 档')
+  assert.match(r.stdout, /凭据优先级[^\n]*env/, '应列出 env 档')
+  assert.match(r.stdout, /凭据优先级[^\n]*file/, '应列出 file 档')
+  assert.doesNotMatch(r.stdout, /grape_env_secret|grape_file_secret/, '不得回显 token')
+})
+
+/* ── QA 复审（PR #11）P1：doctor 解析失败不得把文件内容透传进输出 ── */
+
+test('QA#P1 doctor 文件通道解析失败：报错固定为「解析失败」，不回显 JSON.parse 携带的文件原文片段', () => {
+  const h = home()
+  const grapeHome = join(h, 'grapehome')
+  mkdirSync(grapeHome, { recursive: true })
+  // 非法 JSON：JSON.parse 的 e.message 会带出原文（实测 `Unexpected token 'k', "tk_9…"`），
+  // 凭据片段由此进入 doctor 输出——违反 Spec「never echo the token」
+  writeFileSync(join(grapeHome, 'config.json'), 'tk_9leaked_fragment_not_json')
+  const r = run(['doctor'], h, { ...cleanCredEnv, GRAPE_HOME: grapeHome, GRAPE_KIT_SKIP_UPDATE_CHECK: '1' })
+  assert.equal(r.status, 0, '解析失败按未配置处理，doctor 不非零退出', r.stderr)
+  const out = `${r.stdout}${r.stderr}`
+  assert.match(out, /解析失败/, '应提示解析失败')
+  assert.doesNotMatch(out, /tk_9leaked/, '不得回显文件内容片段')
+})
+
+/* ── QA 复审（PR #11）硬违规 1：未命中档不得渲染成 [ok]，双打印回归 ── */
+
+test('QA#硬违规1 doctor 优先级视图：未命中/被覆盖档渲染 [--] 信息行，只有命中档给 [ok]', () => {
+  // 场景 1：env 命中——① runtime 未命中、③ file 未命中，只有 ② env 是 [ok]
+  const h = home()
+  const r = run(['doctor'], h, {
+    ...cleanCredEnv, GRAPE_HOME: join(h, 'grapehome'), GRAPE_API_TOKEN: 'grape_env_secret',
+    GRAPE_KIT_SKIP_UPDATE_CHECK: '1',
+  })
+  assert.equal(r.status, 0, r.stderr)
+  const prio = r.stdout.split('\n').filter((l) => l.includes('凭据优先级'))
+  assert.equal(prio.length, 3, `应有三行优先级，实际:\n${r.stdout}`)
+  assert.match(prio[0], /^\s*\[--\]/, `runtime 未命中应为信息行，实际: ${prio[0]}`)
+  assert.doesNotMatch(prio[0], /\[ok\]/, '未命中档不得渲染 [ok]')
+  assert.match(prio[1], /\[ok\].*命中/, `env 命中档应为 [ok]，实际: ${prio[1]}`)
+  assert.match(prio[2], /^\s*\[--\]/, `file 未命中应为信息行，实际: ${prio[2]}`)
+
+  // 场景 2：全部未命中——三行都不是 [ok]；凭据 FAIL 行保持既有 [!!] 约定
+  const h2 = home()
+  const r2 = run(['doctor'], h2, { ...cleanCredEnv, GRAPE_HOME: join(h2, 'grapehome'), GRAPE_KIT_SKIP_UPDATE_CHECK: '1' })
+  assert.equal(r2.status, 0, r2.stderr)
+  const prio2 = r2.stdout.split('\n').filter((l) => l.includes('凭据优先级'))
+  assert.equal(prio2.length, 3)
+  for (const l of prio2) assert.doesNotMatch(l, /\[ok\]/, `未命中档不得渲染 [ok]: ${l}`)
+  assert.match(r2.stdout, /\[!!\] GRAPE_API_TOKEN/, '真实 FAIL 仍按既有约定渲染 [!!]')
+})
+
+test('QA#硬违规1 doctor 优先级视图：file 命中档 [ok] 且 GRAPE_API_TOKEN 行随文件通道转 ok', () => {
+  const h = home()
+  const grapeHome = join(h, 'grapehome')
+  mkdirSync(grapeHome, { recursive: true })
+  writeFileSync(join(grapeHome, 'config.json'), JSON.stringify({ token: 'grape_file_secret', base_url: 'https://file.example' }))
+  const r = run(['doctor'], h, { ...cleanCredEnv, GRAPE_HOME: grapeHome, GRAPE_KIT_SKIP_UPDATE_CHECK: '1' })
+  assert.equal(r.status, 0, r.stderr)
+  const prio = r.stdout.split('\n').filter((l) => l.includes('凭据优先级'))
+  assert.match(prio[2], /\[ok\].*命中，当前生效/, `file 命中档应 [ok]，实际: ${prio[2]}`)
+  assert.match(r.stdout, /\[ok\] GRAPE_API_TOKEN: ok（文件通道/, '文件通道有效时 GRAPE_API_TOKEN 行应为 ok')
+})
+
+test('QA doctor --target opencode 检查项只打印一次（双打印回归）', () => {
+  const h = home()
+  const r = run(['doctor', '--target', 'opencode'], h, { GRAPE_KIT_SKIP_UPDATE_CHECK: '1' })
+  assert.equal(r.status, 0, r.stderr)
+  const occurrences = r.stdout.split('\n').filter((l) => l.includes('node >= 20')).length
+  assert.equal(occurrences, 1, `同一检查项只允许出现一次，实际出现 ${occurrences} 次:\n${r.stdout}`)
 })

@@ -177,8 +177,7 @@ test('未知 target 报错列出 dsh；help 用法与宿主清单含 dsh；--tar
   assert.match(`${bad.stderr}${bad.stdout}`, /dsh/, '未知 target 报错应列出 dsh')
 
   const help = run(['help'], h)
-  assert.match(help.stdout, /--target opencode\|workbuddy\|codearts\|officeace\|dsh|dsh/)
-  assert.match(help.stdout, /--target dsh/)
+  assert.match(help.stdout, /用法: node setup\.mjs install\|uninstall\|doctor \[--target opencode\|workbuddy\|codearts\|officeace\|dsh\] \[--probe\]/)
 
   const all = run(['install', '--target', 'all'], h)
   assert.equal(all.status, 0, all.stderr)
@@ -195,4 +194,60 @@ test('dsh-mcp-client 安装失败仍退出 0，托管块已写入并给出指引
   assert.ok(existsSync(patchPath(h)))
   assert.match(r.stdout, /@deepseek-ai\/dsh-mcp-client/, '应给出依赖名')
   assert.match(r.stdout, /corepack enable pnpm|plugin --profile web add/, '应给出可执行安装指引')
+})
+
+/* ---------- QA 复审（PR #12）：S1 无尾换行还原 / S2 不完整块拒写 / S3 映射形状拒写 / S4 新建文件无残留 ---------- */
+
+test('dsh 无尾换行原文：install→uninstall 逐字节还原，不残留补的分隔换行', () => {
+  const h = home()
+  const dir = join(h, '.dsh', 'profiles', 'web')
+  mkdirSync(dir, { recursive: true })
+  const noEol = USER_PATCH.replace(/\n$/, '')
+  writeFileSync(join(dir, 'cordis.patch.yml'), noEol)
+
+  assert.equal(run(['install', '--target', 'dsh'], h).status, 0)
+  assert.match(readFileSync(join(dir, 'cordis.patch.yml'), 'utf8'), /- id: grape-kit/, '托管块应已写入')
+  const u = run(['uninstall', '--target', 'dsh'], h)
+  assert.equal(u.status, 0, u.stderr)
+  assert.equal(readFileSync(join(dir, 'cordis.patch.yml'), 'utf8'), noEol, '无尾换行原文必须逐字节还原（不得多出 1 字节）')
+})
+
+test('dsh 不完整托管块（有 start 缺 end）：install 拒绝写入，不删除其后的用户 patch 行', () => {
+  const h = home()
+  const dir = join(h, '.dsh', 'profiles', 'web')
+  mkdirSync(dir, { recursive: true })
+  const broken = `${USER_PATCH}# Grape Kit DSH integration start\n- insert:\n    - id: mine\n`
+  writeFileSync(join(dir, 'cordis.patch.yml'), broken)
+
+  const r = run(['install', '--target', 'dsh'], h)
+  assert.notEqual(r.status, 0, '不完整块必须拒绝写入并给出非零退出')
+  assert.match(`${r.stdout}${r.stderr}`, /不完整|修复指引|integration end/, '应给出修复指引')
+  assert.equal(readFileSync(join(dir, 'cordis.patch.yml'), 'utf8'), broken, '拒绝写入时不得改动用户 patch 行')
+})
+
+test('dsh 顶层映射形状 patch：install 拒绝写入，避免追加序列项破坏 YAML', () => {
+  const h = home()
+  const dir = join(h, '.dsh', 'profiles', 'web')
+  mkdirSync(dir, { recursive: true })
+  const mapping = '# 用户映射形状 patch\nplugins:\n  foo:\n    enabled: true\n'
+  writeFileSync(join(dir, 'cordis.patch.yml'), mapping)
+
+  const r = run(['install', '--target', 'dsh'], h)
+  assert.notEqual(r.status, 0, '映射形状必须拒绝写入并给出非零退出')
+  assert.match(`${r.stdout}${r.stderr}`, /顶层不是 YAML 序列|序列文件/, '应说明形状不合法与修复方式')
+  assert.equal(readFileSync(join(dir, 'cordis.patch.yml'), 'utf8'), mapping, '拒绝写入时保持原文')
+
+  const d = run(['doctor', '--target', 'dsh'], h)
+  assert.doesNotMatch(d.stdout, /\[ok\][^\n]*dsh 托管块/, '未写入托管块时 doctor 不得报 ok')
+})
+
+test('dsh 新建文件卸载后不残留空 patch 与仅含托管块的备份', () => {
+  const h = home()
+  assert.equal(run(['install', '--target', 'dsh'], h).status, 0)
+  assert.ok(existsSync(patchPath(h)))
+
+  const u = run(['uninstall', '--target', 'dsh'], h)
+  assert.equal(u.status, 0, u.stderr)
+  assert.ok(!existsSync(patchPath(h)), '仅剩托管块的文件应在卸载后删除（不留 0 字节 patch）')
+  assert.deepEqual(backupsIn(join(h, '.dsh', 'profiles', 'web')), [], '不得残留仅含托管块的备份')
 })
