@@ -686,8 +686,12 @@ test('#19 README 双语设计原则：不再宣称「永不干预」，如实写
 
 test('#19 CHANGELOG 登记 finish 新增可选入参（§7 工具面/参数变化）', () => {
   const cl = readFileSync(new URL('../CHANGELOG.md', import.meta.url), 'utf8')
-  const unreleased = cl.split('## Unreleased')[1]?.split('## 0.3.9')[0] || ''
-  assert.match(unreleased, /新增可选[^\n]*owner\/repo\/issue_number[^\n]*(兜底派发|用于兜底)/, 'Unreleased Fixed 应含一句可选入参说明')
+  // #19 变更已随 0.3.10 发布：按**发布节**取段（发版后 Unreleased 段为空，按 `## Unreleased` 切段会取到空串）
+  const at = cl.search(/^## 0\.3\.10 \(/m)
+  assert.ok(at >= 0, 'CHANGELOG 应有 0.3.10 发布节')
+  const next = cl.slice(at + 1).search(/^## /m)
+  const section = next === -1 ? cl.slice(at) : cl.slice(at, at + 1 + next)
+  assert.match(section, /新增可选[^\n]*owner\/repo\/issue_number[^\n]*(兜底派发|用于兜底)/, '0.3.10 发布节应含一句可选入参说明')
 })
 
 test('#19 handoff 失败但客户端已兜底派发：透出原文并标注覆盖，不再要求手动补发', async () => {

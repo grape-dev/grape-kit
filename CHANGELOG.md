@@ -4,6 +4,10 @@
 
 > 发布口径说明：npm 已发布版本不可回写——0.3.3 的 npm tarball 内 CHANGELOG 仅含本节（10 行）、README 尚无本节链接且把 0.3.2 记为 2026-11-14（commit 日）。因此「npm 页面与仓内 CHANGELOG 一致」自下一版发布起生效。
 
+## Unreleased
+
+暂无待发布变更。下一开发周期的用户可见变更先落本段（按 Added / Changed / Fixed 归类，见 CONTRIBUTING §7），发版时并入对应版本节。
+
 ## 0.3.10 (2026-11-23)
 
 ### Added
@@ -22,7 +26,11 @@
 - QA 复审（PR #11）硬违规：`--clean-global` 的 rc 备份曾保留完整 `export GRAPE_API_TOKEN=…` 明文行且残留检测不扫备份，卸载后打印「未检测到残留」实为假象——备份只保留非凭据行，旧版本留下的含凭据 `.bak-grapemcp-*` 备份纳入残留检测并由 `--clean-global` 清零。
 - QA 复审（PR #11）主命令不可达：`uninstall --clean-global` 不带 `--target` 时曾先走宿主自动解析，无宿主痕迹即 exit 1、清理从未执行——见 Added（全局清理前置于宿主解析）。
 - 测试可移植性：600 权限位与 rc 删除断言按平台分流，破坏性清理用例在 win32 skip（`HOME` 隔离对 win32 `homedir()` 无效）；win32 行为由 Windows 11 实机回归覆盖。
-- `grape_takeover_finish`（`request_only=false` 正式交回）交回后不再静默停在下一节点：**派发指针只认 `next_seq`**（`next_seq>0` 平台已派发则不重复；`handoff_seq` 仅作交回事件披露，不据此判已派发），`next_seq=0` 时按场景链**兜底补发**（范围仅 Spec 指定的 coding→qa，复用 trigger 同源 A2A 通道）并回填 `next_seq`；因 `remote_may_still_run` 等阻塞、缺仓库/issue 标识或补发失败时返回**显式告警 + `pending_dispatch` 待派发标记**（附 `grape_trigger_pipeline(agent=…)` 补发指引）。标记不走 task_messages——finish 在服务端同步关会话，事后向已结束会话写 progress 必 409 not_active；标记由会话记录派生，`grape_takeover_status` 对已结束会话可查（`finished + next_agent + 派发指针 next_seq=0` 即派发未证实；仅有 `handoff_seq>0` 不作已派发证据，降级为「派发未证实」），渲染给出目标/原因/补发指引。派发目标只取 `issue_number`（平台 `issue.id` 是内部主键，不再当单号兜底）；`next_step` 仅整串 agent 名命中，散文不解析（由场景链兜底）。工具描述与真实行为对齐，「链不断」承诺不再与静默 grace 相悖。finish 新增可选 owner/repo/issue_number，会话缺仓库标识时用于兜底派发。交回渲染的 `handoff` 字段按形状分派：字符串原样作标签，对象一律按结构化口径描述——平台返回 `{"ok":false,"error":"HTTP 405: …"}` 时**醒目透出 error 原文**并给 `grape_trigger_pipeline(agent=…)` 手动补发指引，不再输出 `handoff=[object Object]`。
+- `grape_takeover_finish`（`request_only=false` 正式交回）交回后不再静默停在下一节点：**派发指针只认 `next_seq`**（`next_seq>0` 平台已派发则不重复；`handoff_seq` 仅作交回事件披露，不据此判已派发），`next_seq=0` 时按场景链**兜底补发**（范围仅 Spec 指定的 coding→qa，复用 trigger 同源 A2A 通道）并回填 `next_seq`；因 `remote_may_still_run` 等阻塞、缺仓库/issue 标识或补发失败时返回**显式告警 + `pending_dispatch` 待派发标记**（附 `grape_trigger_pipeline(agent=…)` 补发指引）。工具描述与真实行为对齐，「链不断」承诺不再与静默 grace 相悖。finish 新增可选 owner/repo/issue_number，会话缺仓库标识时用于兜底派发。
+- 待派发标记的落盘通道：标记不走 task_messages——finish 在服务端同步关会话，事后向已结束会话写 progress 必 409 not_active；标记由会话记录派生，`grape_takeover_status` 对已结束会话可查（`finished + next_agent + 派发指针 next_seq=0` 即派发未证实；仅有 `handoff_seq>0` 不作已派发证据，降级为「派发未证实」），渲染给出目标/原因/补发指引，并注明**客户端兜底只写事件、不回填会话 `next_seq`**，故 `next_seq=0` 不构成「未派发」证据，需查事件核实。
+- 派发目标与派发源：派发目标只取 `issue_number`（平台 `issue.id` 是内部主键，不再当单号兜底）；`next_step` 仅整串 agent 名命中，散文不解析（由场景链兜底）。
+- 交回渲染的 `handoff` 字段按形状分派：字符串原样作标签，对象一律按结构化口径描述——平台返回 `{"ok":false,"error":"HTTP 405: …"}` 时**醒目透出 error 原文**并给 `grape_trigger_pipeline(agent=…)` 手动补发指引，不再输出 `handoff=[object Object]`。
+- 交回与派发的三处「未证实当成功」收口（QA 终审追加项）：**交回未成功**（平台 `ok=false`，或 `changed=false` 未真正落账）时**不再派发下一节点**——否则下一节点会接手一个未交回的任务，改为落待派发并渲染「交回未成功」，标题写「交回未完成」、不再输出「链不断／无需手动 trigger」；平台给了**白名单外节点名**（实测 `reviewer`）时**不按场景链改写**为 qa，原样上报「未知节点」待人工裁决（区分「平台未给」与「给了但不认识」）；**补发响应缺事件 `seq`** 时判「派发未证实」并落待派发，不再判已派发、不再渲染「已自动派发 seq=0」。`takeover_status` 的派发指针/跳过计数改走 `seqOf` 单一口径，不再内联重算。
 
 ## 0.3.9 (2026-11-23)
 

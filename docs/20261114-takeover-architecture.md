@@ -114,7 +114,13 @@ sequenceDiagram
 | `next_seq=0` 且目标不在 coding→qa 范围（vod/issue/qa 等节点） | 不改其它节点派发行为（Spec Out of Scope），只如实披露 | `兜底范围仅 coding→qa` |
 | `remote_may_still_run` 等警告码、`skipped_dispatches>0`、缺 owner/repo/issue_number 标识、补发失败 | 不瞎派：`dispatch.status=pending` + `pending_dispatch{agent,owner,repo,issue_number,reason}` 随交回结果返回。**标记不走 task_messages**——finish 在服务端同步关会话，事后向已结束会话写 progress 必 409 not_active（mgmt 路由实测）；标记由**会话记录派生**：`grape_takeover_status` 对已结束会话仍可查，`finished + next_agent + 派发指针 next_seq=0` 即派发未证实（仅 `handoff_seq>0` 不作已派发证据，降级为「交回已写、派发未证实」并提示先核实事件），渲染给出目标/原因/补发指引 | 显式告警 + `grape_trigger_pipeline(agent=…)` 补发指引（补发前先 `grape_get_issue_events` 核实，防兜底已成功时重复派发） |
 
-**派发目标口径**：`issue_number` 才是单号；平台 `/tasks` 的 `issue.id`（#19 实测 `18808`）是内部主键，**不能**当 `issue_number` 兜底，否则派发会打到错误 issue。会话未带仓库标识时用 `owner`/`repo`/`issue_number` 入参补齐；平台未给下一节点且不在兜底范围（如 qa 交回、非 coding 节点）返回 `no_next_node` 或 `out_of_scope`，属正常收尾。**会话未带 `agent_type` 时同样按 `out_of_scope` 处理**：无当前节点标识就无法确认兜底范围（coding→qa），宁可不派、由渲染如实披露，不静默。
+**交回成功度前置（未成功不派发）**：上表的兜底只在交回**本身成功**之后才有意义。平台返回 `ok=false`（可达面：`200 + ok:false`，以及 `401` 经 CLI 回退包装成 `ok:false`）或 `changed=false`（未真正落账）时，kit **不派发**下一节点——否则下一节点会接手一个未交回的任务，属「部分成功当全部成功」的同一类错；此时落 `dispatch.status=pending`、渲染「交回未成功」、标题写「交回未完成」，不再输出「链不断／无需手动 trigger」。
+
+**「未给」与「不认识」是两件事**：平台 `next_agent` 为空或缺省 → 按场景链 coding→qa 兜底（正常路径）；平台给了**白名单外**节点名（实测 `reviewer`）→ kit 不把平台决定顶掉改写成 qa，原样上报「未知节点」并落 `pending` 待人工裁决。`next_step` 的散文不算「给了节点名」，仍按场景链兜底。
+
+**补发未证实不判成功**：兜底 A2A 响应缺事件 `seq`（200 形态 `{}`）时 `dispatch.status=pending`（`cause=dispatch_unconfirmed`），转人工查事件核实——不渲染 `seq=0`、不宣称「已自动派发」。
+
+**派发目标口径**：`issue_number` 才是单号；平台 `/tasks` 的 `issue.id`（#19 实测 `18808`）是内部主键，**不能**当 `issue_number` 兜底，否则派发会打到错误 issue。会话未带仓库标识时用 `owner`/`repo`/`issue_number` 入参补齐；平台未给下一节点且不在兜底范围（如 qa 交回、非 coding 节点）返回 `no_next_node` 或 `out_of_scope`，属正常收尾。**会话未带 `agent_type` 时同样按 `out_of_scope` 处理**：无当前节点标识就无法确认兜底范围（coding→qa），宁可不派、由渲染如实披露，不静默。`out_of_scope` 渲染另提示「平台若未派发则该节点会停在当前节点」，不给「无需 trigger」的错觉。
 
 **待派发的阻塞判据**：只认警告**稳定码**（`remote_may_still_run` / `branch_conflict` / `merge_conflict`，取 `code:` 前缀精确匹配）。不匹配散文子串——「branch_sync: 远端无冲突」含「冲突」二字但不阻塞；平台 warnings 是稳定 code 列表，按码匹配不漏不误伤。
 

@@ -162,6 +162,7 @@ npx -y @grape-dev/grape-kit intro     # 随时重看能力地图
 
 | 版本 | 日期 | 要点 |
 |---|---|---|
+| 0.3.10 | 2026-11-23 | 接管交回派发收口（#19）：派发指针只认 `next_seq`（`handoff_seq` 只是交回事件序号，不作派发证据）· 平台漏派时客户端兜底补发 coding→qa（与 trigger 同源 A2A 通道）并回填 `next_seq` · 受阻（`remote_may_still_run`／缺仓库-issue 标识／补发失败）落 `pending_dispatch` 待派发标记 + 可读告警，不再静默 grace；三处「未证实当成功」收口：交回未成功（`ok=false`／`changed=false`）不派发下一节点 · 白名单外节点名（如 `reviewer`）按「未知」上报不改写为 qa · 补发响应缺事件 `seq` 判未证实；#20 凭据/卸载批：`auth init` 唯一写入入口 · `uninstall --clean-global`（`--dry-run`、rc 备份不留凭据行、`_npx` 收窄到 grape-kit）· doctor 完整凭据优先级视图；单测 156→221 |
 | 0.3.9 | 2026-11-23 | 端云接管全链路硬化（#12）：takeover_start 分支/MR 前置检查 · warnings 全量透出 · Node 跨平台接管三脚本（report/request-finish/finish）· 409 agent_mismatch 友好提示 · bundle 脚本 {{CWD}} 渲染 · doctor 凭据来源行；#17 修复批：intro 子命令 + 能力地图（无凭据先给 3 步 API Key 指引）· trigger_pipeline agent 参数（可从指定节点续跑）· doctor base_url 双通道并标注生效来源 · 审核三工具 native 崩溃修复；单测 136→156 |
 | 0.3.8 | 2026-11-20 | 审核三工具（grape_review_pass / grape_review_reject / grape_confirm_done，工具面 36→39）· issues 表新增「仓库」列 · doctor 识别 ~/.grape/config.json 文件通道凭证（不再误报 FAIL） |
 | 0.3.7 | 2026-11-20 | trigger/task_status 图形化渲染（触发即出节点链图 · 状态查询出卡片+进度条+下一步指引）· Quick Start 重构对齐 devkit 模式 + Capabilities 总览节 · 卸载清理 receipt · Codex/hermes 移出露出面 |
@@ -174,11 +175,11 @@ npx -y @grape-dev/grape-kit intro     # 随时重看能力地图
 | 0.3.0 | 2026-11-11 | 传输层原生化：原生 HTTP 直连，grape CLI/Python 变可选（401 回退通道） |
 | 0.2.x | 2026-11-09 前 | 13→31 工具扩展 · worker_onboard · B1 接管闭环 |
 
-逐版本完整记录（发布日期、工具面变化、行为修复，覆盖 npm 全部 19 条发布记录——含 `0.0.0-stage` 占位包，0.2.3 从未发布）：[CHANGELOG.md](CHANGELOG.md)
+逐版本完整记录（发布日期、工具面变化、行为修复，覆盖 npm 全部 20 条发布记录——含 `0.0.0-stage` 占位包，0.2.3 从未发布）：[CHANGELOG.md](CHANGELOG.md)
 
 ## 设计原则
 
-- **只触发、只观察、可推进、可接管**：A2A 编排默认服务端驱动；takeover 交回时平台漏派 coding→qa（`next_seq=0`）由客户端兜底补发，超出该范围保持平台原行为；接管以会话原语完成原子让渡与交回
+- **只触发、只观察、可推进、可接管**：A2A 编排默认服务端驱动；takeover 交回时平台漏派 coding→qa（`next_seq=0`）由客户端兜底补发——且只在交回**本身成功**之后，交回未成功绝不把下一节点拉进一个未交回的任务；白名单外节点名按「未知」上报而不被改写；超出该范围保持平台原行为；接管以会话原语完成原子让渡与交回
 - **scope 是第一道门禁**：契约 219 命令中 session_only 的 28 个（git-repo 等）对外部 token 必 403，直接排除；`tko_` 接管凭据仅 repo_session 能力、结束即吊销
 - **无 UI 补偿**：工具返回即 Markdown 表格 / 节点链 / 事件时间线；`wait_task` 轮询带阶段摘要与超时提示
 
@@ -192,7 +193,7 @@ npx -y @grape-dev/grape-kit intro     # 随时重看能力地图
 
 ```bash
 npm install
-npm test        # 189 个单测（fake-grape 替身，不依赖真实服务端）
+npm test        # 221 个单测（fake-grape 替身，不依赖真实服务端）
 npm run smoke   # 真实 stdio JSON-RPC 往返：initialize → tools/list → tools/call
 ```
 
