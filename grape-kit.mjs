@@ -116,6 +116,7 @@ function fileChannelInfo() {
 /**
  * 凭据完整优先级视图（runtime > env > file）：逐档列出命中/未命中与原因，不回显 token。
  * 与 resolveCredentials 同源判定，避免 doctor 展示层另写一套优先级。
+ * 渲染约定：命中档 ok → [ok]；未命中/被覆盖档 note → [--] 信息行（无修复动作）。
  */
 function priorityChecks() {
   const env = process.env
@@ -127,24 +128,24 @@ function priorityChecks() {
     '凭据优先级 ① runtime（GRAPE_API_TOKEN_ONCE，仅进程内）',
     env.GRAPE_API_TOKEN_ONCE
       ? 'ok（命中，当前生效；仅本进程）'
-      : 'ok（未命中：未设置，仅一次性参数场景使用）',
+      : 'note（未命中：未设置，仅一次性参数场景使用）',
   ])
 
   const envHit = effective === 'env:GRAPE_API_TOKEN'
   checks.push([
     '凭据优先级 ② env（GRAPE_API_TOKEN / GRAPE_BASE_URL）',
     env.GRAPE_API_TOKEN
-      ? (envHit ? 'ok（命中，当前生效）' : 'ok（已设置，被 runtime 覆盖）')
-      : 'ok（未命中：GRAPE_API_TOKEN 为空）',
+      ? (envHit ? 'ok（命中，当前生效）' : 'note（已设置，被 runtime 覆盖）')
+      : 'note（未命中：GRAPE_API_TOKEN 为空）',
   ])
 
   let fileDetail
-  if (!f.exists) fileDetail = `未命中：文件不存在（${f.authFile}）`
-  else if (f.parseError) fileDetail = '未命中：文件解析失败（内容不回显）'
-  else if (!f.cfg || !f.cfg.token) fileDetail = `未命中：文件存在但无 token（${f.authFile}）`
-  else if (effective === `file:${f.authFile}`) fileDetail = `命中，当前生效（${f.authFile}；不回显 token）`
-  else fileDetail = `已配置，被更高优先级覆盖（${f.authFile}）`
-  checks.push(['凭据优先级 ③ file（GRAPE_AUTH_FILE 或 GRAPE_HOME/config.json）', `ok（${fileDetail}）`])
+  if (!f.exists) fileDetail = `note（未命中：文件不存在（${f.authFile}））`
+  else if (f.parseError) fileDetail = 'note（未命中：文件解析失败（内容不回显））'
+  else if (!f.cfg || !f.cfg.token) fileDetail = `note（未命中：文件存在但无 token（${f.authFile}））`
+  else if (effective === `file:${f.authFile}`) fileDetail = `ok（命中，当前生效（${f.authFile}；不回显 token））`
+  else fileDetail = `note（已配置，被更高优先级覆盖（${f.authFile}））`
+  checks.push(['凭据优先级 ③ file（GRAPE_AUTH_FILE 或 GRAPE_HOME/config.json）', fileDetail])
   return checks
 }
 
@@ -199,8 +200,15 @@ function connectivityCheck(baseUrl) {
     baseUrl], { encoding: 'utf8', timeout: 20_000 })
   return String(r.stdout).trim() || '探测失败'
 }
+/** 检查项渲染三态：ok 前缀 → [ok]（通过）；note 前缀 → [--]（信息行，如优先级视图的
+ *  未命中/被覆盖档——非失败、无修复动作，混进 [!!] 或 [ok] 都会误导「全部 [ok] 即就绪」的约定）；
+ *  其余 → [!!]（失败，必须给出修复动作）。 */
 function printChecks(checks) {
-  for (const [k, v] of checks) console.log(`  ${String(v).startsWith('ok') ? '[ok]' : '[!!]'} ${k}: ${v}`)
+  for (const [k, v] of checks) {
+    const s = String(v)
+    const mark = s.startsWith('ok') ? '[ok]' : s.startsWith('note') ? '[--]' : '[!!]'
+    console.log(`  ${mark} ${k}: ${v}`)
+  }
 }
 
 /** 纯 JSON 宿主（mcpServers 容器）条目检出；解析失败带 error，供 doctor 区分「未装配」与「配置损坏」 */
@@ -925,7 +933,6 @@ Promise.all([
   let updateStatus = { state: 'unavailable' }
   try { updateStatus = await checkUpdateStatus(pkgVersion) } catch { /* 版本检查绝不影响 doctor */ }
   checks.push(['版本更新', updateCheckLine(pkgVersion, updateStatus)])
-  for (const [k, v] of checks) console.log(`  ${String(v).startsWith('ok') ? '[ok]' : '[!!]'} ${k}: ${v}`)
   printChecks(checks)
 }
 
@@ -986,7 +993,7 @@ const HOSTS = {
        export GRAPE_API_TOKEN=grape_你的Key
 【第 2 步 · 自检】
        npx -y @grape-dev/grape-kit doctor --probe
-  全部 [ok] 即就绪；每个 [!!] 行都会给出对应修复动作。
+  没有 [!!] 行即就绪（[--] 为信息行）；每个 [!!] 行都会给出对应修复动作。
 【第 3 步 · 重启宿主会话】然后对 agent 说一句话即可（能力清单见下）。
 完整文档：https://gitcode.com/grape-dev/grape-kit/blob/main/README.md
 ──────────────────────────────────────────────`)

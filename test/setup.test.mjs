@@ -335,3 +335,50 @@ test('QA#P1 doctor 文件通道解析失败：报错固定为「解析失败」�
   assert.match(out, /解析失败/, '应提示解析失败')
   assert.doesNotMatch(out, /tk_9leaked/, '不得回显文件内容片段')
 })
+
+/* ── QA 复审（PR #11）硬违规 1：未命中档不得渲染成 [ok]，双打印回归 ── */
+
+test('QA#硬违规1 doctor 优先级视图：未命中/被覆盖档渲染 [--] 信息行，只有命中档给 [ok]', () => {
+  // 场景 1：env 命中——① runtime 未命中、③ file 未命中，只有 ② env 是 [ok]
+  const h = home()
+  const r = run(['doctor'], h, {
+    ...cleanCredEnv, GRAPE_HOME: join(h, 'grapehome'), GRAPE_API_TOKEN: 'grape_env_secret',
+    GRAPE_KIT_SKIP_UPDATE_CHECK: '1',
+  })
+  assert.equal(r.status, 0, r.stderr)
+  const prio = r.stdout.split('\n').filter((l) => l.includes('凭据优先级'))
+  assert.equal(prio.length, 3, `应有三行优先级，实际:\n${r.stdout}`)
+  assert.match(prio[0], /^\s*\[--\]/, `runtime 未命中应为信息行，实际: ${prio[0]}`)
+  assert.doesNotMatch(prio[0], /\[ok\]/, '未命中档不得渲染 [ok]')
+  assert.match(prio[1], /\[ok\].*命中/, `env 命中档应为 [ok]，实际: ${prio[1]}`)
+  assert.match(prio[2], /^\s*\[--\]/, `file 未命中应为信息行，实际: ${prio[2]}`)
+
+  // 场景 2：全部未命中——三行都不是 [ok]；凭据 FAIL 行保持既有 [!!] 约定
+  const h2 = home()
+  const r2 = run(['doctor'], h2, { ...cleanCredEnv, GRAPE_HOME: join(h2, 'grapehome'), GRAPE_KIT_SKIP_UPDATE_CHECK: '1' })
+  assert.equal(r2.status, 0, r2.stderr)
+  const prio2 = r2.stdout.split('\n').filter((l) => l.includes('凭据优先级'))
+  assert.equal(prio2.length, 3)
+  for (const l of prio2) assert.doesNotMatch(l, /\[ok\]/, `未命中档不得渲染 [ok]: ${l}`)
+  assert.match(r2.stdout, /\[!!\] GRAPE_API_TOKEN/, '真实 FAIL 仍按既有约定渲染 [!!]')
+})
+
+test('QA#硬违规1 doctor 优先级视图：file 命中档 [ok] 且 GRAPE_API_TOKEN 行随文件通道转 ok', () => {
+  const h = home()
+  const grapeHome = join(h, 'grapehome')
+  mkdirSync(grapeHome, { recursive: true })
+  writeFileSync(join(grapeHome, 'config.json'), JSON.stringify({ token: 'grape_file_secret', base_url: 'https://file.example' }))
+  const r = run(['doctor'], h, { ...cleanCredEnv, GRAPE_HOME: grapeHome, GRAPE_KIT_SKIP_UPDATE_CHECK: '1' })
+  assert.equal(r.status, 0, r.stderr)
+  const prio = r.stdout.split('\n').filter((l) => l.includes('凭据优先级'))
+  assert.match(prio[2], /\[ok\].*命中，当前生效/, `file 命中档应 [ok]，实际: ${prio[2]}`)
+  assert.match(r.stdout, /\[ok\] GRAPE_API_TOKEN: ok（文件通道/, '文件通道有效时 GRAPE_API_TOKEN 行应为 ok')
+})
+
+test('QA doctor --target opencode 检查项只打印一次（双打印回归）', () => {
+  const h = home()
+  const r = run(['doctor', '--target', 'opencode'], h, { GRAPE_KIT_SKIP_UPDATE_CHECK: '1' })
+  assert.equal(r.status, 0, r.stderr)
+  const occurrences = r.stdout.split('\n').filter((l) => l.includes('node >= 20')).length
+  assert.equal(occurrences, 1, `同一检查项只允许出现一次，实际出现 ${occurrences} 次:\n${r.stdout}`)
+})
