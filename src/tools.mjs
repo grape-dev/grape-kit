@@ -131,17 +131,28 @@ function resultJsonOf(json = {}) {
  * `next_agent` 是离散标签，顶层代表**本次交回**平台刚给出的决定，session 快照可能还停在旧值；
  * 而 `next_seq`/`handoff_seq` 是计数器，交回响应顶层常被置 0 或缺省（0 是缺省值而非事实），
  * 必须让 session 记录先说话。两处各自取「最新且可靠的那一份」。
+ *
+ * 返回值区分两件不同的事（QA 终审判断项 2）：
+ * - `agent`：认得出来的节点名（可直接派发）；
+ * - `unknown`：平台**给了**一个白名单外的节点名（实测 `reviewer`）。
+ * 「没给」（unknown 为空）才允许按场景链兜底；「给了但不认识」必须原样上报、不得静默改写成
+ * 场景链下一节点——否则平台的决定被客户端顶掉，读者还以为是平台派的。
+ * `next_step` 的散文（如「qa：请复查 PR #10」）不算平台给了节点名，仍按场景链兜底（S6）。
  */
-function resolveNextAgent(json = {}) {
+function resolveNextTarget(json = {}) {
   const sess = json.session || {}
   const rj = resultJsonOf(json)
+  const declared = [json.next_agent, sess.next_agent, rj.next_agent]
+    .map((v) => String(v ?? '').trim())
+    .find(Boolean)
+  if (declared !== undefined) {
+    const agent = asAgentType(declared)
+    return agent ? { agent, unknown: '' } : { agent: '', unknown: declared }
+  }
+  const stepAgent = asAgentType(rj.next_step)
+  if (stepAgent) return { agent: stepAgent, unknown: '' }
   const current = asAgentType(sess.agent_type) || asAgentType(json.agent_type)
-  return asAgentType(json.next_agent)
-    || asAgentType(sess.next_agent)
-    || asAgentType(rj.next_agent)
-    || asAgentType(rj.next_step)
-    || DISPATCH_SCOPE[current]
-    || ''
+  return { agent: DISPATCH_SCOPE[current] || '', unknown: '' }
 }
 
 /**
@@ -194,10 +205,32 @@ function dispatchContext(json, nextAgent) {
 async function ensureNextNodeDispatched(json, args = {}, apiMod = api) {
   const base = json && typeof json === 'object' ? json : { raw: json }
   const sess = base.session || {}
-  const nextAgent = resolveNextAgent(base)
+  const { agent: nextAgent, unknown: unknownNextAgent } = resolveNextTarget(base)
   const current = asAgentType(sess.agent_type) || asAgentType(base.agent_type)
   const nextSeq = seqOf(base, 'next_seq')
   const handoffSeq = seqOf(base, 'handoff_seq')
+  const target = resolveDispatchTarget(base, args)
+  // 无法派发时一律落到「待派发」：显式告警；标记随交回结果返回，事后经会话记录可查（见 pending 注释）。
+  // `cause` 只用于渲染分支（交回未成功 / 节点名不认识 / 派发未证实 的处置动作各不相同）。
+  const pending = (reason, cause = 'blocked') => ({
+    ...base,
+    next_agent: nextAgent,
+    next_seq: 0,
+    pending_dispatch: { agent: nextAgent, ...target, reason },
+    dispatch: { status: 'pending', agent: nextAgent, seq: 0, warnings: [reason], cause },
+  })
+  // 交回本身没成功（平台明确 ok=false，或 changed=false 表示未真正落账）时**不得**派发下一节点：
+  // 下一节点会接手一个未交回的任务。「部分成功当全部成功」正是 #19 要根除的形态，
+  // 现实测可达面为「200 + ok:false」（401 经 CLI 回退后同样返回 ok:false）。
+  if (base.ok === false || base.changed === false) {
+    const cause = base.ok === false ? 'finish_not_ok' : 'finish_not_changed'
+    const detail = String(base.error ?? base.detail ?? base.message ?? '').trim()
+      || (base.ok === false ? '平台返回 ok=false 但未给错误详情' : '平台返回 changed=false（交回未落账）')
+    return pending(
+      `next_node_pending_dispatch: 交回未成功（${detail}），未派发 ${nextAgent || '下一节点'}；先重试交回，成功后再派发`,
+      cause,
+    )
+  }
   if (nextSeq > 0) {
     // next_seq 指向平台已写入的下一节点派发事件：重复派发会重跑下一节点，跳过
     return {
@@ -205,6 +238,19 @@ async function ensureNextNodeDispatched(json, args = {}, apiMod = api) {
       next_agent: nextAgent || base.next_agent || '',
       next_seq: nextSeq,
       dispatch: { status: 'already_dispatched', agent: nextAgent, seq: nextSeq, warnings: [] },
+    }
+  }
+  if (unknownNextAgent) {
+    // 平台给了白名单外的节点名：不是「平台未给」，不得按场景链改写为 qa 顶掉平台决定
+    return {
+      ...base,
+      next_agent: unknownNextAgent,
+      next_seq: 0,
+      pending_dispatch: { agent: unknownNextAgent, ...target, reason: `平台指定的下一节点「${unknownNextAgent}」不在已知节点内，未按场景链改写` },
+      dispatch: {
+        status: 'pending', agent: unknownNextAgent, seq: 0, cause: 'unknown_next_agent',
+        warnings: [`next_node_pending_dispatch: 平台指定的下一节点「${unknownNextAgent}」不在已知节点（${AGENT_TYPES.join('/')}）内，未按场景链改写、未派发，需人工裁决`],
+      },
     }
   }
   if (!nextAgent) {
@@ -220,35 +266,31 @@ async function ensureNextNodeDispatched(json, args = {}, apiMod = api) {
       dispatch: { status: 'out_of_scope', agent: nextAgent, seq: 0, warnings: [] },
     }
   }
-  const target = resolveDispatchTarget(base, args)
   // handoff_seq>0 而 next_seq=0：交回事件已写、派发未证实，按未派发处理并留痕
   const unconfirmed = handoffSeq > 0
     ? `handoff_seq=${handoffSeq} 仅为交回事件序号、未见派发指针 next_seq：按「交回已写、派发未证实」兜底补发`
     : ''
-  // 无法派发时一律落到「待派发」：显式告警；标记随交回结果返回，事后经会话记录可查（见 pending 注释）
-  const pending = (reason) => ({
-    ...base,
-    next_agent: nextAgent,
-    next_seq: 0,
-    pending_dispatch: { agent: nextAgent, ...target, reason },
-    dispatch: { status: 'pending', agent: nextAgent, seq: 0, warnings: [reason] },
-  })
   const platformWarnings = [base.warnings, sess.warnings]
     .flatMap((w) => (Array.isArray(w) ? w : (w ? [w] : [])))
   const blockers = platformWarnings.filter((w) => DISPATCH_BLOCKER_CODES.has(warningCode(w)))
   const skipped = seqOf(base, 'skipped_dispatches')
   if (blockers.length) {
-    return pending(`next_node_pending_dispatch: 平台警告「${blockers.join('；')}」，未立即派发 ${nextAgent}，需人工裁决后补发`)
+    return pending(`next_node_pending_dispatch: 平台警告「${blockers.join('；')}」，未立即派发 ${nextAgent}，需人工裁决后补发`, 'blocked')
   }
   if (skipped > 0) {
-    return pending(`next_node_pending_dispatch: 平台 skipped_dispatches=${skipped}，未派发 ${nextAgent}，需人工补发`)
+    return pending(`next_node_pending_dispatch: 平台 skipped_dispatches=${skipped}，未派发 ${nextAgent}，需人工补发`, 'skipped')
   }
   if (!target.owner || !target.repo || !target.issue_number) {
-    return pending(`next_node_pending_dispatch: 缺少仓库/issue 标识，无法派发 ${nextAgent}；可用 owner/repo/issue_number 入参重试`)
+    return pending(`next_node_pending_dispatch: 缺少仓库/issue 标识，无法派发 ${nextAgent}；可用 owner/repo/issue_number 入参重试`, 'no_target')
   }
   try {
     const r = await apiMod.triggerPipeline(target.owner, target.repo, target.issue_number, dispatchContext(base, nextAgent), nextAgent)
     const seq = Number(r?.seq ?? r?.event_seq) || 0
+    if (!seq) {
+      // 补发响应缺事件 seq（stub/平台 200 形态 `{}`）：派发是否发生无证据，
+      // 判 dispatched 并渲染「已自动派发 seq=0」会把未证实当成功——落 pending 由人工查事件核实。
+      return pending(`next_node_pending_dispatch: 补发 ${nextAgent} 的响应未返回事件 seq，派发未证实，需查事件核实后决定是否补发`, 'dispatch_unconfirmed')
+    }
     return {
       ...base,
       next_agent: nextAgent,
@@ -256,7 +298,7 @@ async function ensureNextNodeDispatched(json, args = {}, apiMod = api) {
       dispatch: { status: 'dispatched', agent: nextAgent, seq, warnings: unconfirmed ? [unconfirmed] : [] },
     }
   } catch (e) {
-    return pending(`next_node_pending_dispatch: 自动派发 ${nextAgent} 失败（${e?.message || e}），需手动补发`)
+    return pending(`next_node_pending_dispatch: 自动派发 ${nextAgent} 失败（${e?.message || e}），需手动补发`, 'dispatch_failed')
   }
 }
 
@@ -940,7 +982,8 @@ export const TOOLS = [
     description:
       '查看接管会话状态/列表（不改变任何状态）。可查单条（含 renew 续期凭据）或列仓库/issue 的活跃会话。' +
       '接管中途断连后用本工具找回 session_id 与最新进度。已结束会话可查待派发标记：' +
-      'finished + next_agent 有值 + 派发指针 next_seq=0 即「交回已写、派发未证实」（仅有 handoff_seq 时同样不判已派发），渲染给出目标/原因/补发指引。',
+      'finished + next_agent 有值 + 派发指针 next_seq=0 即「交回已写、派发未证实」（仅有 handoff_seq 时同样不判已派发），渲染给出目标/原因/补发指引。' +
+      '判据注明：客户端兜底派发只写事件、不回填会话记录的 next_seq，故 next_seq=0 不构成「未派发」证据——需查事件核实（grape_get_issue_events）后再决定是否补发。',
     schema: {
       type: 'object',
       properties: {
@@ -979,8 +1022,10 @@ export const TOOLS = [
        * next_seq>0 即已派发；next_seq=0 时 handoff_seq 只是平台侧「交回事件序号」，不作派发证据，
        * 仅有 handoff_seq 时措辞降级为「交回事件已写、派发未证实，请核实事件」。 */
       const nextA = String(sess.next_agent ?? '').trim()
-      const nextSeq = Number(sess.next_seq ?? json.next_seq) || 0
-      const handoffSeq = Number(sess.handoff_seq ?? json.handoff_seq) || 0
+      // 判据与 finish 同源：一律走 seqOf（session 优先、仅 nullish 回落顶层），不再各自重算——
+      // 内联 `Number(sess.next_seq ?? json.next_seq)` 与 seqOf 两套取值顺序迟早漂移成互斥结论。
+      const nextSeq = seqOf(json, 'next_seq')
+      const handoffSeq = seqOf(json, 'handoff_seq')
       const finished = String(sess.status).toLowerCase() === 'finished'
       const issue = issueLabel(sess)
       if (finished && nextA && nextSeq > 0) {
@@ -990,7 +1035,7 @@ export const TOOLS = [
         const repoKey = String(sess.repo_key ?? '').split(':').pop()
         const warns = Array.isArray(sess.warnings) ? sess.warnings
           : (() => { try { return JSON.parse(sess.warnings_json || '[]') } catch { return [] } })()
-        const skipped = Number(sess.skipped_dispatches ?? json.skipped_dispatches) || 0
+        const skipped = seqOf(json, 'skipped_dispatches')
         lines.push('', handoffSeq
           ? '**⚠️ 待派发标记（派发未证实）**'
           : '**⚠️ 待派发标记（派发指针缺失）**', '')
@@ -1000,6 +1045,8 @@ export const TOOLS = [
         if (repoKey) lines.push(`- 目标仓库: ${repoKey}${issue ? ` · issue: ${issue}` : ''}`)
         if (warns.length) lines.push(`- 会话警告: ${warns.join('；')}`)
         if (skipped > 0) lines.push(`- 平台跳过派发: skipped_dispatches=${skipped}`)
+        // 客户端兜底派发只写事件、不回填会话记录：会话里 next_seq=0 不能反证「没派」
+        lines.push(`- 口径: 客户端兜底派发不回填会话记录的 next_seq（只写事件），故本行 next_seq=0 不构成「未派发」证据——交回时若提示「已自动派发」，需查事件核实（grape_get_issue_events）再决定是否补发`)
         lines.push('', `_补发前先 grape_get_issue_events 确认下一节点无事件（客户端兜底补发不会回填会话里的 next_seq），确认后 grape_trigger_pipeline(agent=${nextA}) 补发。_`)
       }
       return lines.join('\n')
@@ -1041,6 +1088,9 @@ export const TOOLS = [
       '标记随交回结果返回（平台对已结束会话拒绝 progress 写入——409 not_active，不走 task_messages），' +
       '事后经 `grape_takeover_status` 复查会话记录同样可见派发指针缺失（next_agent + next_seq=0，仅 handoff_seq 不算已派发）与补发指引，不再静默。' +
       '下一节点推导顺序：平台 next_agent > 结构化 next_step（**整串** agent 名如 `qa`，散文如「qa：请复查 PR #10」不解析）> 场景链 coding→qa。' +
+      '三个不放行的边界：交回未成功（平台 `ok=false` 或 `changed=false`）时**不派发**下一节点（否则下一节点会接手一个未交回的任务），落待派发并渲染「交回未成功」；' +
+      '平台给了白名单外节点名（如 `reviewer`）时**不按场景链改写**为 qa，原样上报「未知节点」待人工裁决；' +
+      '补发响应缺事件 `seq` 时判「派发未证实」（不渲染 `seq=0`、不宣称已派发），需查事件核实。' +
       '⚠️ 用户决策层动作：确认本地成果可交回后再调用。' +
       '两阶段确认流：先 request-finish（仅报告完成，等用户确认），用户确认后再本工具 finish。',
     schema: {
@@ -1083,7 +1133,9 @@ export const TOOLS = [
         && (json.awaiting_confirmation || json.requested || json.session?.finish_requested_at)
       if (isRequestOnly) lines.push('### 已报告完成，等待用户确认', '', '用户确认后再次调用本工具（request_only=false）正式交回。')
       else {
-        lines.push('### 接管交回完成', '')
+        // 平台明确 ok=false / changed=false：交回未生效，标题不得写「完成」
+        const uncommitted = json.ok === false || json.changed === false
+        lines.push(uncommitted ? '### 接管交回未完成' : '### 接管交回完成', '')
         const ho = describeHandoff(json.handoff)
         if (json.next_agent) lines.push(`- 下一节点: ${json.next_agent}（handoff=${ho.label}）`)
         const handoffCovered = ['dispatched', 'already_dispatched'].includes(json.dispatch?.status)
@@ -1105,13 +1157,31 @@ export const TOOLS = [
           lines.push('', '_链不断：下一节点已被派发，无需手动 trigger。_')
         } else if (d.status === 'out_of_scope') {
           lines.push(`- 下一节点 ${d.agent || '-'} 的派发不由本工具兜底（兜底范围仅 coding→qa），保持平台原行为`)
+          lines.push('', '_平台若未派发该节点，链会停在当前节点；确认无事件后再手动 grape_trigger_pipeline 补发。_')
         } else if (d.status === 'pending') {
           const pd = json.pending_dispatch || {}
-          lines.push('', '**⚠️ 下一节点未被派发（待派发，pending_dispatch）**', '')
-          lines.push(`- 目标节点: ${d.agent || '-'}${pd.owner ? ` · 仓库: ${pd.owner}/${pd.repo}` : ''}${pd.issue_number ? ` · issue: #${pd.issue_number}` : ''}`)
-          for (const w of (d.warnings || [])) lines.push(`- ${w}`)
-          lines.push(`- 标记随本次交回结果返回；事后用 grape_takeover_status 复查会话（finished + next_agent=${d.agent || '-'} + next_seq=0 即派发未证实）`)
-          lines.push('', `_链未自动接续：先 grape_get_issue_events 确认下一节点无事件，再调 \`grape_trigger_pipeline(agent=${d.agent})\` 补发。_`)
+          if (d.cause === 'finish_not_ok' || d.cause === 'finish_not_changed') {
+            // 交回没成功就派发下一节点，会把下一节点拉去接手一个未交回的任务
+            lines.push('', '**⚠️ 交回未成功：未派发下一节点**', '')
+            for (const w of (d.warnings || [])) lines.push(`- ${w}`)
+            lines.push('', '_先解决交回本身（修完再调 grape_takeover_finish 正式交回），成功后再由本工具兜底派发。本次未派发，链可能停在当前节点。_')
+          } else if (d.cause === 'unknown_next_agent') {
+            lines.push('', '**⚠️ 下一节点未被派发（平台指定的节点名不认识）**', '')
+            lines.push(`- 平台指定的节点: ${d.agent || '-'}（未知节点名，未按场景链改写）`)
+            for (const w of (d.warnings || [])) lines.push(`- ${w}`)
+            lines.push('', '_场景链兜底只覆盖 coding→qa，白名单外节点名不被静默顶掉：请核实场景链后手动派发。_')
+          } else if (d.cause === 'dispatch_unconfirmed') {
+            // 补发响应缺事件 seq：不能把「请求发出去了」当成「派发发生了」
+            lines.push('', '**⚠️ 下一节点派发未证实（补发响应缺事件 seq）**', '')
+            for (const w of (d.warnings || [])) lines.push(`- ${w}`)
+            lines.push('', `_补发请求已发出但平台未返回事件序号：先 \`grape_get_issue_events\` 核实下一节点是否已有事件，确认无事件再 \`grape_trigger_pipeline(agent=${d.agent})\` 补发。_`)
+          } else {
+            lines.push('', '**⚠️ 下一节点未被派发（待派发，pending_dispatch）**', '')
+            lines.push(`- 目标节点: ${d.agent || '-'}${pd.owner ? ` · 仓库: ${pd.owner}/${pd.repo}` : ''}${pd.issue_number ? ` · issue: #${pd.issue_number}` : ''}`)
+            for (const w of (d.warnings || [])) lines.push(`- ${w}`)
+            lines.push(`- 标记随本次交回结果返回；事后用 grape_takeover_status 复查会话（finished + next_agent=${d.agent || '-'} + next_seq=0 即派发未证实）`)
+            lines.push('', `_链未自动接续：先 grape_get_issue_events 确认下一节点无事件，再调 \`grape_trigger_pipeline(agent=${d.agent})\` 补发。_`)
+          }
         } else if (ho.failure) {
           // 无 dispatch 字段但平台已明确 handoff 失败：不得再宣称「无需 trigger」
           lines.push('', '_平台未返回派发结果，且 handoff 已失败：链可能停在当前节点，以下指引为准。_')

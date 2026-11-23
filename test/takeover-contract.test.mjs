@@ -826,6 +826,16 @@ test('#19 takeover_status 派发指针与 finish 同源 seqOf：session 优先�
   assert.doesNotMatch(out, /next_seq=99/, '不得把顶层值当成派发指针')
 })
 
+test('#19 描述与行为一致：交回未成功不派发 / 未知节点名不改写 / 缺 seq 未证实（§7 工具面同步）', () => {
+  const d = finishTool().description
+  assert.match(d, /交回未成功/, '描述须写明交回未成功时不派发下一节点')
+  assert.match(d, /白名单外|不认识|未知/, '描述须写明白名单外节点名不被改写')
+  assert.match(d, /缺事件 `seq`|未证实/, '描述须写明缺 seq 时判派发未证实')
+  const s = findTool('grape_takeover_status').description
+  assert.match(s, /不回填/, '状态工具描述须写明兜底派发不回填会话 next_seq')
+  assert.match(s, /核实/, '状态工具描述须给出查事件核实的通道')
+})
+
 test('#19 旧响应形状（无 dispatch 字段）且 handoff 失败：仍给出手动补发指引', () => {
   const t = finishTool()
   const out = t.render({ ok: true, changed: true, next_agent: 'qa', handoff: { ok: false, error: 'HTTP 405: Method Not Allowed' } })
