@@ -20,6 +20,7 @@ import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
 import { checkUpdateStatus, formatUpdateNotice } from './src/update-check.mjs'
 import { resolveCredentials, getBaseUrl, grapeHome, readAuthChannel, npxCacheRoot } from './src/api.mjs'
+import { classifyRegQuery, REG_QUERY } from './src/registry.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const DEFAULT_SCRIPT = resolve(HERE, 'grape-kit-mcp.mjs')
@@ -311,7 +312,7 @@ function uninstallWorkbuddy() {
   else if (steps.status === 'remove') {
     const backup = writeValidated(steps.path, steps.nextText, steps.beforeText)
     console.log(`已移除 mcpServers.grape-kit（备份: ${backup}）`)
-  } else if (steps.status === 'damaged') console.log(DAMAGED_LINE(steps.path))
+  } else if (steps.status === 'damaged') console.log(damagedEntryLine(steps.path, true))
   else console.log('未安装条目')
   // skill 清理：删 grape-remote 目录 + receipt（.grape-kit-native.json）；skills 目录空则一并移除
   if (existsSync(steps.skillDir)) {
@@ -336,7 +337,7 @@ function planUninstallWorkbuddy() {
   const lines = []
   if (!steps.exists) lines.push('未找到 ~/.workbuddy/mcp.json，无需卸载')
   else if (steps.status === 'remove') lines.push(`将移除 mcpServers.grape-kit（${steps.path}）`)
-  else if (steps.status === 'damaged') lines.push(DAMAGED_LINE(steps.path))
+  else if (steps.status === 'damaged') lines.push(damagedEntryLine(steps.path, true))
   if (existsSync(steps.skillDir)) lines.push(`将删除 skill 目录 ${steps.skillDir}`)
   if (existsSync(steps.receipt)) lines.push(`将删除 receipt ${steps.receipt}`)
   return lines
@@ -433,7 +434,7 @@ function uninstallCodearts() {
   if (steps.status === 'remove') {
     const backup = writeValidated(steps.path, steps.nextText, steps.beforeText)
     console.log(`已移除 mcp.grape-kit 条目（备份: ${backup}）`)
-  } else if (steps.status === 'damaged') console.log(DAMAGED_LINE(steps.path))
+  } else if (steps.status === 'damaged') console.log(damagedEntryLine(steps.path, false))
   else console.log('未发现 grape-kit 条目，跳过')
 }
 
@@ -454,7 +455,7 @@ function planUninstallCodearts() {
   const lines = []
   if (!steps.exists) lines.push(`未找到码道 MCP 配置 ${steps.path}，无需卸载`)
   else if (steps.status === 'remove') lines.push(`将移除 mcp.grape-kit 条目（${steps.path}）`)
-  else if (steps.status === 'damaged') lines.push(DAMAGED_LINE(steps.path))
+  else if (steps.status === 'damaged') lines.push(damagedEntryLine(steps.path, false))
   return lines
 }
 
@@ -532,7 +533,7 @@ function uninstallOfficeace() {
     const backup = writeValidated(steps.path, steps.nextText, steps.beforeText)
     console.log(`已移除 mcpServers.grape-kit（备份: ${backup}）`)
     console.log('⚠️ 果办OfficeAce 侧还需在「扩展 → 连接器 → 我的连接器」中手动删除该连接器')
-  } else if (steps.status === 'damaged') console.log(DAMAGED_LINE(steps.path))
+  } else if (steps.status === 'damaged') console.log(damagedEntryLine(steps.path, false))
   else console.log('未发现 grape-kit 连接器，跳过')
 }
 
@@ -549,7 +550,7 @@ function planUninstallOfficeace() {
   else if (steps.status === 'remove') {
     lines.push(`将移除 mcpServers.grape-kit（${steps.path}）`)
     lines.push('果办OfficeAce 侧的连接器仍需在客户端「扩展 → 连接器」中手动删除')
-  } else if (steps.status === 'damaged') lines.push(DAMAGED_LINE(steps.path))
+  } else if (steps.status === 'damaged') lines.push(damagedEntryLine(steps.path, false))
   return lines
 }
 
@@ -1007,7 +1008,9 @@ function inspectUninstallOpencode() {
   if (removed !== null) { steps.status = 'remove'; steps.beforeText = text; steps.nextText = removed }
   return steps
 }
-const DAMAGED_LINE = (path) => `配置损坏（${path}）：跳过条目移除，请先修复（grape 自有 skill 仍会清理）`
+/** 配置损坏提示：只有确实处理 skill 副本的宿主（opencode / workbuddy）才承诺「skill 仍会清理」；
+ *  codearts / officeace 无 skill 处理，沿用固定文案等于承诺一个不存在的动作（QA#PR13 判断项 1）。 */
+const damagedEntryLine = (path, hasSkills) => `配置损坏（${path}）：跳过条目移除，请先修复${hasSkills ? '（grape 自有 skill 仍会清理）' : ''}`
 
 function uninstallOpencode() {
   const steps = inspectUninstallOpencode()
@@ -1015,7 +1018,7 @@ function uninstallOpencode() {
     const backup = writeValidated(steps.path, steps.nextText, steps.beforeText)
     console.log(`已移除 mcp.grape 条目（备份: ${backup}）`)
   } else if (steps.status === 'damaged') {
-    console.log(DAMAGED_LINE(steps.path))
+    console.log(damagedEntryLine(steps.path, true))
   } else {
     console.log('未发现 grape 条目，跳过')
   }
@@ -1027,7 +1030,7 @@ function planUninstallOpencode() {
   const steps = inspectUninstallOpencode()
   const lines = []
   if (steps.status === 'remove') lines.push(`将移除 mcp.grape 条目（${steps.path}）`)
-  else if (steps.status === 'damaged') lines.push(DAMAGED_LINE(steps.path))
+  else if (steps.status === 'damaged') lines.push(damagedEntryLine(steps.path, true))
   for (const s of steps.skills) if (existsSync(join(steps.skillsDir, s))) lines.push(`将删除 skill 目录 ${join(steps.skillsDir, s)}`)
   if (steps.receipt) lines.push(`将删除 receipt ${steps.receipt}`)
   return lines
@@ -1156,8 +1159,24 @@ async function resolveTargetAuto() {
 /* ---------- 凭据写入单入口 / 全局清理（Issue #20） ---------- */
 
 const CREDENTIAL_ENV_KEYS = ['GRAPE_API_TOKEN', 'GRAPE_BASE_URL']
-const RC_FILES = ['.zshrc', '.bashrc', '.profile']
-const EXPORT_RE = /^\s*export\s+(GRAPE_API_TOKEN|GRAPE_BASE_URL)\s*=/
+/** 凭据导出行三种形态（QA#PR13 判断项 3：旧实现只认 `export`，`declare -x`、`.bash_profile`
+ *  与 fish 的 `set -x` 全都不清不掩，「未发现导出行（跳过）」等于谎报）： */
+const POSIX_CREDENTIAL_LINE_RE = /^\s*(?:export|declare\s+-x)\s+(GRAPE_API_TOKEN|GRAPE_BASE_URL)\s*=/
+const FISH_CREDENTIAL_LINE_RE = /^\s*set\s+(?:-x|-gx|--export)\s+(GRAPE_API_TOKEN|GRAPE_BASE_URL)(?:\s|$)/
+/** 扫描目标：POSIX 常见 rc（含仅登录 shell 读的 .bash_profile）+ fish 配置；kind 决定行形态 */
+const rcTargets = () => [
+  { path: join(homedir(), '.zshrc'), kind: 'posix' },
+  { path: join(homedir(), '.bashrc'), kind: 'posix' },
+  { path: join(homedir(), '.bash_profile'), kind: 'posix' },
+  { path: join(homedir(), '.profile'), kind: 'posix' },
+  { path: join(homedir(), '.config', 'fish', 'config.fish'), kind: 'fish' },
+]
+
+/** 该行是否导出凭据：命中返回变量名，否则 null（扫描、清理、掩码共用同一判据） */
+function credentialLineKey(line, kind) {
+  const m = (kind === 'fish' ? FISH_CREDENTIAL_LINE_RE : POSIX_CREDENTIAL_LINE_RE).exec(line)
+  return m ? m[1] : null
+}
 
 /** rc 文件的 .bak-grapemcp-* 备份清单（本工具备份命名空间，与 rc 同目录同名前缀） */
 function rcBackupPathsOf(rcPath) {
@@ -1174,7 +1193,7 @@ function rcBackupPathsOf(rcPath) {
  * auth init 的写入目标若是它，清理不删它、检测不扫它 = 凭据留盘 + 「零残留」谎报。
  */
 function scanResidues() {
-  const out = { grapeHome: null, authFileOverride: null, envKeys: [], rcHits: [], rcCredentialBackups: [], npxHits: [] }
+  const out = { grapeHome: null, authFileOverride: null, envKeys: [], regErrors: [], rcHits: [], rcCredentialBackups: [], npxHits: [] }
   const home = grapeHome()
   if (existsSync(home)) {
     let items = []
@@ -1183,35 +1202,33 @@ function scanResidues() {
   }
   const authOverride = String(process.env.GRAPE_AUTH_FILE || '').trim()
   if (authOverride && resolve(authOverride) !== resolve(join(home, 'config.json')) && existsSync(authOverride)) {
-    // 只把「凭据形态」（可解析且含 token/base_url 字段）的文件当凭据残留：
-    // GRAPE_AUTH_FILE 可被指向任意路径，检测/删除都必须先证明它是凭据文件，否则要求人工处理
-    let shaped = false
-    try {
-      const cfg = JSON.parse(readFileSync(authOverride, 'utf8').replace(/^\uFEFF/, ''))
-      shaped = !!(cfg && typeof cfg === 'object' && (typeof cfg.token === 'string' || typeof (cfg.base_url || cfg.baseUrl) === 'string'))
-    } catch { shaped = false }
+    // 判据与护栏同一份 isGrapeCredentialShape：GRAPE_AUTH_FILE 可被指向任意路径，
+    // 检测/删除都必须先证明它是凭据文件；任意 token 字符串 / 任意 http(s) base_url 都不算（否则会盲删用户配置）
+    const shaped = isGrapeCredentialShape(readJsonFile(authOverride))
     out.authFileOverride = { path: authOverride, ...(shaped ? {} : { notCredentials: true }) }
   }
   for (const k of CREDENTIAL_ENV_KEYS) {
     if (process.env[k]) { out.envKeys.push(k); continue }
     // QA 复审 win32 盲区：setx 写入 HKCU\Environment 的用户级变量旧进程不可见（process.env 读不到），
     // 不查注册表会让默认 uninstall 在 Windows 假零残留。reg query 仅 win32 执行（实机回归覆盖）。
+    // QA#PR13 判断项 4：非零退出必须区分「确实不存在」与「查不了」——拒绝访问/reg 缺失时
+    // 静默当成不存在就是假零残留，故登记 regErrors 供提示点名人工核对。
     if (process.platform === 'win32') {
-      const q = spawnSync('reg', ['query', 'HKCU\\Environment', '/v', k], { encoding: 'utf8' })
-      if (q.status === 0) out.envKeys.push(k)
+      const verdict = classifyRegQuery(spawnSync('reg', ['query', 'HKCU\\Environment', '/v', k], { encoding: 'utf8' }))
+      if (verdict.state === REG_QUERY.PRESENT) out.envKeys.push(k)
+      else if (verdict.state === REG_QUERY.ERROR) out.regErrors.push({ key: k, detail: verdict.detail })
     }
   }
   if (process.platform !== 'win32') {
-    for (const name of RC_FILES) {
-      const rc = join(homedir(), name)
+    for (const { path: rc, kind } of rcTargets()) {
       if (!existsSync(rc)) continue
       let lines
       try { lines = readFileSync(rc, 'utf8').split('\n') } catch { continue }
-      const hits = lines.filter((line) => EXPORT_RE.test(line)).length
-      if (hits) out.rcHits.push({ path: rc, hits })
+      const hits = lines.filter((line) => credentialLineKey(line, kind)).length
+      if (hits) out.rcHits.push({ path: rc, kind, hits })
       for (const b of rcBackupPathsOf(rc)) {
         try {
-          if (readFileSync(b, 'utf8').split('\n').some((line) => EXPORT_RE.test(line))) out.rcCredentialBackups.push(b)
+          if (readFileSync(b, 'utf8').split('\n').some((line) => credentialLineKey(line, kind))) out.rcCredentialBackups.push(b)
         } catch { /* 忽略 */ }
       }
     }
@@ -1323,6 +1340,12 @@ function cleanEnvVars() {
     // 扫描已包含「process.env 命中」与「HKCU\Environment 注册表命中」；删除失败必须可见，不吞错。
     const s = scanResidues()
     for (const name of CREDENTIAL_ENV_KEYS) {
+      const unreadable = s.regErrors.find((e) => e.key === name)
+      // 查询失败 ≠ 不存在：不得报「未发现（跳过）」蒙混过去（QA#PR13 判断项 4）
+      if (unreadable && !s.envKeys.includes(name)) {
+        console.warn(`  无法确认用户环境变量 ${name} 是否存在（${unreadable.detail}），请人工核对 HKCU\\Environment`)
+        continue
+      }
       if (!s.envKeys.includes(name)) { console.log(`  未发现用户环境变量: ${name}（跳过）`); continue }
       const d = spawnSync('reg', ['delete', 'HKCU\\Environment', '/v', name, '/f'], { encoding: 'utf8' })
       if (d.status === 0) console.log(`  已删除用户环境变量: ${name}`)
@@ -1335,8 +1358,11 @@ function cleanEnvVars() {
   let changed = false
   for (const hit of s.rcHits) {
     const lines = readFileSync(hit.path, 'utf8').split('\n')
-    const kept = lines.filter((line) => !EXPORT_RE.test(line))
-    const masked = lines.map((line) => (EXPORT_RE.test(line) ? `# [grape-kit --clean-global 已移除凭据行] ${/^\s*export\s+(GRAPE_\w+)/.exec(line)?.[1] || 'GRAPE_*'}` : line))
+    const kept = lines.filter((line) => !credentialLineKey(line, hit.kind))
+    const masked = lines.map((line) => {
+      const key = credentialLineKey(line, hit.kind)
+      return key ? `# [grape-kit --clean-global 已移除凭据行] ${key}` : line
+    })
     const backup = backupOf(hit.path, masked.join('\n'))
     writeFileSync(hit.path, kept.join('\n'))
     console.log(`  已从 ${hit.path} 删除 ${hit.hits} 行 GRAPE_* 导出（备份保留非凭据原文+凭据行掩码: ${backup}）`)
@@ -1389,15 +1415,24 @@ function isKnownGrapeBaseUrl(b) {
     return KNOWN_GRAPE_HOSTS.some((h) => host === h || host.endsWith('.' + h))
   } catch { return false }
 }
+function readJsonFile(path) {
+  try { return JSON.parse(readFileSync(path, 'utf8').replace(/^\uFEFF/, '')) } catch { return null }
+}
+
+/** 凭据形态唯一判据（QA#PR13 三审 硬违规 1）：护栏的目录证据与 GRAPE_AUTH_FILE 的
+ *  「授权删除」共用这一份，不允许两处各写一套。
+ *  强判据只有两条——token 以 grape_ 开头（用户级 API Key）、或 base_url 命中已知 grape 域。
+ *  「任意字符串 token」「任意 http(s) base_url」都不构成凭据形态：否则 GRAPE_AUTH_FILE 只要
+ *  指向任何带 base_url 的普通配置就会被盲删，与 README/CHANGELOG「非凭据形态不盲删」相反。 */
+function isGrapeCredentialShape(cfg) {
+  if (!cfg || typeof cfg !== 'object') return false
+  if (typeof cfg.token === 'string' && cfg.token.startsWith('grape_')) return true
+  return isKnownGrapeBaseUrl(cfg.base_url || cfg.baseUrl)
+}
+
+/** 目录里的 config.json 是否为凭据形态（护栏证据） */
 function grapeShapedConfig(dir) {
-  try {
-    const cfg = JSON.parse(readFileSync(join(dir, 'config.json'), 'utf8').replace(/^\uFEFF/, ''))
-    if (cfg && typeof cfg === 'object') {
-      if (typeof cfg.token === 'string' && cfg.token.startsWith('grape_')) return true
-      return isKnownGrapeBaseUrl(cfg.base_url || cfg.baseUrl)
-    }
-  } catch { /* 非凭据形态：不构成证据 */ }
-  return false
+  return isGrapeCredentialShape(readJsonFile(join(dir, 'config.json')))
 }
 /** 自定义目录条目的「仅伴随」产物名：workers/worker-* 是 worker 注册产物目录，但名字通用，
  *  只能在与强证据（凭据形态 config.json / grape 专属文件）同时出现时放行，不能单独构成证据。 */
@@ -1410,31 +1445,54 @@ function normalizeForGuard(p) {
   try { r = realpathSync(r) } catch { /* 目标不存在/不可达：保留 resolve 结果参与比较 */ }
   return r
 }
+const NUMERALS = ['①', '②', '③', '④']
+
+/** 护栏拒绝：把「原因 / 判定依据 / 放行办法」分三行给出（QA#PR13 判断项 6：旧文案把
+ *  「无强证据」与「存在非 grape 条目」并成一句，用户既不知道是哪条规则命中，也不知道怎么放行）。 */
+function rejectGraveHome(home, resolved, { reasons, criteria, allow }) {
+  console.error(`  [拒绝] GRAPE_HOME=${home}${resolved === String(home) ? '' : `（解析为 ${resolved}）`}——已拒绝删除。`)
+  const numbered = reasons.map((r, i) => `${NUMERALS[i] || '·'} ${r}`).join('；')
+  console.error(`    原因：${reasons.length > 1 ? numbered : reasons[0]}`)
+  console.error(`    判定依据：${criteria}`)
+  console.error(`    放行办法：${allow}`)
+  process.exit(1)
+}
+
 function assertSafeGrapeHome(home) {
   const resolved = normalizeForGuard(home)
   const userHome = normalizeForGuard(homedir())
+  const defaultHome = join(userHome, '.grape')
   const sep = process.platform === 'win32' ? '\\' : '/'
   const isRoot = process.platform === 'win32' ? /^[a-zA-Z]:\\?$/.test(resolved) : resolved === '/'
   if (resolved === userHome || isRoot || userHome.startsWith(resolved + sep)) {
-    console.error(`  [拒绝] GRAPE_HOME=${home} 解析后为 ${resolved}——指向用户主目录本身/其祖先/根，疑似配置错误，已拒绝删除。`)
-    console.error(`  如确要清理，请把 GRAPE_HOME 指向专用子目录（如 ${join(userHome, '.grape')}）再执行 --clean-global。`)
-    process.exit(1)
+    rejectGraveHome(home, resolved, {
+      reasons: ['指向用户主目录本身 / 其祖先 / 文件系统根，疑似配置错误'],
+      criteria: 'GRAPE_HOME 先 resolve 再 realpath 归一化，与 $HOME 本身、$HOME 的祖先、文件系统根比较；这些位置放的是用户数据，不是 grape 产物。',
+      allow: `把 GRAPE_HOME 指向专用子目录（如 ${defaultHome}）后重跑 --clean-global。`,
+    })
   }
   const base = basename(resolved)
-  if (base !== '.grape') {
-    let items = []
-    try { items = readdirSync(resolved) } catch { /* 读不了按空处理 */ }
-    // 强证据：凭据形态 config.json 或 grape 专属文件；workers/worker-* 只是伴随条目
-    const evidence = grapeShapedConfig(resolved) || items.some((x) => GRAPE_ARTIFACT_NAMES.has(x))
-    // 自定义路径一律要求全部条目均为 grape 产物（防把含用户文件的目录整删）
-    const allGrape = items.length > 0 && items.every((x) => isGrapeArtifactEntry(resolved, x))
-    if (!items.length || !evidence || !allGrape) {
-      console.error(`  [拒绝] GRAPE_HOME=${home}（解析为 ${resolved}）非 .grape 且内容未全部呈现 grape 产物证据${items.length ? `（内容: ${items.slice(0, 5).join(', ')}…）` : '（空目录）'}——疑似误指真实目录，已拒绝删除。`)
-      console.error(`  确认要删请先核对目录内容，或把 GRAPE_HOME 改回默认 ${join(userHome, '.grape')}。`)
-      process.exit(1)
-    }
-    console.log(`  [警告] GRAPE_HOME 为自定义路径 ${home}（解析为 ${resolved}），含 grape 产物证据，按配置继续清理。`)
+  if (base === '.grape') return
+  let items = []
+  try { items = readdirSync(resolved) } catch { /* 读不了按空处理 */ }
+  // 强证据：凭据形态 config.json 或 grape 专属文件；workers/worker-* 只是伴随条目
+  const hasCredentialConfig = grapeShapedConfig(resolved)
+  const hasGrapeFile = items.some((x) => GRAPE_ARTIFACT_NAMES.has(x))
+  const foreign = items.filter((x) => !isGrapeArtifactEntry(resolved, x))
+  const reasons = []
+  if (!items.length) reasons.push('目录为空，没有任何条目能证明它是 grape 产物目录')
+  else if (!hasCredentialConfig && !hasGrapeFile) {
+    reasons.push(`无 grape 产物证据：既没有凭据形态的 config.json，也没有 grape 专属文件（${[...GRAPE_ARTIFACT_NAMES].join(' / ')}）`)
   }
+  if (foreign.length) reasons.push(`存在非 grape 产物条目（${foreign.slice(0, 5).join('、')}${foreign.length > 5 ? ' 等' : ''}）`)
+  if (reasons.length) {
+    rejectGraveHome(home, resolved, {
+      reasons,
+      criteria: `自定义路径（基名非 .grape）须同时满足两条：① 有强证据——config.json 为凭据形态（token 以 grape_ 开头，或 base_url 命中 ${KNOWN_GRAPE_HOSTS.join('/')}）或存在 grape 专属文件 ${[...GRAPE_ARTIFACT_NAMES].join(' / ')}；② 目录内「全部」条目均为 grape 产物（workers/、worker-* 名字过于通用，只能作伴随条目，不能单独构成证据）。`,
+      allow: `核对目录内容、移走非 grape 文件后重跑；若这本来就不是 grape 目录，请把 GRAPE_HOME 改回默认 ${defaultHome}。`,
+    })
+  }
+  console.log(`  [警告] GRAPE_HOME 为自定义路径 ${home}（解析为 ${resolved}），含 grape 产物证据，按配置继续清理。`)
 }
 
 /** --clean-global：整删 GRAPE_HOME（文件通道 + worker 注册产物）+ GRAPE_AUTH_FILE 凭据文件 + 用户级 env + 本包 npx 缓存。
@@ -1456,7 +1514,7 @@ function cleanGlobal() {
   const s = scanResidues()
   if (s.authFileOverride) {
     if (s.authFileOverride.notCredentials) {
-      console.log(`  [提示] GRAPE_AUTH_FILE=${s.authFileOverride.path} 不是凭据形态（不可解析/无 token、base_url 字段），不盲删——请人工确认后处理`)
+      console.log(`  [提示] GRAPE_AUTH_FILE=${s.authFileOverride.path} 不是凭据形态（凭据形态 = token 以 grape_ 开头，或 base_url 命中 ${KNOWN_GRAPE_HOSTS.join('/')}），不盲删——请人工确认后处理`)
     } else {
       rmSync(s.authFileOverride.path, { force: true })
       console.log(`  已删除 GRAPE_AUTH_FILE 凭据文件: ${s.authFileOverride.path}`)
@@ -1480,7 +1538,7 @@ function cleanGlobalPlan() {
   }
   if (s.authFileOverride) {
     if (s.authFileOverride.notCredentials) {
-      console.log(`  [提示] GRAPE_AUTH_FILE=${s.authFileOverride.path} 不是凭据形态，不盲删——执行时将要求人工处理`)
+      console.log(`  [提示] GRAPE_AUTH_FILE=${s.authFileOverride.path} 不是凭据形态（凭据形态 = token 以 grape_ 开头，或 base_url 命中 ${KNOWN_GRAPE_HOSTS.join('/')}），不盲删——执行时将要求人工处理`)
     } else {
       console.log(`  将删除凭据文件（GRAPE_AUTH_FILE）: ${s.authFileOverride.path}`)
     }
@@ -1488,6 +1546,10 @@ function cleanGlobalPlan() {
   }
   if (s.envKeys.length) {
     console.log(`  环境变量 ${s.envKeys.join('/')}：${process.platform === 'win32' ? 'reg delete 用户级注册表项' : '删除 rc 中的导出行'}（已运行会话需重启后生效）`)
+    any = true
+  }
+  for (const e of s.regErrors) {
+    console.log(`  无法确认注册表项 HKCU\\Environment\\${e.key} 是否存在（${e.detail}），执行时同样无法代清——请人工核对`)
     any = true
   }
   for (const hit of s.rcHits) {
@@ -1517,6 +1579,7 @@ function detectResiduals() {
       : `GRAPE_AUTH_FILE 凭据文件 ${s.authFileOverride.path}`)
   }
   for (const k of s.envKeys) found.push(`环境变量 ${k}`)
+  for (const e of s.regErrors) found.push(`无法确认环境变量 ${e.key} 是否存在（注册表查询失败：${e.detail}），请人工核对 HKCU\\Environment`)
   for (const hit of s.rcHits) found.push(`shell 配置 ${hit.path} 中 ${hit.hits} 行 GRAPE_* 导出`)
   for (const b of s.rcCredentialBackups) found.push(`含明文凭据的备份文件 ${b}（旧版清理所留，需删除）`)
   if (s.npxHits.length) found.push(`npm _npx 缓存中 ${s.npxHits.length} 个含 node_modules/@grape-dev/grape-kit 的条目`)
@@ -1555,7 +1618,8 @@ if (cmd === 'intro') {
   const dryRun = cmd === 'uninstall' && process.argv.includes('--dry-run')
   /** clean-global 收尾：--dry-run 只预览（单一扫描，所见即所删），否则执行破坏性清理 */
   const runCleanGlobal = () => (dryRun ? cleanGlobalPlan() : cleanGlobal())
-  /** --dry-run 宿主卸载预览（QA 硬违规 2：dry-run 不得动盘——宿主条目/skill/备份同样只列不删） */
+  /** --dry-run 宿主卸载预览（QA 硬违规 2：dry-run 不得动盘——宿主条目/skill/receipt 只列不删；
+   *  配置备份只由真实执行 writeValidated 生成，预览不产生备份也不列备份，与 README「备份只在真实执行生成」一致） */
   const uninstallHostOrPlan = (n) => {
     console.log(`
 ===== ${n} =====${dryRun ? '（--dry-run 预览，未执行任何删除）' : ''}`)
