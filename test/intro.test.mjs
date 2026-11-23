@@ -73,3 +73,16 @@ test('WorkBuddy 安装提示不再要求「手动信任一次」，改为实测�
   assert.doesNotMatch(r.stdout, /需在 WorkBuddy 中手动「信任」一次/)
   assert.match(r.stdout, /重启.*宿主会话|重启.*WorkBuddy/, '应给出实测准确的生效方式')
 })
+
+test('用法行把 intro 与 --target 拆开：intro 不接收 --target（避免用户以为能指定宿主）', () => {
+  const h = home()
+  const r = run(['--help'], h)
+  assert.equal(r.status, 0, r.stderr)
+  const lines = r.stdout.split('\n')
+  const usageOf = (re) => lines.find((l) => re.test(l))
+  assert.ok(usageOf(/install\|uninstall\|doctor/), '用法行应列出 install|uninstall|doctor')
+  assert.match(usageOf(/install\|uninstall\|doctor/), /--target/, 'install/uninstall/doctor 必须给出 --target')
+  const introLine = usageOf(/\bintro\b/)
+  assert.ok(introLine, '用法行必须单独列出 intro')
+  assert.doesNotMatch(introLine, /--target/, 'intro 会静默忽略 --target，不得与 --target 并列在同一行')
+})
