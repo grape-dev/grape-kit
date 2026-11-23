@@ -35,9 +35,11 @@ export function hostInfo() {
   return { host_os, host_arch: process.arch, host_shell }
 }
 
-/** 文件通道配置（剥 BOM；损坏文件按未配置处理） */
+/** 文件通道配置（剥 BOM；损坏文件按未配置处理）。
+ *  GRAPE_HOME 覆盖凭据目录（默认 ~/.grape）：测试隔离与自部署容器共用同一覆盖点。 */
 function readFileConfig(env = process.env) {
-  const authFile = env.GRAPE_AUTH_FILE || join(homedir(), '.grape', 'config.json')
+  const home = String(env.GRAPE_HOME || '').trim() || join(homedir(), '.grape')
+  const authFile = env.GRAPE_AUTH_FILE || join(home, 'config.json')
   if (!existsSync(authFile)) return { authFile, cfg: null }
   try {
     // 剥 BOM：Windows 记事本保存会带 UTF-8 BOM，JSON.parse 直接抛错（P2 实修，不只写文档）

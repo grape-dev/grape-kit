@@ -12,7 +12,7 @@ import { dirname, join } from 'node:path'
 
 const CACHE_TTL_MS = 24 * 3600 * 1000
 const REGISTRY = 'https://registry.npmjs.org'
-const cachePath = () => join(homedir(), '.grape', 'grape-kit-update-check.json')
+const cachePath = () => join(String(process.env.GRAPE_HOME || '').trim() || join(homedir(), '.grape'), 'grape-kit-update-check.json')
 
 /** 写缓存：目录不存在时先创建（首次运行 HOME 下通常没有 ~/.grape） */
 function writeCache(data) {

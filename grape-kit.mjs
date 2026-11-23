@@ -12,7 +12,7 @@
  *   node setup.mjs uninstall --target opencode
  *   node setup.mjs doctor [--probe]
  */
-import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync, readdirSync, statSync, rmdirSync } from 'node:fs'
+import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync, readdirSync, statSync, rmdirSync, chmodSync } from 'node:fs'
 import { createInterface } from 'node:readline'
 import { homedir, tmpdir } from 'node:os'
 import { join, dirname, resolve } from 'node:path'
@@ -24,6 +24,14 @@ import { resolveCredentials, getBaseUrl } from './src/api.mjs'
 const HERE = dirname(fileURLToPath(import.meta.url))
 const DEFAULT_SCRIPT = resolve(HERE, 'grape-kit-mcp.mjs')
 const RECEIPT = '.grape-kit-native.json'
+
+/**
+ * 凭据/缓存根目录：默认 ~/.grape，可用 GRAPE_HOME 覆盖。
+ * 覆盖点是可测试性前置——--clean-global 会整目录删除，测试必须能把它指向临时目录，
+ * 绝不允许在真实用户 home 上做破坏性断言。src/api.mjs 与 update-check 同源读取（env.GRAPE_HOME）。
+ */
+const grapeHome = () => String(process.env.GRAPE_HOME || '').trim() || join(homedir(), '.grape')
+const configPath = () => join(grapeHome(), 'config.json')
 
 /** npx 免全局安装的启动参数（workbuddy / codearts / officeace 共用，与 opencode 的本地脚本模式并列） */
 const NPX_ARGS = ['-y', '-p', '@grape-dev/grape-kit', 'grape-kit-mcp']
@@ -81,7 +89,7 @@ function credentialSourceCheck() {
 function baseUrlInfo() {
   const base = getBaseUrl()
   if (process.env.GRAPE_BASE_URL) return { base, source: '环境变量 GRAPE_BASE_URL' }
-  const authFile = process.env.GRAPE_AUTH_FILE || join(homedir(), '.grape', 'config.json')
+  const authFile = process.env.GRAPE_AUTH_FILE || configPath()
   if (existsSync(authFile)) {
     try {
       const cfg = JSON.parse(readFileSync(authFile, 'utf8').replace(/^\uFEFF/, ''))
@@ -90,15 +98,69 @@ function baseUrlInfo() {
   }
   return { base, source: '默认' }
 }
-const envChecks = () => [
-  (() => { const { base, source } = baseUrlInfo(); return ['GRAPE_BASE_URL', `ok（${base}；来源=${source}）`] })(),
-  ['GRAPE_API_TOKEN', process.env.GRAPE_API_TOKEN
-    ? 'ok（已设置，不回显）'
-    : existsSync(join(homedir(), '.grape', 'config.json'))
-      ? (() => { try { const c = JSON.parse(readFileSync(join(homedir(), '.grape', 'config.json'), 'utf8')); return c.token ? 'ok（文件通道 ~/.grape/config.json）' : '未设置（FAIL）' } catch { return '未设置（FAIL）：~/.grape/config.json 解析失败' } })()
-      : '未设置（FAIL）：打开 https://www.grapedev.cn/app/#account/profile 生成用户级 API Key（自部署实例用「你的地址/app/#account/profile」），用环境变量或 ~/.grape/config.json 提供'],
-  credentialSourceCheck(),
-]
+
+/** 文件通道解析：存在性 / 解析错误 / token 有无分开报，doctor 优先级视图据此给出未命中原因 */
+function fileChannelInfo() {
+  const authFile = process.env.GRAPE_AUTH_FILE || configPath()
+  if (!existsSync(authFile)) return { authFile, exists: false }
+  try {
+    const cfg = JSON.parse(readFileSync(authFile, 'utf8').replace(/^\uFEFF/, ''))
+    return { authFile, exists: true, cfg }
+  } catch (e) {
+    return { authFile, exists: true, error: e.message }
+  }
+}
+
+/**
+ * 凭据完整优先级视图（runtime > env > file）：逐档列出命中/未命中与原因，不回显 token。
+ * 与 resolveCredentials 同源判定，避免 doctor 展示层另写一套优先级。
+ */
+function priorityChecks() {
+  const env = process.env
+  const effective = resolveCredentials(env).source
+  const f = fileChannelInfo()
+  const checks = []
+
+  checks.push([
+    '凭据优先级 ① runtime（GRAPE_API_TOKEN_ONCE，仅进程内）',
+    env.GRAPE_API_TOKEN_ONCE
+      ? 'ok（命中，当前生效；仅本进程）'
+      : 'ok（未命中：未设置，仅一次性参数场景使用）',
+  ])
+
+  const envHit = effective === 'env:GRAPE_API_TOKEN'
+  checks.push([
+    '凭据优先级 ② env（GRAPE_API_TOKEN / GRAPE_BASE_URL）',
+    env.GRAPE_API_TOKEN
+      ? (envHit ? 'ok（命中，当前生效）' : 'ok（已设置，被 runtime 覆盖）')
+      : 'ok（未命中：GRAPE_API_TOKEN 为空）',
+  ])
+
+  let fileDetail
+  if (!f.exists) fileDetail = `未命中：文件不存在（${f.authFile}）`
+  else if (f.error) fileDetail = `未命中：文件解析失败（${f.error}）`
+  else if (!f.cfg || !f.cfg.token) fileDetail = `未命中：文件存在但无 token（${f.authFile}）`
+  else if (effective === `file:${f.authFile}`) fileDetail = `命中，当前生效（${f.authFile}；不回显 token）`
+  else fileDetail = `已配置，被更高优先级覆盖（${f.authFile}）`
+  checks.push(['凭据优先级 ③ file（GRAPE_AUTH_FILE 或 GRAPE_HOME/config.json）', `ok（${fileDetail}）`])
+  return checks
+}
+
+const envChecks = () => {
+  const f = fileChannelInfo()
+  const fileToken = f.exists && !f.error && f.cfg && f.cfg.token
+  let tokenLine
+  if (process.env.GRAPE_API_TOKEN) tokenLine = 'ok（已设置，不回显）'
+  else if (fileToken) tokenLine = `ok（文件通道 ${f.authFile}）`
+  else if (f.exists && f.error) tokenLine = `未设置（FAIL）：${f.authFile} 解析失败`
+  else tokenLine = '未设置（FAIL）：打开 https://www.grapedev.cn/app/#account/profile 生成用户级 API Key（自部署实例用「你的地址/app/#account/profile」），用环境变量或 ~/.grape/config.json 提供'
+  return [
+    (() => { const { base, source } = baseUrlInfo(); return ['GRAPE_BASE_URL', `ok（${base}；来源=${source}）`] })(),
+    ['GRAPE_API_TOKEN', tokenLine],
+    credentialSourceCheck(),
+    ...priorityChecks(),
+  ]
+}
 /** 安装后能力清单：安装结束与 `intro` 子命令共用同一份常量，避免两处文案漂移 */
 const CAPABILITY_GROUPS = [
   { title: '流水线遥控', desc: '建/查/触发/取消需求，观察流水线进度', ask: '我有哪些单子在跑流水线？' },
@@ -999,6 +1061,170 @@ async function resolveTargetAuto() {
   }
 }
 
+/* ---------- 凭据写入单入口 / 全局清理（Issue #20） ---------- */
+
+const CREDENTIAL_ENV_KEYS = ['GRAPE_API_TOKEN', 'GRAPE_BASE_URL']
+const RC_FILES = ['.zshrc', '.bashrc', '.bash_profile', '.profile']
+const EXPORT_RE = /^\s*export\s+(GRAPE_API_TOKEN|GRAPE_BASE_URL)\s*=/
+
+/**
+ * `auth init`：凭据唯一写入入口。写文件通道 GRAPE_HOME/config.json（600），
+ * 并打印 env 通道设置命令与优先级说明——解析语义复用 src/api.mjs，不另造一套。
+ */
+async function authInit() {
+  const rawToken = arg('token')
+  let token = typeof rawToken === 'string' ? rawToken.replace(/^\uFEFF/, '').trim() : ''
+  const rawBase = arg('base-url', arg('baseUrl', arg('base')))
+  let base = typeof rawBase === 'string' ? rawBase.trim() : ''
+
+  if (!token && process.stdin.isTTY) {
+    const rl = createInterface({ input: process.stdin, output: process.stdout })
+    const ask = (q) => new Promise((r) => rl.question(q, r))
+    token = (await ask('API Key（grape_ 前缀，明文只显示一次）：')).trim()
+    if (!base) base = (await ask(`平台地址（回车沿用 ${getBaseUrl(process.env)}）：`)).trim()
+    rl.close()
+  }
+  if (!token) {
+    console.error('缺少凭据：非交互场景请用 grape-kit auth init --token <grape_...> [--base-url <url>]')
+    process.exit(1)
+  }
+  if (!token.startsWith('grape_')) {
+    console.error(`凭据前缀不合法：${token.slice(0, 6)}…（用户级 API Key 必须以 grape_ 开头；tko_ 是节点级凭据，不写入文件通道）`)
+    process.exit(1)
+  }
+  if (!base) base = getBaseUrl(process.env)
+  if (!/^https?:\/\//.test(base)) {
+    console.error(`平台地址不合法：${base}（需以 http:// 或 https:// 开头）`)
+    process.exit(1)
+  }
+
+  mkdirSync(grapeHome(), { recursive: true })
+  const cfgPath = configPath()
+  let cfg = {}
+  if (existsSync(cfgPath)) {
+    try { cfg = JSON.parse(readFileSync(cfgPath, 'utf8').replace(/^\uFEFF/, '')) || {} } catch { cfg = {} }
+  }
+  cfg.token = token
+  cfg.base_url = base
+  delete cfg.baseUrl
+  writeFileSync(cfgPath, JSON.stringify(cfg, null, 2) + '\n', { mode: 0o600 })
+  try { chmodSync(cfgPath, 0o600) } catch { /* Windows 权限位不适用 */ }
+
+  console.log(`已写入文件通道: ${cfgPath}（权限 600，已剥 BOM）`)
+  if (process.platform === 'win32') {
+    console.log('环境变量通道（Windows：setx 只对新进程生效，需重启宿主会话）：')
+    console.log(`  setx GRAPE_BASE_URL "${base}"`)
+    console.log(`  setx GRAPE_API_TOKEN "${token}"`)
+  } else {
+    console.log('环境变量通道（POSIX：写入 shell 配置后 source 或重开终端）：')
+    console.log(`  export GRAPE_BASE_URL="${base}"`)
+    console.log(`  export GRAPE_API_TOKEN="${token}"`)
+  }
+  console.log('优先级：GRAPE_API_TOKEN_ONCE（runtime）> GRAPE_API_TOKEN（env）> GRAPE_AUTH_FILE / GRAPE_HOME/config.json（file）')
+}
+
+/** 删除用户级环境变量：POSIX 精确删 rc 中的 export 行（改前备份），Windows 用 reg delete */
+function cleanEnvVars() {
+  if (process.platform === 'win32') {
+    for (const name of CREDENTIAL_ENV_KEYS) {
+      const r = spawnSync('reg', ['delete', 'HKCU\\Environment', '/v', name, '/f'], { encoding: 'utf8' })
+      console.log(r.status === 0 ? `  已删除用户环境变量: ${name}` : `  未发现用户环境变量: ${name}（跳过）`)
+    }
+    console.log('  提示：已运行中的宿主会话读不到删除结果，需重启宿主/终端后生效。')
+    return
+  }
+  let changed = false
+  for (const f of RC_FILES.map((name) => join(homedir(), name))) {
+    if (!existsSync(f)) continue
+    let text
+    try { text = readFileSync(f, 'utf8') } catch { continue }
+    const lines = text.split('\n')
+    const kept = lines.filter((line) => !EXPORT_RE.test(line))
+    if (kept.length === lines.length) continue
+    const backup = backupOf(f)
+    writeFileSync(f, kept.join('\n'))
+    console.log(`  已从 ${f} 删除 GRAPE_API_TOKEN/GRAPE_BASE_URL 导出行（备份: ${backup}）`)
+    changed = true
+  }
+  if (!changed) console.log('  未在 shell 配置文件发现 GRAPE_API_TOKEN/GRAPE_BASE_URL 导出行（跳过）')
+}
+
+/** 清理本包 npx 缓存：仅认 node_modules/@grape-dev 实体；非命中一律跳过，失败只告警不中断 */
+function cleanNpxCache() {
+  const root = join(homedir(), '.npm', '_npx')
+  if (!existsSync(root)) { console.log('  未找到 npm _npx 缓存（跳过）'); return }
+  let removed = 0
+  for (const entry of readdirSync(root)) {
+    const dir = join(root, entry)
+    try { if (!statSync(dir).isDirectory()) continue } catch { continue }
+    if (!existsSync(join(dir, 'node_modules', '@grape-dev'))) continue
+    try {
+      rmSync(dir, { recursive: true, force: true })
+      removed += 1
+      console.log(`  已清理本包 _npx 缓存: ${entry}`)
+    } catch (e) {
+      console.warn(`  清理 _npx 条目 ${entry} 失败（跳过）: ${e.message}`)
+    }
+  }
+  if (!removed) console.log('  未发现含 node_modules/@grape-dev 的 _npx 缓存（跳过）')
+}
+
+/** --clean-global：整删 GRAPE_HOME（文件通道 + worker 注册产物）+ 用户级 env + 本包 npx 缓存 */
+function cleanGlobal() {
+  console.log('\n[clean-global] 清理全局凭据与使用痕迹')
+  const home = grapeHome()
+  if (existsSync(home)) {
+    let items = []
+    try { items = readdirSync(home) } catch { /* 读不了也按存在处理 */ }
+    console.log(`  将删除目录: ${home}${items.length ? `（${items.join(', ')}）` : ''}`)
+    rmSync(home, { recursive: true, force: true })
+    console.log(`  已删除: ${home}`)
+  } else {
+    console.log(`  目录不存在（跳过）: ${home}`)
+  }
+  cleanEnvVars()
+  cleanNpxCache()
+}
+
+/** 残留检测：默认 uninstall 只提示，不静默执行破坏性清理 */
+function detectResiduals() {
+  const found = []
+  const home = grapeHome()
+  if (existsSync(home)) {
+    let items = []
+    try { items = readdirSync(home) } catch { /* 忽略 */ }
+    found.push(`目录 ${home}${items.length ? `（${items.join(', ')}）` : ''}`)
+  }
+  for (const k of CREDENTIAL_ENV_KEYS) if (process.env[k]) found.push(`环境变量 ${k}`)
+  if (process.platform !== 'win32') {
+    for (const f of RC_FILES.map((name) => join(homedir(), name))) {
+      if (!existsSync(f)) continue
+      try {
+        if (readFileSync(f, 'utf8').split('\n').some((line) => EXPORT_RE.test(line))) {
+          found.push(`shell 配置 ${f} 中的 GRAPE_* 导出行`)
+        }
+      } catch { /* 忽略 */ }
+    }
+  }
+  const npxRoot = join(homedir(), '.npm', '_npx')
+  if (existsSync(npxRoot)) {
+    let hits = 0
+    try {
+      for (const e of readdirSync(npxRoot)) if (existsSync(join(npxRoot, e, 'node_modules', '@grape-dev'))) hits += 1
+    } catch { /* 忽略 */ }
+    if (hits) found.push(`npm _npx 缓存中 ${hits} 个含 @grape-dev 的条目`)
+  }
+  return found
+}
+
+function printResidualHint() {
+  const found = detectResiduals()
+  if (!found.length) { console.log('\n[残留提示] 未检测到凭据/使用痕迹残留。'); return }
+  console.log('\n[残留提示] 检测到凭据/使用痕迹残留（默认 uninstall 不主动删除）：')
+  for (const item of found) console.log(`  - ${item}`)
+  console.log('  清理命令: npx -y @grape-dev/grape-kit uninstall --clean-global')
+}
+
 /* ---------- main ---------- */
 
 if (cmd === '--version' || cmd === 'version' || cmd === '-v') {
@@ -1009,6 +1235,14 @@ if (cmd === '--version' || cmd === 'version' || cmd === '-v') {
 if (cmd === 'intro') {
   // 随时重看能力清单；与安装结束共用同一份文案（无凭据时同样先给 Key 指引）
   printInstallGuide()
+} else if (cmd === 'auth') {
+  // auth init：凭据唯一写入入口；其它子命令给出明确用法
+  const sub = process.argv[3]
+  if (sub === 'init') await authInit()
+  else {
+    console.error('用法: node setup.mjs auth init --token <grape_...> [--base-url <url>]')
+    process.exit(1)
+  }
 } else if (cmd === 'install' || cmd === 'uninstall' || cmd === 'doctor') {
   let installed = false
   // doctor 未显式指定 --target 时汇总全部宿主；install/uninstall 仍默认 opencode
@@ -1036,10 +1270,17 @@ if (cmd === 'intro') {
     }
   }
   if (installed) printInstallGuide()
+  // uninstall 生命周期收尾：--clean-global 显式触发破坏性清理；否则仅提示残留
+  if (cmd === 'uninstall') {
+    if (process.argv.includes('--clean-global')) cleanGlobal()
+    else printResidualHint()
+  }
 } else {
   // intro 不吃 --target（只读本地凭据状态，重看能力地图与宿主无关）：与 install/uninstall/doctor 拆行，
   // 否则用户会以为 `grape-kit intro --target codearts` 能指定宿主
   console.log(`用法: node setup.mjs install|uninstall|doctor [--target ${SUPPORTED_TARGETS.join('|')}] [--probe]`)
+  console.log('      node setup.mjs uninstall [--target <宿主>] [--clean-global]   同时清理 ~/.grape 凭据与使用痕迹')
+  console.log('      node setup.mjs auth init --token <grape_...> [--base-url <url>]   凭据唯一写入入口（文件通道 + env 指引）')
   console.log('      node setup.mjs intro                   重看安装后能力地图（与宿主无关，随时可用）')
   for (const [name, host] of Object.entries(HOSTS)) console.log(`  --target ${name.padEnd(10)} ${host.label}`)
 }
