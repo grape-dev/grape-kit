@@ -54,6 +54,29 @@ export GRAPE_API_TOKEN=grape_xxx      # API Key: https://www.grapedev.cn/app/#ac
 # Agents that sanitize env vars: file channel ~/.grape/config.json {"token":"grape_xxx","base_url":"..."}
 ```
 
+### Credential priority & `auth init`
+
+One entry point writes credentials; the resolution order is fixed and shared by the API client, `doctor`, and takeover scripts:
+
+1. `GRAPE_API_TOKEN_ONCE` — runtime, current process only (highest)
+2. `GRAPE_API_TOKEN` / `GRAPE_BASE_URL` — environment channel
+3. `GRAPE_AUTH_FILE` or `~/.grape/config.json` (the directory can be overridden with `GRAPE_HOME`) — file channel
+
+```bash
+# write the file channel (mode 600, BOM stripped) and print the matching env commands
+npx -y @grape-dev/grape-kit auth init --token grape_xxx --base-url https://www.grapedev.cn
+npx -y @grape-dev/grape-kit doctor     # shows the full runtime > env > file chain (never echoes the token)
+```
+
+`auth init` writes to `GRAPE_AUTH_FILE` when it is set, otherwise `GRAPE_HOME/config.json` — the write target is always identical to the resolution target, and the file is read back and verified after writing. In `doctor` output the effective tier shows `[ok]`; missed/overridden tiers show `[--]` (informational, no action needed).
+
+A plain `uninstall` removes only the host entry and reports any leftover credentials. Add `--clean-global` to delete `~/.grape` (file channel + worker artifacts), the user-level `GRAPE_API_TOKEN`/`GRAPE_BASE_URL` (POSIX: the exact `export` lines are removed from rc files and the backup keeps only non-credential lines — a backup holding credentials would just be the token under a different name; Windows uses `reg delete`), and only those `_npx` cache entries that contain `node_modules/@grape-dev`. `--clean-global` works with or without `--target` (with no host traces it still runs the global cleanup), and `--dry-run` previews what would be deleted without touching the disk:
+
+```bash
+npx -y @grape-dev/grape-kit uninstall --clean-global --dry-run   # preview first
+npx -y @grape-dev/grape-kit uninstall --clean-global
+```
+
 ### OpenCode
 
 ```bash
@@ -110,6 +133,7 @@ The `clawhub:` prefix is the source (matching devkit's listing form). Verify wit
 npx -y @grape-dev/grape-kit --version        # version check
 npm install -g @grape-dev/grape-kit          # update (then restart the agent session)
 npx -y @grape-dev/grape-kit uninstall        # uninstall, target auto-detected
+npx -y @grape-dev/grape-kit uninstall --clean-global   # also purge ~/.grape + user env vars + _npx cache
 ```
 
 A startup version check compares against the npm registry and reminds you once when a newer release exists (24h dedupe; disable with `GRAPE_KIT_SKIP_UPDATE_CHECK=1`). Mirror registries (npmmirror etc.) may lag 1-3 days — use `--registry https://registry.npmjs.org/` for the latest.
@@ -168,7 +192,7 @@ Full release notes: [CHANGELOG.md](CHANGELOG.md) — 19 条发布记录（含 0.
 
 ```bash
 npm install
-npm test        # 156 unit tests (fake-grape stand-in, no real server needed)
+npm test        # 177 unit tests (fake-grape stand-in, no real server needed)
 npm run smoke   # real stdio JSON-RPC round-trip: initialize → tools/list → tools/call
 ```
 

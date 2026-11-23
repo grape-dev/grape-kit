@@ -77,3 +77,17 @@ test('CHANGELOG 保留 Unreleased 段（下一周期入口），0.3.9 发布节�
     assert.match(body, re, `0.3.9 发布节应记录 ${what} 变更`)
   }
 })
+/* ── Issue #20：凭据优先级链与新命令用法必须双语 README + CHANGELOG 同步 ── */
+
+test('Issue #20 README 双语载明凭据优先级链与 auth init / uninstall --clean-global', () => {
+  for (const name of ['README.md', 'README.zh.md']) {
+    const md = read(name)
+    assert.match(md, /auth init/, `${name} 应载明 auth init 单入口`)
+    assert.match(md, /--clean-global/, `${name} 应载明 uninstall --clean-global`)
+    assert.match(
+      md,
+      /GRAPE_API_TOKEN_ONCE[\s\S]{0,240}GRAPE_API_TOKEN[\s\S]{0,240}(GRAPE_AUTH_FILE|config\.json)/,
+      `${name} 应列出 runtime > env > file 完整优先级链`,
+    )
+  }
+})

@@ -54,6 +54,29 @@ export GRAPE_API_TOKEN=grape_xxx      # API Key：https://www.grapedev.cn/app/#a
 # 环境变量被清洗的宿主：写文件通道 ~/.grape/config.json {"token":"grape_xxx","base_url":"..."}
 ```
 
+### 凭据优先级与 `auth init`
+
+凭据写入收敛为单一入口；解析顺序固定，API 客户端、`doctor` 与接管脚本共用同一份语义：
+
+1. `GRAPE_API_TOKEN_ONCE` —— runtime，仅当前进程（最高）
+2. `GRAPE_API_TOKEN` / `GRAPE_BASE_URL` —— env 环境变量通道
+3. `GRAPE_AUTH_FILE` 或 `~/.grape/config.json`（目录可用 `GRAPE_HOME` 覆盖）—— file 文件通道
+
+```bash
+# 写文件通道（权限 600、剥 BOM），并打印对应的 env 设置命令
+npx -y @grape-dev/grape-kit auth init --token grape_xxx --base-url https://www.grapedev.cn
+npx -y @grape-dev/grape-kit doctor     # 展示完整 runtime > env > file 优先级链（不回显 token）
+```
+
+`auth init` 在 `GRAPE_AUTH_FILE` 已设置时写它，否则写 `GRAPE_HOME/config.json`——写入目标始终与解析目标一致，写盘后回读校验。`doctor` 输出中命中档显示 `[ok]`；未命中/被覆盖档显示 `[--]`（信息行，无需处理）。
+
+普通 `uninstall` 只移除宿主条目并提示残留凭据；加 `--clean-global` 才会删除 `~/.grape`（文件通道 + worker 注册产物）、用户级 `GRAPE_API_TOKEN`/`GRAPE_BASE_URL`（POSIX：从 rc 文件精确删除 `export` 行，备份只保留非凭据行——含凭据的备份等于换个文件名把 token 留盘；Windows 用 `reg delete`），并仅清理含 `node_modules/@grape-dev` 的 `_npx` 缓存条目。`--clean-global` 带不带 `--target` 均可执行（零宿主痕迹时也照跑全局清理）；`--dry-run` 先预览将删除项、不动盘：
+
+```bash
+npx -y @grape-dev/grape-kit uninstall --clean-global --dry-run   # 先预览
+npx -y @grape-dev/grape-kit uninstall --clean-global
+```
+
 ### OpenCode
 
 ```bash
@@ -110,6 +133,7 @@ openclaw plugins install clawhub:grape-kit@latest
 npx -y @grape-dev/grape-kit --version        # 版本查询
 npm install -g @grape-dev/grape-kit          # 更新（更新后重启 Agent 会话）
 npx -y @grape-dev/grape-kit uninstall        # 卸载（宿主自动检测）
+npx -y @grape-dev/grape-kit uninstall --clean-global   # 同时清理 ~/.grape + 用户环境变量 + _npx 缓存
 ```
 
 启动时自动检查 npm 新版本（24h 去重，`GRAPE_KIT_SKIP_UPDATE_CHECK=1` 关闭）；国内镜像同步滞后 1-3 天，最新版用 `--registry https://registry.npmjs.org/`。
@@ -168,7 +192,7 @@ npx -y @grape-dev/grape-kit intro     # 随时重看能力地图
 
 ```bash
 npm install
-npm test        # 156 个单测（fake-grape 替身，不依赖真实服务端）
+npm test        # 177 个单测（fake-grape 替身，不依赖真实服务端）
 npm run smoke   # 真实 stdio JSON-RPC 往返：initialize → tools/list → tools/call
 ```
 
