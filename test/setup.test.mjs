@@ -21,7 +21,9 @@ after(() => {
 function run(args, h, extraEnv = {}) {
   return spawnSync(process.execPath, [SETUP, ...args], {
     encoding: 'utf8',
-    env: { ...process.env, HOME: h, ...extraEnv },
+    // AC4（QA 复审）：显式清 GRAPE_HOME/GRAPE_AUTH_FILE——不隔离时外部继承值会让
+    // doctor/update-check 的 grapeHome() 指向外部目录（QA 实测 GRAPE_HOME=x npm test 13 红）
+    env: { ...process.env, HOME: h, GRAPE_HOME: '', GRAPE_AUTH_FILE: '', ...extraEnv },
     timeout: 30_000,
   })
 }
@@ -289,6 +291,42 @@ test('Issue #20 auth init 拒绝非 grape_ 前缀 token 且不落盘', () => {
   assert.ok(!existsSync(join(grapeHome, 'config.json')), '拒绝时不得写入文件通道')
 })
 
+/* ── QA 复审（合入后 dev 基线）AC2/可疑3：auth init 冲突检测 + 非 TTY token 掩码 ── */
+
+test('QA#AC2 auth init 检测旧 env 凭据冲突：警告 env 覆盖文件通道并给出处置指引', () => {
+  const h = home()
+  const grapeHome = join(h, 'grapehome')
+  const r = run(['auth', 'init', '--token', 'grape_new_secret', '--base-url', 'https://new.example'], h,
+    { ...cleanCredEnv, GRAPE_HOME: grapeHome, GRAPE_API_TOKEN: 'grape_env_old' })
+  assert.equal(r.status, 0, r.stderr)
+  assert.match(r.stdout, /冲突|不一致/, '应提示双通道冲突')
+  assert.match(r.stdout, /env.*优先|优先级|被更高优先级/, '应说明 env 优先级高于文件通道')
+  assert.match(r.stdout, /--clean-global|删除.*环境变量|重启/, '应给出让文件通道生效的处置指引')
+  assert.doesNotMatch(r.stdout, /grape_env_old/, '不得回显旧 token')
+})
+
+test('QA#AC2 auth init 检测 runtime（GRAPE_API_TOKEN_ONCE）冲突：同样警告', () => {
+  const h = home()
+  const grapeHome = join(h, 'grapehome')
+  const r = run(['auth', 'init', '--token', 'grape_new_secret'], h,
+    { ...cleanCredEnv, GRAPE_HOME: grapeHome, GRAPE_API_TOKEN_ONCE: 'grape_runtime_old' })
+  assert.equal(r.status, 0, r.stderr)
+  assert.match(r.stdout, /冲突|不一致/, 'runtime 档命中同样要提示冲突')
+  assert.doesNotMatch(r.stdout, /grape_runtime_old/, '不得回显旧 token')
+})
+
+test('QA#可疑3 auth init 非 TTY 输出掩码 token：明文不落 CI 日志（文件通道已写入）', () => {
+  const h = home()
+  const grapeHome = join(h, 'grapehome')
+  const r = run(['auth', 'init', '--token', 'grape_fake_init', '--base-url', 'https://self.example'], h,
+    { ...cleanCredEnv, GRAPE_HOME: grapeHome })
+  assert.equal(r.status, 0, r.stderr)
+  assert.doesNotMatch(r.stdout, /grape_fake_init/, '非 TTY 不得把 token 明文打进 stdout')
+  assert.match(r.stdout, /export GRAPE_API_TOKEN=|setx GRAPE_API_TOKEN /, '仍给出 env 通道指引（掩码占位）')
+  // 文件通道照常写入（掩码只影响回显，不影响落盘目标）
+  assert.equal(JSON.parse(readFileSync(join(grapeHome, 'config.json'), 'utf8')).token, 'grape_fake_init')
+})
+
 /* ── QA 复审（PR #11）P1：auth init 写入目标必须与 resolveCredentials 解析目标一致 ── */
 
 test('QA#P1 auth init 尊重 GRAPE_AUTH_FILE：写入目标=解析目标，一次写入后文件通道即生效', () => {
@@ -390,4 +428,21 @@ test('QA doctor --target opencode 检查项只打印一次（双打印回归）'
   assert.equal(r.status, 0, r.stderr)
   const occurrences = r.stdout.split('\n').filter((l) => l.includes('node >= 20')).length
   assert.equal(occurrences, 1, `同一检查项只允许出现一次，实际出现 ${occurrences} 次:\n${r.stdout}`)
+})
+
+/* ── QA 复审（合入后 dev 基线）可疑项 1：runtime-only 时凭据行不得 [!!] ── */
+
+test('QA#可疑1 doctor runtime-only（仅 GRAPE_API_TOKEN_ONCE）：凭据检查行无 [!!]，GRAPE_API_TOKEN 为 [--] 信息行', () => {
+  const h = home()
+  const r = run(['doctor'], h, {
+    ...cleanCredEnv, GRAPE_HOME: join(h, 'grapehome'), GRAPE_API_TOKEN_ONCE: 'grape_once_secret',
+    GRAPE_KIT_SKIP_UPDATE_CHECK: '1',
+  })
+  assert.equal(r.status, 0, r.stderr)
+  for (const l of r.stdout.split('\n').filter((x) => x.includes('GRAPE_API_TOKEN'))) {
+    assert.doesNotMatch(l, /\[!!\]/, `runtime 凭据已命中，凭据行不得 [!!]（与「没有 [!!] 即就绪」矛盾）: ${l}`)
+  }
+  assert.match(r.stdout, /\[--\] GRAPE_API_TOKEN:/, 'GRAPE_API_TOKEN 行应渲染 [--] 信息行（runtime 档覆盖，不影响使用）')
+  assert.match(r.stdout, /\[ok\][^\n]*一次性 env GRAPE_API_TOKEN_ONCE/, 'runtime 命中档保持 [ok]')
+  assert.doesNotMatch(r.stdout, /grape_once_secret/, '不得回显 token')
 })

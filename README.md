@@ -164,7 +164,7 @@ Full release notes: [CHANGELOG.md](CHANGELOG.md) — 20 条发布记录（含 0.
 
 | Version | Date | Highlights |
 |---|---|---|
-| 0.3.10 | 2026-11-23 | Takeover hand-back dispatch closed (#19): the dispatch pointer is `next_seq` only (`handoff_seq` is the hand-back event seq, never evidence of dispatch); when the platform misses the dispatch the client falls back to re-dispatching coding→qa over the same A2A channel as trigger and backfills `next_seq`; blocked (`remote_may_still_run` / missing repo or issue / failed fallback) yields an explicit `pending_dispatch` marker plus readable warnings instead of silent grace. Three "unproven read as success" paths closed: a hand-back that did not succeed (`ok=false` / `changed=false`) never dispatches the next node, a node name outside the whitelist (e.g. `reviewer`) is reported as unknown instead of being silently rewritten to qa, and a fallback response without an event `seq` counts as unproven. #20 credential/uninstall batch: `auth init` as the single credential write entry, `uninstall --clean-global` (with `--dry-run`, rc backups keeping no credential lines, `_npx` narrowed to grape-kit), doctor's full credential-precedence view; unit tests 156→221 |
+| 0.3.10 | 2026-11-23 | Takeover hand-back dispatch closed (#19): the dispatch pointer is `next_seq` only (`handoff_seq` is the hand-back event seq, never evidence of dispatch); when the platform misses the dispatch the client falls back to re-dispatching coding→qa over the same A2A channel as trigger and backfills `next_seq`; blocked (`remote_may_still_run` / missing repo or issue / failed fallback) yields an explicit `pending_dispatch` marker plus readable warnings instead of silent grace. Three "unproven read as success" paths closed: a hand-back that did not succeed (`ok=false` / `changed=false`) never dispatches the next node, a node name outside the whitelist (e.g. `reviewer`) is reported as unknown instead of being silently rewritten to qa, and a fallback response without an event `seq` counts as unproven. #20 credential/uninstall batch: `auth init` as the single credential write entry, `uninstall --clean-global` (with `--dry-run`, rc backups keeping no credential lines, `_npx` narrowed to grape-kit), doctor's full credential-precedence view; unit tests 156→257 |
 | 0.3.9 | 2026-11-23 | Takeover full-chain hardening (#12): takeover_start branch/MR preflight checks + warnings fully surfaced, cross-platform Node takeover scripts (report / request-finish / finish), 409 agent_mismatch hints, bundle {{CWD}} rendering, doctor credential-source line; #17 fix batch: `intro` subcommand + post-install capability map (3-step API Key guide when no credentials), trigger_pipeline `agent` param (resume from a given node), doctor base_url dual-channel with source annotated, review tools native-channel crash fixed; unit tests 136→156 |
 | 0.3.8 | 2026-11-20 | Three review tools (grape_review_pass / grape_review_reject / grape_confirm_done — tools 36→39); issues table gains a "Repository" column; doctor recognizes ~/.grape/config.json file-channel credentials (no more false FAIL) |
 | 0.3.7 | 2026-11-20 | Graphical rendering for trigger/task_status (node-chain diagram on trigger; status card + progress bar + next-step hints); README Quick Start rebuilt in devkit style (per-agent sections, Capabilities overview, lifecycle command group); uninstall receipt cleanup; Codex/hermes removed from surfaced targets |
@@ -193,7 +193,10 @@ Full release notes: [CHANGELOG.md](CHANGELOG.md) — 20 条发布记录（含 0.
 
 ```bash
 npm install
-npm test        # 221 unit tests (fake-grape stand-in, no real server needed)
+
+
+npm test        # 257 unit tests (fake-grape stand-in, no real server needed)
+
 npm run smoke   # real stdio JSON-RPC round-trip: initialize → tools/list → tools/call
 ```
 
