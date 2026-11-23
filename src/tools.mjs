@@ -115,7 +115,20 @@ function dispatchContext(json, nextAgent) {
  */
 export async function ensureNextNodeDispatched(json, args = {}, apiMod = api) {
   const base = json && typeof json === 'object' ? json : { raw: json }
+  const sess = base.session || {}
   const nextAgent = resolveNextAgent(base)
+  const handoffSeq = Number(base.handoff_seq ?? sess.handoff_seq) || 0
+  const nextSeq = Number(base.next_seq ?? sess.next_seq) || 0
+  const dispatchedSeq = nextSeq || handoffSeq
+  if (dispatchedSeq > 0) {
+    // 平台已写入指向下一节点的事件（handoff_seq/next_seq）：重复派发会重跑下一节点，跳过
+    return {
+      ...base,
+      next_agent: nextAgent || base.next_agent || '',
+      next_seq: dispatchedSeq,
+      dispatch: { status: 'already_dispatched', agent: nextAgent, seq: dispatchedSeq, warnings: [] },
+    }
+  }
   if (!nextAgent) {
     // 场景链尾（如 sre）或平台未指定下一节点：不是故障，无需派发
     return { ...base, next_agent: '', next_seq: 0, dispatch: { status: 'no_next_node', agent: '', seq: 0, warnings: [] } }
@@ -920,6 +933,11 @@ export const TOOLS = [
         if (d.status === 'dispatched') {
           lines.push(`- 下一节点已自动派发：事件 seq=${d.seq}（平台 handoff_seq=0，客户端按场景链兜底补发）`)
           lines.push('', '_链不断：下一节点已收到派发事件，无需手动 trigger。_')
+        } else if (d.status === 'already_dispatched') {
+          lines.push(`- 下一节点 ${d.agent || '-'} 已由平台派发（seq=${d.seq}），未重复派发`)
+          lines.push('', '_链不断：下一节点已被派发，无需手动 trigger。_')
+        } else if (d.status !== 'pending') {
+          lines.push('', '_流水线从断点继续，无需 context 口述、无需 trigger 重触发。_')
         }
       }
       return lines.join('\n')
