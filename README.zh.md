@@ -178,7 +178,7 @@ npx -y @grape-dev/grape-kit intro     # 随时重看能力地图
 
 ## 设计原则
 
-- **只触发、只观察、可推进、可接管**：A2A 编排由服务端 `pipelines.json` 驱动，插件永不干预节点交接；接管以会话原语完成原子让渡与交回
+- **只触发、只观察、可推进、可接管**：A2A 编排默认服务端驱动；takeover 交回时平台漏派 coding→qa（`next_seq=0`）由客户端兜底补发，超出该范围保持平台原行为；接管以会话原语完成原子让渡与交回
 - **scope 是第一道门禁**：契约 219 命令中 session_only 的 28 个（git-repo 等）对外部 token 必 403，直接排除；`tko_` 接管凭据仅 repo_session 能力、结束即吊销
 - **无 UI 补偿**：工具返回即 Markdown 表格 / 节点链 / 事件时间线；`wait_task` 轮询带阶段摘要与超时提示
 
@@ -192,7 +192,7 @@ npx -y @grape-dev/grape-kit intro     # 随时重看能力地图
 
 ```bash
 npm install
-npm test        # 177 个单测（fake-grape 替身，不依赖真实服务端）
+npm test        # 189 个单测（fake-grape 替身，不依赖真实服务端）
 npm run smoke   # 真实 stdio JSON-RPC 往返：initialize → tools/list → tools/call
 ```
 
