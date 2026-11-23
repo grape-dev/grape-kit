@@ -1,10 +1,28 @@
 /**
- * 接管脚本共用件：零依赖（Node >= 20 原生 fetch），凭据只从环境变量读取。
- * GRAPE_BASE_URL：平台地址（默认生产实例）；GRAPE_SESSION_TOKEN：tko_ 接管凭据；
+ * 接管脚本共用件：零依赖（Node >= 20 原生 fetch）。
+ * 地址优先级与 src/api.mjs 的 getBaseUrl() 保持一致（单一事实源）：
+ * GRAPE_BASE_URL > ~/.grape/config.json 的 base_url/baseUrl > 默认生产实例。
+ * 凭据只从环境变量读取：GRAPE_SESSION_TOKEN：tko_ 接管凭据；
  * GRAPE_API_TOKEN：用户级凭据（仅 finish 需要）。
  */
+import { readFileSync, existsSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
+
+function fileBaseUrl() {
+  const authFile = process.env.GRAPE_AUTH_FILE || join(homedir(), '.grape', 'config.json')
+  if (!existsSync(authFile)) return ''
+  try {
+    // 剥 BOM，与 src/api.mjs 的文件通道处理一致
+    const cfg = JSON.parse(readFileSync(authFile, 'utf-8').replace(/^\uFEFF/, ''))
+    return cfg.base_url || cfg.baseUrl || ''
+  } catch {
+    return ''
+  }
+}
+
 export function resolveCreds() {
-  const base = String(process.env.GRAPE_BASE_URL || 'https://www.grapedev.cn').replace(/\/$/, '')
+  const base = String(process.env.GRAPE_BASE_URL || fileBaseUrl() || 'https://www.grapedev.cn').replace(/\/$/, '')
   const token = process.env.GRAPE_SESSION_TOKEN || process.env.GRAPE_API_TOKEN || ''
   return { base, token }
 }

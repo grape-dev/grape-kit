@@ -894,7 +894,8 @@ export const TOOLS = [
       properties: { device_name: str('设备名（可选，默认 grape-kit-<主机名>）') },
     },
     async run(a, { runGrape, apiModule }) {
-      const base = (process.env.GRAPE_BASE_URL || 'https://www.grapedev.cn').replace(/\/$/, '')
+      // 地址与运行时 API 同源：env > ~/.grape/config.json > 默认（否则文件通道用户会连错实例）
+      const base = getBaseUrl().replace(/\/$/, '')
       const baseName = a.device_name || `grape-kit-${hostname()}`
       const A = apiModule || (await import('./api.mjs')).api
       // 凭据名全局唯一且 token 只展示一次：重名（400 已存在）自动加时间戳后缀重试一次

@@ -215,3 +215,27 @@ test('M3 takeover_start 始终给出分支/MR 前置检查项（无 warnings 时
   assert.match(out, /已有 MR|MR 列表/, '应要求确认已有 MR')
   assert.match(out, /禁止裸 `--force`|禁止裸 --force/, '应禁止裸强推')
 })
+
+/* ── Issue #17：takeover 脚本地址与 getBaseUrl() 同优先级（env > 文件通道 > 默认） ── */
+
+test('Issue #17 takeover _lib.resolveCreds 地址优先级与 getBaseUrl() 一致', async () => {
+  const { resolveCreds } = await import('../skills/grape-remote/scripts/takeover/_lib.mjs')
+  const { getBaseUrl } = await import('../src/api.mjs')
+  const dir = mkdtempSync(join(tmpdir(), 'gk-tk-base-'))
+  const cfg = join(dir, 'config.json')
+  writeFileSync(cfg, JSON.stringify({ token: 'tko_fake', base_url: 'https://file.example' }))
+  const saved = { base: process.env.GRAPE_BASE_URL, auth: process.env.GRAPE_AUTH_FILE }
+  try {
+    process.env.GRAPE_AUTH_FILE = cfg
+    delete process.env.GRAPE_BASE_URL
+    assert.equal(resolveCreds().base, 'https://file.example', '文件通道地址必须被采用（不需 GRAPE_BASE_URL）')
+    assert.equal(resolveCreds().base, getBaseUrl())
+    process.env.GRAPE_BASE_URL = 'https://env.example'
+    assert.equal(resolveCreds().base, 'https://env.example', 'env 优先于文件通道')
+    assert.equal(resolveCreds().base, getBaseUrl())
+  } finally {
+    if (saved.base === undefined) delete process.env.GRAPE_BASE_URL; else process.env.GRAPE_BASE_URL = saved.base
+    if (saved.auth === undefined) delete process.env.GRAPE_AUTH_FILE; else process.env.GRAPE_AUTH_FILE = saved.auth
+    rmSync(dir, { recursive: true, force: true })
+  }
+})

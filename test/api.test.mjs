@@ -182,3 +182,33 @@ test('triggerPipeline agent：默认 vod / 指定 qa 透传 / 非法值可读错
     if (saved.auth === undefined) delete process.env.GRAPE_AUTH_FILE; else process.env.GRAPE_AUTH_FILE = saved.auth
   }
 })
+
+test('Issue #17：worker_onboard 地址与 getBaseUrl() 同源（env / 文件通道，无需 GRAPE_BASE_URL）', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gk-onboard-'))
+  const cfg = join(dir, 'config.json')
+  writeFileSync(cfg, JSON.stringify({ token: 'grape_file', base_url: 'https://file.example' }))
+  const saved = { tok: process.env.GRAPE_API_TOKEN, base: process.env.GRAPE_BASE_URL, auth: process.env.GRAPE_AUTH_FILE }
+  const { findTool } = await import('../src/tools.mjs')
+  const t = findTool('grape_worker_onboard')
+  const apiModule = { workerCredentialCreate: async () => ({ token: 'rta_x' }) }
+  try {
+    // 文件通道：只有 token+base_url，没有 GRAPE_BASE_URL
+    process.env.GRAPE_AUTH_FILE = cfg
+    delete process.env.GRAPE_BASE_URL
+    delete process.env.GRAPE_API_TOKEN
+    const byFile = await t.run({ device_name: 'probe' }, { runGrape: null, apiModule })
+    assert.match(byFile.install_command, /curl -sSL https:\/\/file\.example\/api\/runtime\/install/)
+    assert.match(byFile.install_command, /--server https:\/\/file\.example/)
+
+    // env 通道：显式 GRAPE_BASE_URL 优先
+    process.env.GRAPE_BASE_URL = 'https://env.example'
+    const byEnv = await t.run({ device_name: 'probe' }, { runGrape: null, apiModule })
+    assert.match(byEnv.install_command, /--server https:\/\/env\.example/)
+    assert.equal(getBaseUrl(), 'https://env.example')
+  } finally {
+    if (saved.tok === undefined) delete process.env.GRAPE_API_TOKEN; else process.env.GRAPE_API_TOKEN = saved.tok
+    if (saved.base === undefined) delete process.env.GRAPE_BASE_URL; else process.env.GRAPE_BASE_URL = saved.base
+    if (saved.auth === undefined) delete process.env.GRAPE_AUTH_FILE; else process.env.GRAPE_AUTH_FILE = saved.auth
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
