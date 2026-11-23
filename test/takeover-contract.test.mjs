@@ -509,6 +509,27 @@ test('#19 阻塞判据只认稳定告警码：散文「远端无冲突」不误�
   } finally { stub2.restore() }
 })
 
+test('#19 派发指针取值单一口径：session 优先、顶层 0 不遮蔽，判据与渲染一致', async () => {
+  const t = finishTool()
+  // 顶层 next_seq=0 + session next_seq=77：session 是会话记录权威值，判 0 会重复补发
+  const stub = await stubFinish({
+    finish: {
+      ok: true, changed: true, next_agent: 'qa', next_seq: 0, handoff_seq: 0,
+      session: sessOf({ handoff_seq: 42, next_seq: 77 }),
+    },
+    trigger: { seq: 99, agent: 'qa', status: 'running' },
+  })
+  try {
+    const j = await t.native({ session_id: 'tkos_19', summary: '完成' })
+    assert.equal(stub.triggers().length, 0, 'session next_seq=77 已指向派发事件，顶层 0 不得遮蔽导致重复补发')
+    assert.equal(j.dispatch.status, 'already_dispatched')
+    assert.equal(j.next_seq, 77)
+    const out = t.render(j)
+    assert.match(out, /handoff_seq=42/, '渲染与判据同一 getter：session handoff_seq=42 必须如实披露')
+    assert.match(out, /next_seq=77/)
+  } finally { stub.restore() }
+})
+
 test('#19/S6 next_step 只认整串 agent 名：散文不解析，靠场景链兜底', async () => {
   const t = finishTool()
   const stub = await stubFinish({
