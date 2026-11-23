@@ -10,7 +10,11 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 
 function fileBaseUrl() {
-  const authFile = process.env.GRAPE_AUTH_FILE || join(homedir(), '.grape', 'config.json')
+  // GRAPE_HOME 覆盖凭据目录（默认 ~/.grape），与 src/api.mjs 的 readFileConfig 同语义：
+  // 本文件是无依赖 skill 副本（随 skills/grape-remote 单独分发），无法 import src/api.mjs，
+  // 表达式必须与其保持逐字一致；README 宣称 API client / doctor / takeover scripts 共用该覆盖点。
+  const home = String(process.env.GRAPE_HOME || '').trim() || join(homedir(), '.grape')
+  const authFile = process.env.GRAPE_AUTH_FILE || join(home, 'config.json')
   if (!existsSync(authFile)) return ''
   try {
     // 剥 BOM，与 src/api.mjs 的文件通道处理一致

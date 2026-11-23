@@ -239,3 +239,26 @@ test('Issue #17 takeover _lib.resolveCreds 地址优先级与 getBaseUrl() 一�
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+test('QA#P1 takeover _lib 文件通道尊重 GRAPE_HOME（与 src/api.mjs 同语义）', async () => {
+  const { resolveCreds } = await import('../skills/grape-remote/scripts/takeover/_lib.mjs')
+  const { getBaseUrl } = await import('../src/api.mjs')
+  const dir = mkdtempSync(join(tmpdir(), 'gk-tk-home-'))
+  const cfg = join(dir, 'config.json')
+  writeFileSync(cfg, JSON.stringify({ token: 'tko_fake', base_url: 'https://takeover-home.example' }))
+  const saved = { base: process.env.GRAPE_BASE_URL, auth: process.env.GRAPE_AUTH_FILE, home: process.env.GRAPE_HOME }
+  try {
+    process.env.GRAPE_HOME = dir
+    delete process.env.GRAPE_AUTH_FILE
+    delete process.env.GRAPE_BASE_URL
+    // 旧实现硬编码 join(homedir(),'.grape','config.json')：GRAPE_HOME 对接管脚本无效，
+    // README 宣称的「shared by API client, doctor, and takeover scripts」与实现不符
+    assert.equal(resolveCreds().base, 'https://takeover-home.example', 'GRAPE_HOME/config.json 应被接管脚本采用')
+    assert.equal(resolveCreds().base, getBaseUrl(), '必须与 src/api.mjs 文件通道解析同语义')
+  } finally {
+    if (saved.base === undefined) delete process.env.GRAPE_BASE_URL; else process.env.GRAPE_BASE_URL = saved.base
+    if (saved.auth === undefined) delete process.env.GRAPE_AUTH_FILE; else process.env.GRAPE_AUTH_FILE = saved.auth
+    if (saved.home === undefined) delete process.env.GRAPE_HOME; else process.env.GRAPE_HOME = saved.home
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
