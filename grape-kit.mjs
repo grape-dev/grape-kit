@@ -181,7 +181,7 @@ function resolveTarget() {
   if (t !== 'all' && !SUPPORTED_TARGETS.includes(t)) {
     console.error(`不支持的 --target: ${t}`)
     console.error(`受支持宿主: ${SUPPORTED_TARGETS.join(' / ')}`)
-    console.error('（hermes 无 MCP client，复制 skills/grape-remote 手动装配；dsh 由 grape-dsh 独立插件承载）')
+    console.error('（hermes 无 MCP client，复制 skills/grape-remote 手动装配；dsh 走 MCP 最小路径，grape-dsh 为完整形态插件，二者并存）')
     process.exit(1)
   }
   return t
@@ -434,6 +434,209 @@ function doctorOfficeace(probe) {
   const found = detectOfficeace()
   checks.push(entryCheck('officeace mcpServers.grape-kit', found, 'npx -y @grape-dev/grape-kit install --target officeace'))
   if (found.ok) checks.push(['officeace 导入状态', '需在客户端「扩展 → 连接器」中确认已连接（清单存在 ≠ 已导入）'])
+  if (probe) checks.push(['契约连通性', connectivityCheck(getBaseUrl())])
+  printChecks(checks)
+}
+
+/* ---------- dsh（DeepSeek Harness）：MCP stdio 托管 patch 模式 ---------- */
+
+/**
+ * dsh 装配位置：`$DSH_HOME || ~/.dsh`，MCP 客户端以 Cordis patch 行挂在 web profile。
+ * `GRAPE_DSH_PATCH` 覆盖 patch 文件路径（实机 profile 差异 / 用例隔离，对齐 GRAPE_CODEARTS_CONFIG）。
+ * 口径：dsh 走 MCP 最小路径（36 工具零改动复用），原生 Cordis 插件形态由 grape-dsh 承载，二者并存。
+ */
+function dshPaths() {
+  const dshHome = String(process.env.DSH_HOME || '').trim() || join(homedir(), '.dsh')
+  const override = String(process.env.GRAPE_DSH_PATCH || '').trim()
+  return {
+    home: dshHome,
+    patch: override || join(dshHome, 'profiles', 'web', 'cordis.patch.yml'),
+    skillsDir: join(dshHome, 'skills'),
+  }
+}
+
+/** 托管块标记：只有这两行之间属于 grape-kit，用户其余 patch 行不重排、不改写 */
+const DSH_BLOCK_START = '# Grape Kit DSH integration start'
+const DSH_BLOCK_END = '# Grape Kit DSH integration end'
+/** dsh profile 侧 MCP 客户端包（可能被其他插件共用，卸载时不动它） */
+const DSH_CLIENT_PKG = '@deepseek-ai/dsh-mcp-client'
+
+/**
+ * 定位托管块：{ start, end, complete }；找不到返回 null。
+ * 有起始标记却缺结束标记 → complete=false（doctor 报「不完整」而非 ok，install 按整段替换）。
+ */
+function findDshBlock(text) {
+  const startRe = /^[ \t]*# Grape Kit DSH integration start[^\n]*(?:\r?\n|$)/m
+  const m = startRe.exec(text)
+  if (!m) return null
+  const afterStart = m.index + m[0].length
+  const endRe = /^[ \t]*# Grape Kit DSH integration end[^\n]*(?:\r?\n|$)/m
+  const em = endRe.exec(text.slice(afterStart))
+  if (!em) return { start: m.index, end: text.length, complete: false }
+  return { start: m.index, end: afterStart + em.index + em[0].length, complete: true }
+}
+
+/** YAML 单引号标量：路径含空格/撇号时不破坏结构（内层 ' → ''） */
+const yamlScalar = (s) => `'${String(s).replace(/'/g, "''")}'`
+
+/** 托管块正文：本地 MCP 入口优先（DEFAULT_SCRIPT / --script），解析不到回退 npx 免全局安装 */
+function dshBlock(scriptAbs) {
+  const hasLocal = !!scriptAbs && existsSync(scriptAbs)
+  const command = hasLocal ? 'node' : 'npx'
+  const args = hasLocal ? [scriptAbs] : [...NPX_ARGS]
+  const argv = args.map((a) => `\n          - ${yamlScalar(a)}`).join('')
+  return [
+    DSH_BLOCK_START,
+    '- insert:',
+    '    - id: grape-kit',
+    `      name: ${yamlScalar(DSH_CLIENT_PKG)}`,
+    '      config:',
+    '        serverName: grape-kit',
+    '        transport: stdio',
+    `        command: ${command}`,
+    `        args:${argv}`,
+    '        failOnStartupError: false',
+    DSH_BLOCK_END,
+  ].join('\n')
+}
+
+/** 只摘除托管块（含标记行），其余文本原样保留；无块返回原文本 */
+function stripDshBlock(text) {
+  const block = findDshBlock(text)
+  if (!block) return text
+  return text.slice(0, block.start) + text.slice(block.end)
+}
+
+/** 追加托管块到文件末尾；调用前已剥离旧块，因此重复安装产出逐字节相同 */
+function appendDshBlock(text, block) {
+  if (text === '') return `${block}\n`
+  return `${text.endsWith('\n') ? text : `${text}\n`}${block}\n`
+}
+
+/** profile 侧依赖是否已就绪：package.json 声明或 node_modules 实体 */
+function dshClientInstalled(profileDir) {
+  try {
+    const cfg = JSON.parse(readFileSync(join(profileDir, 'package.json'), 'utf8'))
+    const deps = { ...(cfg.dependencies || {}), ...(cfg.devDependencies || {}) }
+    if (deps[DSH_CLIENT_PKG]) return true
+  } catch { /* 无 package.json 时退回 node_modules 判定 */ }
+  return existsSync(join(profileDir, 'node_modules', ...DSH_CLIENT_PKG.split('/')))
+}
+
+/** dsh-mcp-client best-effort 安装：失败只给指引，不阻塞装配（依赖属 dsh profile 侧资产） */
+function ensureDshClient(patchPath) {
+  if (dshClientInstalled(dirname(patchPath))) {
+    console.log(`dsh 依赖已就绪: ${DSH_CLIENT_PKG}`)
+    return
+  }
+  // GRAPE_DSH_DEP_CMD 覆盖依赖安装命令（对齐 GRAPE_CLI_BIN；用例注入必失败命令以免联网）
+  const bin = String(process.env.GRAPE_DSH_DEP_CMD || '').trim() || 'npx'
+  console.log(`正在安装 dsh 依赖 ${DSH_CLIENT_PKG}（best-effort，失败不阻塞）…`)
+  const r = spawnSync(bin, ['-y', '@deepseek-ai/dsh', 'plugin', '--profile', 'web', 'add', DSH_CLIENT_PKG], {
+    encoding: 'utf8', timeout: 120_000,
+  })
+  if (r.status === 0) { console.log(`dsh 依赖已安装: ${DSH_CLIENT_PKG}`); return }
+  console.log(`⚠️ 未能自动安装 ${DSH_CLIENT_PKG}（托管块已写入，不影响后续修复）：`)
+  console.log(`   手动安装： npx @deepseek-ai/dsh plugin --profile web add ${DSH_CLIENT_PKG}`)
+  console.log('   pnpm 缺失时先执行： corepack enable pnpm')
+}
+
+function copySkillDsh() {
+  const p = dshPaths()
+  const src = join(HERE, 'skills', 'grape-remote')
+  if (!existsSync(src)) { console.warn('skill 源缺失，跳过'); return }
+  mkdirSync(p.skillsDir, { recursive: true })
+  const dst = join(p.skillsDir, 'grape-remote')
+  rmSync(dst, { recursive: true, force: true })
+  mkdirSync(dst, { recursive: true })
+  for (const f of readdirSync(src)) {
+    if (statSync(join(src, f)).isFile()) writeFileSync(join(dst, f), readFileSync(join(src, f)))
+  }
+  writeFileSync(join(p.skillsDir, RECEIPT), JSON.stringify({ installedBy: 'grape-kit', skills: ['grape-remote'], placedAt: new Date().toISOString() }, null, 2))
+  console.log(`skill 已安装: ${dst}`)
+}
+
+/**
+ * patch 文件落盘：写前备份（原文）+ 写后回读校验，失败回滚。
+ * 与 writeValidated 的区别：cordis.patch.yml 是 YAML，不能用 JSON 解析校验，
+ * 因此只校验「托管块边界完整」这一结构不变量。
+ */
+function writeDshPatch(patchPath, nextText, originalText, expectBlock) {
+  const backup = backupOf(patchPath, originalText)
+  writeFileSync(patchPath, nextText)
+  const written = readFileSync(patchPath, 'utf8')
+  const block = findDshBlock(written)
+  const ok = expectBlock ? !!block && block.complete : !block
+  if (!ok) {
+    if (typeof originalText === 'string') writeFileSync(patchPath, originalText)
+    else rmSync(patchPath, { force: true })
+    console.error(`写入后校验失败（托管块${expectBlock ? '缺失或不完整' : '未清除'}）；已回滚 ${patchPath}${backup ? `（备份: ${backup}）` : ''}`)
+    process.exit(1)
+  }
+  return backup
+}
+
+function installDsh(scriptAbs) {
+  const p = dshPaths()
+  const originalText = existsSync(p.patch) ? readFileSync(p.patch, 'utf8') : null
+  // 先移除再插入：幂等升级（升级后托管块字段不漂移），且始终落回文件末尾
+  const base = originalText === null ? '' : stripDshBlock(originalText)
+  const next = appendDshBlock(base, dshBlock(scriptAbs))
+  mkdirSync(dirname(p.patch), { recursive: true })
+  const backup = writeDshPatch(p.patch, next, originalText, true)
+  console.log(`已写入 ${p.patch}（dsh 托管块 id: grape-kit，${backup ? `备份: ${backup}` : '新建'}）`)
+  copySkillDsh()
+  ensureDshClient(p.patch)
+  console.log('dsh：重启 dsh 会话（profile: web）后加载 grape-kit 的 MCP 工具')
+  console.log('凭据走环境变量（GRAPE_BASE_URL / GRAPE_API_TOKEN），不要写进 cordis.patch.yml')
+}
+
+function uninstallDsh() {
+  const p = dshPaths()
+  if (!existsSync(p.patch)) {
+    console.log(`未找到 ${p.patch}，无需卸载`)
+  } else {
+    const text = readFileSync(p.patch, 'utf8')
+    if (!findDshBlock(text)) {
+      console.log('未发现 dsh 托管块，跳过')
+    } else {
+      const backup = writeDshPatch(p.patch, stripDshBlock(text), text, false)
+      console.log(`已移除 dsh 托管块（备份: ${backup}）`)
+    }
+  }
+  // skill 副本 + receipt：只删自己放的，dsh profile 依赖与用户 patch 行不动
+  const skillDir = join(p.skillsDir, 'grape-remote')
+  if (existsSync(skillDir)) {
+    rmSync(skillDir, { recursive: true, force: true })
+    console.log(`skill 已删除: ${skillDir}`)
+  }
+  const receipt = join(p.skillsDir, RECEIPT)
+  if (existsSync(receipt)) rmSync(receipt, { force: true })
+  try { rmdirSync(p.skillsDir) } catch { /* skills 目录非空（用户/其它插件）则保留 */ }
+}
+
+/** 检出 dsh 托管块（install / doctor / doctorAll 共用同一判定）；不完整显式返回 error */
+function detectDsh() {
+  const p = dshPaths()
+  if (!existsSync(p.patch)) return { ok: false, path: p.patch }
+  const text = readFileSync(p.patch, 'utf8')
+  const block = findDshBlock(text)
+  if (!block) return { ok: false, path: p.patch }
+  if (!block.complete) return { ok: false, path: p.patch, error: '托管块不完整（缺少结束标记）' }
+  return { ok: text.slice(block.start, block.end).includes('- id: grape-kit'), path: p.patch }
+}
+
+function doctorDsh(probe) {
+  const p = dshPaths()
+  const checks = baseChecks()
+  const found = detectDsh()
+  checks.push(entryCheck('dsh 托管块', found, 'npx -y @grape-dev/grape-kit install --target dsh'))
+  checks.push(['dsh skill 副本', existsSync(join(p.skillsDir, 'grape-remote', 'SKILL.md'))
+    ? 'ok'
+    : '未安装（重新执行 install --target dsh）'])
+  checks.push([`${DSH_CLIENT_PKG} 依赖`, dshClientInstalled(dirname(p.patch))
+    ? 'ok（dsh web profile 已声明/已安装）'
+    : `未安装（npx @deepseek-ai/dsh plugin --profile web add ${DSH_CLIENT_PKG}）`])
   if (probe) checks.push(['契约连通性', connectivityCheck(getBaseUrl())])
   printChecks(checks)
 }
@@ -956,9 +1159,17 @@ const HOSTS = {
     doctor: doctorOfficeace,
     detect: detectOfficeace,
   },
+  dsh: {
+    label: 'dsh（DeepSeek Harness）',
+    install: () => installDsh(resolve(String(arg('script', DEFAULT_SCRIPT)))),
+    uninstall: uninstallDsh,
+    doctor: doctorDsh,
+    detect: detectDsh,
+  },
 }
 
-/* 受支持宿主以 HOSTS 为唯一来源（hermes 无 MCP client 走 skill 手动复制；dsh 由 grape-dsh 插件承载） */
+/* 受支持宿主以 HOSTS 为唯一来源（hermes 无 MCP client 走 skill 手动复制；dsh 走 MCP 最小路径，
+ * 原生 Cordis 插件形态由 grape-dsh 承载，二者并存） */
 const SUPPORTED_TARGETS = Object.keys(HOSTS)
 
 function detectHosts() {
@@ -967,6 +1178,7 @@ function detectHosts() {
   if (existsSync(join(home, '.workbuddy'))) found.push('workbuddy')
   if (existsSync(join(home, '.codeartsdoer'))) found.push('codearts')
   if (existsSync(join(home, '.officeace'))) found.push('officeace')
+  if (existsSync(dshPaths().home)) found.push('dsh')
   if (existsSync(join(home, '.config', 'opencode'))) found.push('opencode')
   return found
 }
@@ -979,7 +1191,7 @@ async function resolveTargetAuto() {
   if (found.length > 1) return 'all'
   if (!process.stdin.isTTY) {
     console.error('未检测到任何已安装的宿主 agent。')
-    console.error('支持的宿主: opencode / workbuddy / codearts / officeace')
+    console.error(`支持的宿主: ${SUPPORTED_TARGETS.join(' / ')}`)
     console.error('请用 --target <宿主> 指定后重跑（或先安装对应宿主 agent）。')
     process.exit(1)
   }
