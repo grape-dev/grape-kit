@@ -118,3 +118,67 @@ test('hintFor 409 同时认 code 与 detail（兼容旧平台只给散文）', (
   assert.equal(hintFor(409, { detail: 'other conflict' }), '')
   assert.match(hintFor(409, { code: 'taken_by_other' }), /10-30s/)
 })
+
+/* ── Issue #19：takeover 交回后按场景链派发下一节点（coding→qa「链不断」） ── */
+
+const finishTool = () => findTool('grape_takeover_finish')
+
+/** 挂起 api.takeoverFinish / api.triggerPipeline：记录调用顺序、注入平台响应 */
+async function stubFinish({ finish, trigger }) {
+  const mod = await import('../src/api.mjs')
+  const calls = []
+  const orig = { finish: mod.api.takeoverFinish, trigger: mod.api.triggerPipeline }
+  mod.api.takeoverFinish = async (...a) => { calls.push(['finish', ...a]); return finish }
+  mod.api.triggerPipeline = async (...a) => {
+    calls.push(['trigger', ...a])
+    if (trigger instanceof Error) throw trigger
+    return trigger
+  }
+  return {
+    calls,
+    triggers: () => calls.filter((c) => c[0] === 'trigger'),
+    restore: () => { mod.api.takeoverFinish = orig.finish; mod.api.triggerPipeline = orig.trigger },
+  }
+}
+
+test('#19 平台漏派（handoff_seq=0）：交回后按场景链自动补发 coding→qa', async () => {
+  const t = finishTool()
+  const stub = await stubFinish({
+    finish: {
+      ok: true, changed: true, next_agent: 'qa', issue_stage: 'qa', event_status: 'completed',
+      session: {
+        id: 'tkos_19', status: 'finished', agent_type: 'coding',
+        repo_key: 'gitcode:acme/demo', issue_number: 62, handoff_seq: 0, next_seq: 0, skipped_dispatches: 0,
+      },
+    },
+    trigger: { seq: 71, agent: 'qa', status: 'running' },
+  })
+  try {
+    const j = await t.native({ session_id: 'tkos_19', summary: '完成', evidence: 'npm test 全绿' })
+    const trig = stub.triggers()
+    assert.equal(trig.length, 1, '平台漏派时必须补发一次')
+    assert.deepEqual(trig[0].slice(1, 4), ['acme', 'demo', 62], '派发应落到会话所属仓库与 issue')
+    assert.equal(trig[0][5], 'qa', '派发目标必须是场景链下一节点 qa')
+    assert.equal(j.next_agent, 'qa')
+    assert.equal(j.next_seq, 71, 'next_seq 应为补发事件 seq')
+    assert.equal(j.dispatch.status, 'dispatched')
+    const out = t.render(j)
+    assert.match(out, /已自动派发/)
+    assert.match(out, /seq=71/)
+    assert.doesNotMatch(out, /待派发/)
+  } finally { stub.restore() }
+})
+
+test('#19 平台不给 next_agent 时按会话节点推导场景链（coding→qa）', async () => {
+  const t = finishTool()
+  const stub = await stubFinish({
+    finish: { ok: true, changed: true, session: { agent_type: 'coding', repo_key: 'gitcode:acme/demo', issue_number: 62, handoff_seq: 0 } },
+    trigger: { seq: 12, agent: 'qa', status: 'running' },
+  })
+  try {
+    const j = await t.native({ session_id: 'tkos_19', summary: '完成' })
+    assert.equal(stub.triggers().length, 1)
+    assert.equal(stub.triggers()[0][5], 'qa', '场景链 coding→qa 必须被推导出来')
+    assert.equal(j.next_agent, 'qa')
+  } finally { stub.restore() }
+})
