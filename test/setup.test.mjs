@@ -21,7 +21,9 @@ after(() => {
 function run(args, h, extraEnv = {}) {
   return spawnSync(process.execPath, [SETUP, ...args], {
     encoding: 'utf8',
-    env: { ...process.env, HOME: h, ...extraEnv },
+    // AC4（QA 复审）：显式清 GRAPE_HOME/GRAPE_AUTH_FILE——不隔离时外部继承值会让
+    // doctor/update-check 的 grapeHome() 指向外部目录（QA 实测 GRAPE_HOME=x npm test 13 红）
+    env: { ...process.env, HOME: h, GRAPE_HOME: '', GRAPE_AUTH_FILE: '', ...extraEnv },
     timeout: 30_000,
   })
 }
