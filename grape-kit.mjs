@@ -19,18 +19,15 @@ import { join, dirname, resolve, basename } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
 import { checkUpdateStatus, formatUpdateNotice } from './src/update-check.mjs'
-import { resolveCredentials, getBaseUrl } from './src/api.mjs'
+import { resolveCredentials, getBaseUrl, grapeHome, readAuthChannel } from './src/api.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const DEFAULT_SCRIPT = resolve(HERE, 'grape-kit-mcp.mjs')
 const RECEIPT = '.grape-kit-native.json'
 
-/**
- * 凭据/缓存根目录：默认 ~/.grape，可用 GRAPE_HOME 覆盖。
+/** 凭据/缓存根目录：grapeHome() 由 src/api.mjs 单源导出（默认 ~/.grape，GRAPE_HOME 覆盖）。
  * 覆盖点是可测试性前置——--clean-global 会整目录删除，测试必须能把它指向临时目录，
- * 绝不允许在真实用户 home 上做破坏性断言。src/api.mjs 与 update-check 同源读取（env.GRAPE_HOME）。
- */
-const grapeHome = () => String(process.env.GRAPE_HOME || '').trim() || join(homedir(), '.grape')
+ * 绝不允许在真实用户 home 上做破坏性断言。 */
 const configPath = () => join(grapeHome(), 'config.json')
 
 /** npx 免全局安装的启动参数（workbuddy / codearts / officeace 共用，与 opencode 的本地脚本模式并列） */
@@ -89,39 +86,21 @@ function credentialSourceCheck() {
 function baseUrlInfo() {
   const base = getBaseUrl()
   if (process.env.GRAPE_BASE_URL) return { base, source: '环境变量 GRAPE_BASE_URL' }
-  const authFile = process.env.GRAPE_AUTH_FILE || configPath()
-  if (existsSync(authFile)) {
-    try {
-      const cfg = JSON.parse(readFileSync(authFile, 'utf8').replace(/^\uFEFF/, ''))
-      if (cfg.base_url || cfg.baseUrl) return { base, source: `文件通道 ${authFile}` }
-    } catch { /* 损坏文件按未配置处理 */ }
-  }
+  const f = readAuthChannel()
+  if (f.cfg && (f.cfg.base_url || f.cfg.baseUrl)) return { base, source: `文件通道 ${f.authFile}` }
   return { base, source: '默认' }
-}
-
-/** 文件通道解析：存在性 / 解析错误 / token 有无分开报，doctor 优先级视图据此给出未命中原因。
- *  解析失败只置 parseError 标志、不透传 e.message——JSON.parse 的报错消息会携带文件原文片段
- *  （凭据文件即 token 泄露），凭据文件报错必须固定为「解析失败」（QA 安全回归）。 */
-function fileChannelInfo() {
-  const authFile = process.env.GRAPE_AUTH_FILE || configPath()
-  if (!existsSync(authFile)) return { authFile, exists: false }
-  try {
-    const cfg = JSON.parse(readFileSync(authFile, 'utf8').replace(/^\uFEFF/, ''))
-    return { authFile, exists: true, cfg }
-  } catch {
-    return { authFile, exists: true, parseError: true }
-  }
 }
 
 /**
  * 凭据完整优先级视图（runtime > env > file）：逐档列出命中/未命中与原因，不回显 token。
- * 与 resolveCredentials 同源判定，避免 doctor 展示层另写一套优先级。
+ * 判定同源：命中档来自 resolveCredentials 的 sourceKind（结构化标注，不做 source 字符串反推）；
+ * 文件通道明细来自 readAuthChannel（与 src/api.mjs 的解析完全同一实现）。
  * 渲染约定：命中档 ok → [ok]；未命中/被覆盖档 note → [--] 信息行（无修复动作）。
  */
 function priorityChecks() {
   const env = process.env
-  const effective = resolveCredentials(env).source
-  const f = fileChannelInfo()
+  const c = resolveCredentials(env)
+  const f = readAuthChannel()
   const checks = []
 
   checks.push([
@@ -131,11 +110,10 @@ function priorityChecks() {
       : 'note（未命中：未设置，仅一次性参数场景使用）',
   ])
 
-  const envHit = effective === 'env:GRAPE_API_TOKEN'
   checks.push([
     '凭据优先级 ② env（GRAPE_API_TOKEN / GRAPE_BASE_URL）',
     env.GRAPE_API_TOKEN
-      ? (envHit ? 'ok（命中，当前生效）' : 'note（已设置，被 runtime 覆盖）')
+      ? (c.sourceKind === 'env' ? 'ok（命中，当前生效）' : 'note（已设置，被 runtime 覆盖）')
       : 'note（未命中：GRAPE_API_TOKEN 为空）',
   ])
 
@@ -143,14 +121,14 @@ function priorityChecks() {
   if (!f.exists) fileDetail = `note（未命中：文件不存在（${f.authFile}））`
   else if (f.parseError) fileDetail = 'note（未命中：文件解析失败（内容不回显））'
   else if (!f.cfg || !f.cfg.token) fileDetail = `note（未命中：文件存在但无 token（${f.authFile}））`
-  else if (effective === `file:${f.authFile}`) fileDetail = `ok（命中，当前生效（${f.authFile}；不回显 token））`
+  else if (c.sourceKind === 'file') fileDetail = `ok（命中，当前生效（${f.authFile}；不回显 token））`
   else fileDetail = `note（已配置，被更高优先级覆盖（${f.authFile}））`
   checks.push(['凭据优先级 ③ file（GRAPE_AUTH_FILE 或 GRAPE_HOME/config.json）', fileDetail])
   return checks
 }
 
 const envChecks = () => {
-  const f = fileChannelInfo()
+  const f = readAuthChannel()
   const fileToken = f.exists && !f.parseError && f.cfg && f.cfg.token
   let tokenLine
   if (process.env.GRAPE_API_TOKEN) tokenLine = 'ok（已设置，不回显）'
@@ -1161,10 +1139,8 @@ async function authInit() {
   const authFileOverride = String(process.env.GRAPE_AUTH_FILE || '').trim()
   const cfgPath = authFileOverride || configPath()
   mkdirSync(dirname(cfgPath), { recursive: true })
-  let cfg = {}
-  if (existsSync(cfgPath)) {
-    try { cfg = JSON.parse(readFileSync(cfgPath, 'utf8').replace(/^\uFEFF/, '')) || {} } catch { cfg = {} }
-  }
+  const channel = readAuthChannel()
+  let cfg = channel.cfg && typeof channel.cfg === 'object' ? channel.cfg : {}
   cfg.token = token
   cfg.base_url = base
   delete cfg.baseUrl

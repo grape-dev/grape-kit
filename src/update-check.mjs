@@ -7,12 +7,13 @@
  * - 环境变量 GRAPE_KIT_SKIP_UPDATE_CHECK=1 可关闭，GRAPE_KIT_NO_UPDATE_CHECK=1 为等价别名
  */
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs'
-import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
+import { grapeHome } from './api.mjs'
 
 const CACHE_TTL_MS = 24 * 3600 * 1000
 const REGISTRY = 'https://registry.npmjs.org'
-const cachePath = () => join(String(process.env.GRAPE_HOME || '').trim() || join(homedir(), '.grape'), 'grape-kit-update-check.json')
+// GRAPE_HOME 覆盖点单源：与凭据文件通道共用 src/api.mjs 的 grapeHome()（QA P2 去重）
+const cachePath = () => join(grapeHome(), 'grape-kit-update-check.json')
 
 /** 写缓存：目录不存在时先创建（首次运行 HOME 下通常没有 ~/.grape） */
 function writeCache(data) {
