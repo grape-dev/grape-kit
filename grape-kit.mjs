@@ -1225,15 +1225,28 @@ async function authInit() {
     process.exit(1)
   }
 
-  console.log(`已写入文件通道: ${cfgPath}${authFileOverride ? '（GRAPE_AUTH_FILE 指定）' : ''}（权限 600，已剥 BOM）`)
+  console.log(`已写入文件通道: ${cfgPath}${authFileOverride ? '（GRAPE_AUTH_FILE 指定）' : ''}${process.platform === 'win32' ? '（Windows 无 600 权限位，依赖目录 ACL，已剥 BOM）' : '（权限 600，已剥 BOM）'}`)
+  // QA 复审（合入后基线）AC2：env/runtime 档已设置时文件通道不生效（被更高优先级覆盖）——
+  // 不检测不提示 = 用户以为写入成功即生效，实际 doctor 仍读旧 env 值（双通道不一致）
+  const higher = []
+  if (process.env.GRAPE_API_TOKEN_ONCE) higher.push('GRAPE_API_TOKEN_ONCE（runtime）')
+  if (process.env.GRAPE_API_TOKEN) higher.push('GRAPE_API_TOKEN（env）')
+  if (higher.length) {
+    console.log('')
+    console.log(`[注意] 检测到更高优先级的环境变量已设置：${higher.join('、')}——当前生效凭据仍是它，不是刚写入的文件通道（双通道不一致）。`)
+    console.log('  要让文件通道生效：删除上述环境变量（uninstall --clean-global 可代为清理 rc/注册表），然后重启宿主会话。')
+  }
+  // QA 复审可疑项：非 TTY（CI/agent 代跑）把 token 明文打进 stdout 会落日志——与 doctor
+  // 「不回显 token」口径不一致。TTY 下保留完整命令便于复制，非 TTY 只给掩码占位。
+  const shown = process.stdout.isTTY ? token : `${token.slice(0, 6)}${'*'.repeat(Math.max(6, token.length - 8))}`
   if (process.platform === 'win32') {
     console.log('环境变量通道（Windows：setx 只对新进程生效，需重启宿主会话）：')
     console.log(`  setx GRAPE_BASE_URL "${base}"`)
-    console.log(`  setx GRAPE_API_TOKEN "${token}"`)
+    console.log(`  setx GRAPE_API_TOKEN "${shown}"${process.stdout.isTTY ? '' : '（非交互会话掩码回显；token 已写入上方文件通道）'}`)
   } else {
     console.log('环境变量通道（POSIX：写入 shell 配置后 source 或重开终端）：')
     console.log(`  export GRAPE_BASE_URL="${base}"`)
-    console.log(`  export GRAPE_API_TOKEN="${token}"`)
+    console.log(`  export GRAPE_API_TOKEN="${shown}"${process.stdout.isTTY ? '' : '（非交互会话掩码回显；token 已写入上方文件通道）'}`)
   }
   console.log('优先级：GRAPE_API_TOKEN_ONCE（runtime）> GRAPE_API_TOKEN（env）> GRAPE_AUTH_FILE / GRAPE_HOME/config.json（file）')
 }
