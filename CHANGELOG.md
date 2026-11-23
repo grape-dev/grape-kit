@@ -6,7 +6,20 @@
 
 ## Unreleased
 
-暂无待发布变更。下一开发周期的用户可见变更先落本段（按 Added / Changed / Fixed 归类，见 CONTRIBUTING §7），发版时并入对应版本节。
+### Added
+
+- `install --target dsh`（DeepSeek Harness）：以 **MCP stdio 托管 patch** 模式把 grape-kit 接入 dsh web profile —— 在 `$DSH_HOME/profiles/web/cordis.patch.yml`（`$DSH_HOME` 缺省 `~/.dsh`）写入带标记的 `insert` 托管块（`id: grape-kit` / `name: '@deepseek-ai/dsh-mcp-client'` / `transport: stdio`），MCP 入口本地脚本优先、解析不到回退 `npx`；`grape-remote` skill 落到 `$DSH_HOME/skills/`。39 工具零改动复用。
+- dsh 同族能力：`uninstall --target dsh` 只删托管块 + skill 副本（其余 patch 行与 profile 依赖不动），`doctor --target dsh` 给出托管块 / skill 副本 / `dsh-mcp-client` 三项检查，`detect` 把 `~/.dsh` 纳入宿主自动检测（零宿主菜单、`--target all` 与 `help` 用法随 `SUPPORTED_TARGETS` 自动覆盖）。
+- `install --target dsh` 的 `@deepseek-ai/dsh-mcp-client` 依赖安装为 best-effort：失败只打印手动指引（`npx @deepseek-ai/dsh plugin --profile web add …`，pnpm 缺失先 `corepack enable pnpm`），不阻塞装配、退出码仍为 0。
+
+### Changed
+
+- dsh 口径由「由 grape-dsh 独立插件承载」改为「MCP 最小路径 / 完整形态插件并存」：`--target` 未知宿主提示与 `SUPPORTED_TARGETS` 注释同步改口径；README 双语新增 dsh 宿主段、路线图条目改口径。
+
+### Fixed
+
+- QA 复审（PR #12）dsh 写入安全：`install --target dsh` 在托管块不完整（有 start 缺 end）或 patch 顶层为映射形状时拒绝写入并给出修复指引——不再静默删除 start 之后的用户 patch 行，也不再写出 YAML 非法文件；`doctor` 对映射形状同样报配置损坏而非 ok。
+- QA 复审（PR #12）dsh 往返保真：无尾换行原文 `install→uninstall` 后逐字节还原（不再多出 1 字节分隔换行）；仅含托管块的新建 patch 卸载后删除空文件与仅含托管块的备份，不留 0 字节残留。
 
 ## 0.3.10 (2026-11-23)
 
