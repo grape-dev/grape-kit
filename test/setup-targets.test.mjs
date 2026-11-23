@@ -783,9 +783,9 @@ test('QA#硬违规2 含凭据的旧 .bak-grapemcp-* 备份：残留提示点名�
   assert.match(after.stdout, /未检测到[^\n]*残留/, `清理后应真零残留，实际:\n${after.stdout}`)
 })
 
-/* ── QA 复审（PR #11）P2：--clean-global --dry-run 预览语义（危险操作门） ── */
+/* ── QA 复审（合入后 dev 基线）硬违规 2：--dry-run 一律不动盘（宿主卸载/skill/备份同样只预览） ── */
 
-test('QA#P2 --clean-global --dry-run：只预览将清理项，不动盘上任何凭据/痕迹', skipOnWin, () => {
+test('QA#硬违规2 --clean-global --dry-run：宿主条目/skill/备份同样不动盘（README「不动盘」承诺）', skipOnWin, () => {
   const h = home()
   const s = seedResidue(h)
   assert.equal(run(['install', '--target', 'opencode'], h).status, 0)
@@ -794,9 +794,12 @@ test('QA#P2 --clean-global --dry-run：只预览将清理项，不动盘上任�
   assert.match(r.stdout, /dry-run|预览/, '应明确标注预览模式（未执行删除）')
   assert.match(r.stdout, /将删除目录[^\n]*\.grape/, '应预览 GRAPE_HOME 删除')
   assert.match(r.stdout, /将清理[^\n]*_npx/, '应预览 _npx 清理')
-  // dry-run 只作用于全局清理：宿主卸载照常（可回滚，非破坏性）
+  // QA 实测：旧实现 dry-run 下照删宿主条目并写 .bak——与 README/CHANGELOG「不动盘」矛盾
   const cfgPath = join(h, '.config', 'opencode', 'opencode.jsonc')
-  assert.ok(!JSON.parse(readFileSync(cfgPath, 'utf8')).mcp?.grape, '宿主条目卸载不受 dry-run 影响')
+  assert.ok(JSON.parse(readFileSync(cfgPath, 'utf8')).mcp?.grape, 'dry-run 不得卸载宿主条目')
+  assert.ok(existsSync(join(h, '.config', 'opencode', 'skills', 'grape-remote', 'SKILL.md')), 'dry-run 不得删除 skill')
+  assert.equal(backupsIn(h).length, 0, 'dry-run 不得写任何 .bak 备份')
+  assert.equal(backupsIn(join(h, '.config', 'opencode')).length, 0, 'dry-run 不得写宿主配置备份')
   // 一切全局痕迹必须原样保留
   assert.ok(existsSync(s.grapeHome), 'dry-run 不得删除 GRAPE_HOME')
   assert.ok(existsSync(s.own), 'dry-run 不得删除 _npx 缓存')
@@ -804,4 +807,28 @@ test('QA#P2 --clean-global --dry-run：只预览将清理项，不动盘上任�
   if (process.platform !== 'win32') {
     assert.match(readFileSync(join(h, '.bashrc'), 'utf8'), /GRAPE_API_TOKEN=/, 'dry-run 不得改动 rc')
   }
+})
+
+test('QA#硬违规2 --dry-run 不带 --clean-global：宿主卸载同样只预览，不再被静默忽略', skipOnWin, () => {
+  const h = home()
+  assert.equal(run(['install', '--target', 'opencode'], h).status, 0)
+  const r = run(['uninstall', '--target', 'opencode', '--dry-run'], h)
+  assert.equal(r.status, 0, r.stderr)
+  assert.match(r.stdout, /dry-run|预览/, '--dry-run 应明确标注预览模式，不得静默忽略')
+  assert.match(r.stdout, /将移除[^\n]*grape/, '应预览宿主条目移除')
+  const cfgPath = join(h, '.config', 'opencode', 'opencode.jsonc')
+  assert.ok(JSON.parse(readFileSync(cfgPath, 'utf8')).mcp?.grape, 'dry-run 不得卸载宿主条目')
+  assert.ok(existsSync(join(h, '.config', 'opencode', 'skills', 'grape-remote', 'SKILL.md')), 'dry-run 不得删除 skill')
+  assert.equal(backupsIn(join(h, '.config', 'opencode')).length, 0, 'dry-run 不得写备份')
+})
+
+test('QA#硬违规2 不带 --target 的 --clean-global --dry-run：检测到宿主痕迹时也只预览宿主卸载', skipOnWin, () => {
+  const h = home()
+  assert.equal(run(['install', '--target', 'opencode'], h).status, 0)
+  const r = run(['uninstall', '--clean-global', '--dry-run'], h)
+  assert.equal(r.status, 0, r.stderr)
+  const cfgPath = join(h, '.config', 'opencode', 'opencode.jsonc')
+  assert.ok(JSON.parse(readFileSync(cfgPath, 'utf8')).mcp?.grape, 'dry-run 不得卸载宿主条目')
+  assert.ok(existsSync(join(h, '.config', 'opencode', 'skills', 'grape-remote', 'SKILL.md')), 'dry-run 不得删除 skill')
+  assert.equal(backupsIn(join(h, '.config', 'opencode')).length, 0, 'dry-run 不得写备份')
 })
