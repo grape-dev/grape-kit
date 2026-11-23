@@ -823,6 +823,27 @@ test('QA#硬违规1 GRAPE_AUTH_FILE 指向非凭据形态文件：拒删并点�
   assert.ok(existsSync(notCreds), '非凭据形态文件不得被盲删')
 })
 
+/* ── QA 复审（合入后 dev 基线）Spec AC1：默认 uninstall 零宿主痕迹时残留提示不得缺席 ── */
+
+test('QA#AC1 默认 uninstall 不带 --target 零宿主痕迹：exit 1 前打印残留提示与清理命令', skipOnWin, () => {
+  const h = home()
+  const s = seedResidue(h)
+  const r = run(['uninstall'], h, { GRAPE_API_TOKEN: '', GRAPE_BASE_URL: '' })
+  assert.notEqual(r.status, 0, '零宿主痕迹时无事可卸载，保持非零退出（Q&A 口径）')
+  const out = `${r.stderr}${r.stdout}`
+  assert.match(out, /未检测到任何已安装的宿主/, '应说明没有宿主痕迹')
+  assert.match(out, /残留/, 'Spec AC1：默认 uninstall 结束时必须输出残留项')
+  assert.match(out, /--clean-global/, 'Spec AC1：必须给出清理命令')
+  assert.ok(existsSync(s.grapeHome), '默认 uninstall 不得删除 GRAPE_HOME')
+})
+
+test('QA#AC1 默认 uninstall 不带 --target 零痕迹零残留：明确报告未检测到残留（非静默）', skipOnWin, () => {
+  const h = home()
+  const r = run(['uninstall'], h, { GRAPE_API_TOKEN: '', GRAPE_BASE_URL: '' })
+  assert.notEqual(r.status, 0)
+  assert.match(`${r.stderr}${r.stdout}`, /未检测到[^\n]*残留/, '干净环境也应明确报告零残留')
+})
+
 /* ── QA 复审（合入后 dev 基线）硬违规 2：--dry-run 一律不动盘（宿主卸载/skill/备份同样只预览） ── */
 
 test('QA#硬违规2 --clean-global --dry-run：宿主条目/skill/备份同样不动盘（README「不动盘」承诺）', skipOnWin, () => {
