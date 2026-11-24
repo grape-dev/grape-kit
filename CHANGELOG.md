@@ -31,6 +31,27 @@
 - 裸 `doctor` 汇总自检由 5 宿主扩到全部 10 宿主；`uninstall` 零痕迹提示与 `help` 用法统一随 `SUPPORTED_TARGETS` 自动列出全部宿主。
 - dsh 补充 `--dry-run` 预览实现（托管块 / skill / receipt 只列不删），与其它宿主预览口径一致。
 - `trae` 收窄为严格项目级：当前目录与 `$HOME` 相同时 `install` / `uninstall` 直接拒绝并提示到目标项目目录执行（此时项目级路径等同用户级 `~/.trae/mcp.json`）；`--target all` 与全量卸载枚举不再包含项目级宿主，跳过时显式披露原因，任意目录下 `--target all` 不再静默创建 `.trae/`。
+- `src/server.mjs` INSTRUCTIONS 补第 8 条纪律：自管理工具属用户决策层——`grape_kit_version` / `grape_kit_check_update` 只读直执行，`grape_kit_upgrade` / `grape_kit_install` / `grape_kit_uninstall` **只生成命令、不执行任何变更**，执行前必须获得用户确认。
+- README 双语能力总览与工具面口径同步为 45 工具（新增「自管理」条目）；`scripts/smoke.mjs` / `scripts/sweep-0.2.mjs` 工具数断言 39 → 45，冒烟新增 `grape_kit_version` / `grape_kit_check_update` 只读调用。`grape-kit.mjs`（CLI）零改动。`src/update-check.mjs` 仅新增 `REGISTRY_URL` / `REGISTRY_TIMEOUT_MS` / `fetchLatestVersion` 三个导出（registry 访问单源，`src/lifecycle.mjs` 复用），24h 缓存与 semver 语义未变。
+- `CONTRIBUTING.md` 自身纳入「工具数变化必须同步」清单（§1 冒烟注释与 §6 数字），并由 `test/docs-sync.test.mjs` 按 `TOOL_NAMES` 实际数量断言，避免规范文字外的漏改。
+
+### Fixed
+
+- QA 复审（PR #21）BOM 口径对齐：`src/lifecycle.mjs` 对纯 JSON 宿主（workbuddy / officeace）的检出不再私自剥 BOM——与 CLI `detectJsonEntry` 同口径（BOM 配置报 `damaged`），jsonc 通道仍按 `parseLoose` 剥 BOM；两侧判定分歧（lifecycle=installed / doctor=damaged）消除，并有 BOM 夹具（纯 JSON damaged、jsonc installed）与同夹具一致性断言兜住。
+- QA 复审（PR #21）损坏宿主不给假动作：`grape_kit_install` / `grape_kit_uninstall` 遇 `damaged` 宿主不再生成命令（CLI 对解析失败的配置 `exit 1`），改为单列 `blocked` 并带出解析错误与「先修复或移走该文件」指引；「已装配跳过」与「配置损坏待修复」不再混为一谈。
+- QA 复审（PR #21）同步指针去行号：`src/lifecycle.mjs` 对 `grape-kit.mjs` 的 14 处同步指针由「文件:行号」改为函数名/常量名锚，并新增 `SYNC_POINTERS` 清单 + 校验测试（CLI 侧改名/删除即变红），消除行号随无关改动 7/14 失准的漂移面。
+
+## 0.4.0 (2026-11-23)
+
+### Added
+
+- `install --target dsh`（DeepSeek Harness）：以 **MCP stdio 托管 patch** 模式把 grape-kit 接入 dsh web profile —— 在 `$DSH_HOME/profiles/web/cordis.patch.yml`（`$DSH_HOME` 缺省 `~/.dsh`）写入带标记的 `insert` 托管块（`id: grape-kit` / `name: '@deepseek-ai/dsh-mcp-client'` / `transport: stdio`），MCP 入口本地脚本优先、解析不到回退 `npx`；`grape-remote` skill 落到 `$DSH_HOME/skills/`。39 工具零改动复用。
+- dsh 同族能力：`uninstall --target dsh` 只删托管块 + skill 副本（其余 patch 行与 profile 依赖不动），`doctor --target dsh` 给出托管块 / skill 副本 / `dsh-mcp-client` 三项检查，`detect` 把 `~/.dsh` 纳入宿主自动检测（零宿主菜单、`--target all` 与 `help` 用法随 `SUPPORTED_TARGETS` 自动覆盖）。
+- `install --target dsh` 的 `@deepseek-ai/dsh-mcp-client` 依赖安装为 best-effort：失败只打印手动指引（`npx @deepseek-ai/dsh plugin --profile web add …`，pnpm 缺失先 `corepack enable pnpm`），不阻塞装配、退出码仍为 0。
+
+### Changed
+
+- dsh 口径由「由 grape-dsh 独立插件承载」改为「MCP 最小路径 / 完整形态插件并存」：`--target` 未知宿主提示与 `SUPPORTED_TARGETS` 注释同步改口径；README 双语新增 dsh 宿主段、路线图条目改口径。
 
 ### Fixed
 
