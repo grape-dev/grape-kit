@@ -19,7 +19,7 @@
 - hermes：`~/.hermes/config.yaml` 的 `mcp_servers.grape-kit`（保注释/保序）+ `grape-remote` skill 副本到 `~/.hermes/skills/`；`HERMES_HOME` / `GRAPE_HERMES_CONFIG` 可覆盖。
 - atomcode：`~/.atomcode/mcp.json` 的 `mcpServers.grape-kit`，`ATOMCODE_HOME` 可覆盖根路径。
 - trae：项目级 `.trae/mcp.json` 的 `mcpServers.grape-kit`（仅项目级语义，不做用户级兜底），`GRAPE_TRAE_CONFIG` 可覆盖；路径对齐 Trae 官方 MCP 入口。
-- 每个新宿主补 fake HOME 单测（含 TOML 注释/他人表保留、YAML 保注释与条目隔离、JSON 容器兼容、dry-run 不动盘、幂等与备份），单测 270→291；README / README.zh 新增 10 宿主支持矩阵与 5 个宿主专段。
+- 每个新宿主补 fake HOME 单测（含 TOML 注释/他人表保留、YAML 保注释与条目隔离、JSON 容器兼容、dry-run 不动盘、幂等与备份），单测 270→296；README / README.zh 新增 10 宿主支持矩阵与 5 个宿主专段。
 
 ### Changed
 
@@ -28,6 +28,7 @@
 - 修正 `grape-kit.mjs` 中「hermes 无 MCP client」的过时注释：hermes 已支持 MCP client（`config.yaml` 的 `mcp_servers` 段），安装器写入条目并附带 skill 副本。
 - 裸 `doctor` 汇总自检由 5 宿主扩到全部 10 宿主；`uninstall` 零痕迹提示与 `help` 用法统一随 `SUPPORTED_TARGETS` 自动列出全部宿主。
 - dsh 补充 `--dry-run` 预览实现（托管块 / skill / receipt 只列不删），与其它宿主预览口径一致。
+- `trae` 收窄为严格项目级：当前目录与 `$HOME` 相同时 `install` / `uninstall` 直接拒绝并提示到目标项目目录执行（此时项目级路径等同用户级 `~/.trae/mcp.json`）；`--target all` 与全量卸载枚举不再包含项目级宿主，跳过时显式披露原因，任意目录下 `--target all` 不再静默创建 `.trae/`。
 
 ### Fixed
 
@@ -45,6 +46,12 @@
 - `test/setup-dsh.test.mjs` 的 `run()` 补齐 `HERMES_HOME` / `GRAPE_*_CONFIG` / `ATOMCODE_HOME` / `GRAPE_HOME` 置空：`--target all` 不再因继承变量写进真实用户目录。
 - `detectHosts` 的 hermes 探测改用 `hermesPaths().home`，`HERMES_HOME` 覆盖时可被自动命中。
 - codex `uninstall --dry-run` 在文件仅剩托管条目时明确披露「将删除整个文件」，预览与执行同源。
+- hermes 裸 `mcp_servers:` 头按首个内容行判定形态：序列（`  - a`）与标量（`  foo`）取值一律中止安装并保持文件原样——此前会追加托管条目，产出 mapping+sequence 混层（`yaml.safe_load` 直接 ParserError）。
+- hermes 手写条目摘除区间只纳入缩进更深的注释：同层用户注释（如 `# my other server`）不再被重装/卸载吞掉，兑现 README「comments preserved」。
+- codex 表头判定改行级剥离注释后精确匹配：仅含注释行 `# [mcp_servers.grape-kit]` 的配置不再被 doctor 报 `[ok]`，`uninstall` 也不再打印「已移除（备份: …）」而文件未变。
+- 卸载不再残留空容器：hermes 摘除条目后若 `mcp_servers` 段已空则连段头一并移除，配置只剩本次写入的空容器（hermes 空段 / JSON 宿主空 `mcpServers` / `mcp.servers`）时直接删除该文件，写前备份且 `--dry-run` 同步披露（与 codex `removeFile` 同口径）。
+- `test/setup-targets.test.mjs` 子进程补 `DSH_HOME` 置空：宿主运行环境自带 `DSH_HOME` 时不再命中真实 `~/.dsh`（零痕迹用例假绿，且会对真实宿主配置执行卸载）。
+- `AGENTS.md` 结构速览同步 hermes 口径：skill 副本改为「MCP client 宿主（hermes）与无 MCP 宿主共用」，与 `grape-kit.mjs` / README 一致（CONTRIBUTING §7）。
 
 ## 0.4.0 (2026-11-23)
 

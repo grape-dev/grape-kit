@@ -45,6 +45,7 @@ agent (MCP stdio: opencode / CodeArts / WorkBuddy / dsh…; other MCP-capable ag
 > - **None detected**: interactive terminals show an agent picker; non-interactive shells error out with the supported target list.
 > - **One detected**: installs directly to it.
 > - **Multiple detected**: installs to all detected agents (`--target all` equivalent); pass `--target <agent>` to pick one.
+> - `trae` is **project-level**: it is not part of `--target all` (an all-target run cannot know the project), so install it separately with `--target trae` from the target project directory; install/uninstall is refused when the current directory equals `$HOME` (no user-level writes).
 
 ### Supported hosts (10 targets)
 
@@ -89,6 +90,8 @@ A plain `uninstall` removes only the host entry and reports any leftover credent
 
 ```bash
 npx -y @grape-dev/grape-kit uninstall --clean-global --dry-run   # preview first
+
+> Uninstall scope: each host removes only the entry it wrote; when the config is left with nothing but the empty container it created (hermes' empty `mcp_servers`, JSON hosts' empty `mcpServers`), the file itself is removed too (backed up first, disclosed by `--dry-run` as well).
 npx -y @grape-dev/grape-kit uninstall --clean-global
 ```
 
@@ -202,7 +205,7 @@ npx -y @grape-dev/grape-kit uninstall --target atomcode
 npx -y @grape-dev/grape-kit install --target trae
 ```
 
-Writes `mcpServers.grape-kit` into the project-level `.trae/mcp.json` (Trae's official MCP entry, run from the project root); `GRAPE_TRAE_CONFIG` overrides the path. User-level `~/.trae/mcp.json` is intentionally not touched. Other servers are preserved and every write is backed up.
+Writes `mcpServers.grape-kit` into the project-level `.trae/mcp.json` (Trae's official MCP entry, run from the project root); `GRAPE_TRAE_CONFIG` overrides the path. User-level `~/.trae/mcp.json` is intentionally not touched: when the current directory equals `$HOME` (where the project-level path *is* the user-level path) install/uninstall is refused with a pointer to run from the target project, and `--target all` excludes trae. Other servers are preserved and every write is backed up.
 
 ```bash
 npx -y @grape-dev/grape-kit doctor --target trae --probe
@@ -292,7 +295,7 @@ Full release notes: [CHANGELOG.md](CHANGELOG.md) — 21 条发布记录（含 0.
 ```bash
 npm install
 
-npm test        # 291 unit tests (fake-grape stand-in, no real server needed)
+npm test        # 296 unit tests (fake-grape stand-in, no real server needed)
 
 npm run smoke   # real stdio JSON-RPC round-trip: initialize → tools/list → tools/call
 ```

@@ -45,6 +45,7 @@ agent 宿主（MCP stdio：opencode / CodeArts / WorkBuddy / dsh…；其他 MCP
 > - **未检测到**：交互终端弹出宿主选择菜单；非交互环境报错并列出受支持宿主。
 > - **检测到一个**：直接装它。
 > - **检测到多个**：全部安装（等价 `--target all`）；要装单个用 `--target <宿主>`。
+> - `trae` 是**项目级**宿主：不进 `--target all`（全量模式无法确定项目），需在目标项目目录单独 `--target trae`；当前目录与 `$HOME` 相同时安装/卸载会被拒绝（不做用户级落盘）。
 
 ### 受支持宿主（10 个 --target）
 
@@ -202,7 +203,7 @@ npx -y @grape-dev/grape-kit uninstall --target atomcode
 npx -y @grape-dev/grape-kit install --target trae
 ```
 
-写入项目级 `.trae/mcp.json` 的 `mcpServers.grape-kit`（Trae 官方 MCP 入口，需在项目根目录执行）；`GRAPE_TRAE_CONFIG` 可覆盖路径。按设计不触碰用户级 `~/.trae/mcp.json`。其它 MCP server 保留，每次写入先备份。
+写入项目级 `.trae/mcp.json` 的 `mcpServers.grape-kit`（Trae 官方 MCP 入口，需在项目根目录执行）；`GRAPE_TRAE_CONFIG` 可覆盖路径。按设计不触碰用户级 `~/.trae/mcp.json`：当前目录与 `$HOME` 相同时（此时项目级路径就是用户级路径）安装/卸载直接拒绝并提示到目标项目目录执行，`--target all` 也不包含 trae。其它 MCP server 保留，每次写入先备份。
 
 ```bash
 npx -y @grape-dev/grape-kit doctor --target trae --probe
@@ -231,6 +232,8 @@ npx -y @grape-dev/grape-kit --version        # 版本查询
 npm install -g @grape-dev/grape-kit          # 更新（更新后重启 Agent 会话）
 npx -y @grape-dev/grape-kit uninstall        # 卸载（宿主自动检测）
 npx -y @grape-dev/grape-kit uninstall --clean-global   # 同时清理 ~/.grape + 用户环境变量 + _npx 缓存
+
+> 卸载口径：各宿主只删自己写的条目；若配置里只剩本次写入的空容器（如 hermes 的空 `mcp_servers`、JSON 宿主的空 `mcpServers`），则连同该文件一起删除（写前备份，`--dry-run` 同样披露）。
 ```
 
 启动时自动检查 npm 新版本（24h 去重，`GRAPE_KIT_SKIP_UPDATE_CHECK=1` 关闭）；国内镜像同步滞后 1-3 天，最新版用 `--registry https://registry.npmjs.org/`。
@@ -292,7 +295,7 @@ npx -y @grape-dev/grape-kit intro     # 随时重看能力地图
 ```bash
 npm install
 
-npm test        # 291 个单测（fake-grape 替身，不依赖真实服务端）
+npm test        # 296 个单测（fake-grape 替身，不依赖真实服务端）
 
 npm run smoke   # 真实 stdio JSON-RPC 往返：initialize → tools/list → tools/call
 ```
