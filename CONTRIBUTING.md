@@ -13,7 +13,7 @@
 ```bash
 npm ci            # 按 package-lock.json 安装（CI 同口径）
 npm test          # 单测：fake-grape 替身，不依赖真实服务端
-npm run smoke     # 冒烟：真实 stdio JSON-RPC 往返（39 tools）
+npm run smoke     # 冒烟：真实 stdio JSON-RPC 往返（44 tools）
 ```
 
 - 需要连真实实例自测时，凭据只走环境变量：`GRAPE_API_TOKEN`（勿写入任何 agent 配置文件）。
@@ -75,7 +75,7 @@ PR 合入前必须同时满足：
 - 新增/修改 MCP 工具时保持既有渲染风格：返回 Markdown 表格 / 节点链，供无 UI agent 直读。
 - 危险操作（`cancel` / `apply_scene` / `takeover_finish` 等）必须保留「需用户确认」决策门语义，不得绕过。
 - `session_only` 类命令不纳入工具面。
-- 工具数变化（当前 39）必须同步：`README.md` / `README.zh.md` 能力总览、`CHANGELOG.md`、相关测试断言。
+- 工具数变化（当前 44）必须同步：`README.md` / `README.zh.md` 能力总览、`CHANGELOG.md`、相关测试断言，以及 **`CONTRIBUTING.md` 本文件**（§1 冒烟注释与本条数字，`test/docs-sync.test.mjs` 按 `TOOL_NAMES` 实际数量断言，漏改即红）。
 - 新增依赖前先提 Issue 说明必要性；仅接受 MIT/Apache-2.0 等宽松许可依赖。
 
 ## 7. 文档同步要求
