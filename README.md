@@ -90,10 +90,10 @@ A plain `uninstall` removes only the host entry and reports any leftover credent
 
 ```bash
 npx -y @grape-dev/grape-kit uninstall --clean-global --dry-run   # preview first
-
-> Uninstall scope: each host removes only the entry it wrote; when the config is left with nothing but the empty container it created (hermes' empty `mcp_servers`, JSON hosts' empty `mcpServers`), the file itself is removed too (backed up first, disclosed by `--dry-run` as well).
 npx -y @grape-dev/grape-kit uninstall --clean-global
 ```
+
+> Uninstall scope: each host removes only the entry it wrote; when the config is left with nothing but the empty container it created (hermes' empty `mcp_servers`, JSON hosts' empty `mcpServers`), the file itself is removed too (backed up first, disclosed by `--dry-run` as well).
 
 ### OpenCode
 

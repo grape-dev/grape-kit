@@ -93,6 +93,8 @@ npx -y @grape-dev/grape-kit uninstall --clean-global --dry-run   # 先预览
 npx -y @grape-dev/grape-kit uninstall --clean-global
 ```
 
+> 卸载口径：各宿主只删自己写的条目；若配置里只剩本次写入的空容器（如 hermes 的空 `mcp_servers`、JSON 宿主的空 `mcpServers`），则连同该文件一起删除（写前备份，`--dry-run` 同样披露）。
+
 ### OpenCode
 
 ```bash
@@ -232,8 +234,6 @@ npx -y @grape-dev/grape-kit --version        # 版本查询
 npm install -g @grape-dev/grape-kit          # 更新（更新后重启 Agent 会话）
 npx -y @grape-dev/grape-kit uninstall        # 卸载（宿主自动检测）
 npx -y @grape-dev/grape-kit uninstall --clean-global   # 同时清理 ~/.grape + 用户环境变量 + _npx 缓存
-
-> 卸载口径：各宿主只删自己写的条目；若配置里只剩本次写入的空容器（如 hermes 的空 `mcp_servers`、JSON 宿主的空 `mcpServers`），则连同该文件一起删除（写前备份，`--dry-run` 同样披露）。
 ```
 
 启动时自动检查 npm 新版本（24h 去重，`GRAPE_KIT_SKIP_UPDATE_CHECK=1` 关闭）；国内镜像同步滞后 1-3 天，最新版用 `--registry https://registry.npmjs.org/`。
