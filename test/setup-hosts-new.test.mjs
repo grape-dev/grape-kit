@@ -375,6 +375,37 @@ test('detectHosts 的 trae 探测要求 .trae/mcp.json 文件存在（空目录�
   assert.match(r.stderr, /未检测到/)
 })
 
+test('hermes 手写条目：同层用户注释保留（重装/卸载都不吞），条目内部更深注释随条目替换', () => {
+  const h = home()
+  const dir = join(h, '.hermes')
+  mkdirSync(dir, { recursive: true })
+  const cfg = join(dir, 'config.yaml')
+  const original = [
+    'mcp_servers:',
+    '  grape-kit:',
+    '    command: node',
+    '    # 条目内部注释（属于该条目，随条目替换）',
+    '    args: ["old.mjs"]',
+    '  # my other server',
+    '  other:',
+    '    command: node',
+    '',
+  ].join('\n')
+  writeFileSync(cfg, original)
+
+  assert.equal(run(['install', '--target', 'hermes'], h).status, 0)
+  const installed = readFileSync(cfg, 'utf8')
+  assert.match(installed, /^  # my other server/m, '同层用户注释必须保留（README 承诺 comments preserved）')
+  assert.match(installed, /^  other:/m, '他人条目必须保留')
+  assert.doesNotMatch(installed, /条目内部注释/, '被替换条目内部的注释随条目一并移除，不留悬挂注释')
+
+  assert.equal(run(['uninstall', '--target', 'hermes'], h).status, 0)
+  const after = readFileSync(cfg, 'utf8')
+  assert.match(after, /^  # my other server/m, '卸载不得吞掉同层用户注释')
+  assert.match(after, /^  other:/m)
+  assert.doesNotMatch(after, /grape-kit/)
+})
+
 test('hermes 4 空格缩进的合法手写条目：安装去重为单一托管条目，doctor 检出，卸载只删自身', () => {
   const h = home()
   const dir = join(h, '.hermes')
