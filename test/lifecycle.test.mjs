@@ -4,7 +4,7 @@ import { spawnSync } from 'node:child_process'
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
-import { detectHostStatus, detectInstallForm, HOST_NAMES } from '../src/lifecycle.mjs'
+import { detectHostStatus, detectInstallForm, readDismissState, recordDismiss, updateDecision, HOST_NAMES } from '../src/lifecycle.mjs'
 
 /* Issue #27 · 自管理 5 工具的公开 seam：
  * S1  detectHostStatus —— 五宿主只读检出（纯函数 + 显式 home/env 注入，不读进程真实 HOME）
@@ -272,4 +272,75 @@ test('S2 显式覆盖 GRAPE_KIT_INSTALL_FORM 优先于路径推断（实机/测�
   const r = detectInstallForm({ pkgPath: '/tmp/whatever', env: { GRAPE_KIT_INSTALL_FORM: 'global' }, platform: 'linux' })
   assert.equal(r.form, 'global')
   assert.match(r.evidence, /GRAPE_KIT_INSTALL_FORM/)
+})
+
+/* ── S3：dismiss 3 天冷却（独立状态文件，不读写 update-check 的 24h 缓存，Spec §3.2） ── */
+
+const DAY = 24 * 3600 * 1000
+const T0 = Date.UTC(2026, 10, 24, 12, 0, 0)
+
+test('S3 拒绝后 3 天内同版本不再报「有新版本」', () => {
+  const d = updateDecision({
+    currentVersion: '0.4.0', latestVersion: '0.5.0',
+    dismissState: { version: '0.5.0', at: T0 - 1 * DAY }, now: T0,
+  })
+  assert.equal(d.state, 'dismissed')
+  assert.equal(d.updateAvailable, false, '冷却期内不得再报更新')
+  assert.equal(d.latestVersion, '0.5.0', '信息仍可见（只是不打扰）')
+})
+
+test('S3 冷却恰好到期（3 天整）→ 重新提醒', () => {
+  const d = updateDecision({
+    currentVersion: '0.4.0', latestVersion: '0.5.0',
+    dismissState: { version: '0.5.0', at: T0 - 3 * DAY }, now: T0,
+  })
+  assert.equal(d.state, 'newer')
+  assert.equal(d.updateAvailable, true, '满 3 天应恢复提醒（<3 天才是冷却期）')
+})
+
+test('S3 拒绝了旧版本、新版本出现 → 重新提醒（冷却只对同一版本）', () => {
+  const d = updateDecision({
+    currentVersion: '0.4.0', latestVersion: '0.6.0',
+    dismissState: { version: '0.5.0', at: T0 - 1 * DAY }, now: T0,
+  })
+  assert.equal(d.state, 'newer')
+  assert.equal(d.updateAvailable, true)
+})
+
+test('S3 已是最新 / registry 不可达：都不报更新', () => {
+  assert.equal(updateDecision({ currentVersion: '0.4.0', latestVersion: '0.4.0', now: T0 }).state, 'latest')
+  const unavailable = updateDecision({ currentVersion: '0.4.0', latestVersion: '', now: T0 })
+  assert.equal(unavailable.state, 'unavailable')
+  assert.equal(unavailable.updateAvailable, false, '不可达不得伪装成「已是最新」')
+})
+
+test('S3 recordDismiss 落盘到 GRAPE_HOME 下的独立文件（不碰 update-check 缓存）', () => {
+  const h = home()
+  const env = { ...baseEnv(), GRAPE_HOME: join(h, '.grape') }
+  const written = recordDismiss('0.5.0', { env, now: T0 })
+  assert.equal(written.version, '0.5.0')
+  assert.ok(existsSync(join(h, '.grape', 'grape-kit-dismiss.json')), '文件落在 ~/.grape/grape-kit-dismiss.json')
+  assert.ok(!existsSync(join(h, '.grape', 'grape-kit-update-check.json')), '不得写 update-check 的 24h 缓存')
+  const back = readDismissState({ env })
+  assert.equal(back.version, '0.5.0')
+  assert.equal(back.at, T0)
+})
+
+test('S3 状态文件缺失/损坏 → 读成 null（不抛错，不误判冷却）', () => {
+  const h = home()
+  const env = { ...baseEnv(), GRAPE_HOME: join(h, '.grape') }
+  assert.equal(readDismissState({ env }), null)
+  writeFileAt(join(h, '.grape', 'grape-kit-dismiss.json'), '{坏')
+  assert.equal(readDismissState({ env }), null, '损坏文件按「没拒绝过」处理')
+})
+
+test('S3 dismissVersion 显式指定优先于 npm latest（用户点名的版本被记住）', () => {
+  const h = home()
+  const env = { ...baseEnv(), GRAPE_HOME: join(h, '.grape') }
+  recordDismiss('0.7.1', { env, now: T0 })
+  const d = updateDecision({
+    currentVersion: '0.4.0', latestVersion: '0.7.1',
+    dismissState: readDismissState({ env }), now: T0 + DAY,
+  })
+  assert.equal(d.state, 'dismissed', '显式 dismissVersion 与 latest 相同 → 冷却生效')
 })
