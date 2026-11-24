@@ -76,6 +76,7 @@ PR 合入前必须同时满足：
 - 危险操作（`cancel` / `apply_scene` / `takeover_finish` 等）必须保留「需用户确认」决策门语义，不得绕过。
 - `session_only` 类命令不纳入工具面。
 - 工具数变化（当前 44）必须同步：`README.md` / `README.zh.md` 能力总览、`CHANGELOG.md`、相关测试断言，以及 **`CONTRIBUTING.md` 本文件**（§1 冒烟注释与本条数字，`test/docs-sync.test.mjs` 按 `TOOL_NAMES` 实际数量断言，漏改即红）。
+- 同一份工具数口径也写在贡献流程模板里：**`.github/PULL_REQUEST_TEMPLATE.md`**（验证清单的「期望 44 tools」）与 **`.github/ISSUE_TEMPLATE/bug_report.md`**（自检清单）——贡献者照着模板跑验证，模板失真的代价是「成功运行被判失败」；单测数**不写死**（每个 PR 都会变），以 `npm test` 实际输出为准。
 - 新增依赖前先提 Issue 说明必要性；仅接受 MIT/Apache-2.0 等宽松许可依赖。
 
 ## 7. 文档同步要求
