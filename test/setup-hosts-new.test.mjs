@@ -113,6 +113,29 @@ test('codex 安装写入 [mcp_servers.grape-kit] + env 子表，保注释与他�
   assert.match(after, /\[profiles\.fast\]/)
 })
 
+test('codex 仅注释行提到表头：不误判已安装（doctor 非 ok、卸载不谎报已移除、文件不动）', () => {
+  const h = home()
+  const dir = join(h, '.codex')
+  mkdirSync(dir, { recursive: true })
+  const cfg = join(dir, 'config.toml')
+  const original = '# [mcp_servers.grape-kit] 旧配置已停用（注释保留）\nmodel = "gpt-5"\n'
+  writeFileSync(cfg, original)
+
+  const doctor = run(['doctor', '--target', 'codex'], h)
+  assert.doesNotMatch(doctor.stdout, /\[ok\][^\n]*codex/i, '注释掉的表头不算已安装')
+
+  const dry = run(['uninstall', '--target', 'codex', '--dry-run'], h)
+  assert.equal(dry.status, 0, dry.stderr)
+  assert.doesNotMatch(dry.stdout, /将移除/, '无真实表头时不得预告移除')
+
+  const un = run(['uninstall', '--target', 'codex'], h)
+  assert.equal(un.status, 0, un.stderr)
+  assert.doesNotMatch(un.stdout, /已移除/, '不得谎报已移除')
+  assert.match(un.stdout, /未发现|跳过/)
+  assert.equal(readFileSync(cfg, 'utf8'), original, '文件必须逐字节不变')
+  assert.equal(backupsIn(dir).length, 0, '未改动就不得产生备份')
+})
+
 test('codex 已有用户手写 grape-kit 表：安装去重为单一托管条目', () => {
   const h = home()
   const dir = join(h, '.codex')
