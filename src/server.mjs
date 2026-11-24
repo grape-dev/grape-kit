@@ -13,6 +13,7 @@ import {
 import { runGrape, waitTask, GrapeCliError } from './cli.mjs'
 import { waitTaskNative, GrapeApiError, api } from './api.mjs'
 import { toolDefs, findTool } from './tools.mjs'
+import * as lifecycleModule from './lifecycle.mjs'
 
 const PKG = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
 
@@ -37,14 +38,16 @@ export const INSTRUCTIONS = `Grape DevOps 流水线遥控（多 agent：vod→is
 - 写动作一律以**回读**为准：应用场景后列仓库场景；设默认后读 dev_scene；建单后读 issue 详情；交回后看 handoff 与事件。
 - 403 分两类：tk_ 专属端点（review-pass / review-reject / confirm-done）属通道边界，**不要重试**，改用 WebUI 或请用户执行；
   仓库未纳管导致的 403（无权对该仓库发起 A2A）先用 \`grape_host_repo\` 纳管（需用户确认）。
-- 事件是事实源：QA 打回与评论从 \`grape_get_issue_events\` 读；下一节点是否已派发看 \`next_seq\` 与 issue 事件，别重复派发。`
+- 事件是事实源：QA 打回与评论从 \`grape_get_issue_events\` 读；下一节点是否已派发看 \`next_seq\` 与 issue 事件，别重复派发。
+- 自管理属用户决策层：grape_kit_version / grape_kit_check_update 只读直执行（check_update 的 dismiss 只写本地忽略状态文件）；grape_kit_upgrade / grape_kit_install / grape_kit_uninstall **只生成命令、工具本身不执行任何变更**——必须先把命令块与影响范围交给用户，获得确认后再由用户（或用户允许的终端）执行。`
 
 /**
  * 创建 server 实例（依赖注入便于测试）。
- * @param {{runGrape?: Function, waitTask?: Function}} [deps]
+ * @param {{runGrape?: Function, waitTask?: Function, apiModule?: object, lifecycleModule?: object}} [deps]
  */
 export function createServer(deps = {}) {
   const apiModule = deps.apiModule || api
+  const lifecycle = deps.lifecycleModule || lifecycleModule
   const _runGrape = deps.runGrape || runGrape
   const _waitTask = deps.waitTask || waitTaskNative   // v0.3.0：原生轮询（无 CLI 冷启动）；测试可注入旧版
 
@@ -67,7 +70,7 @@ export function createServer(deps = {}) {
       if (tool.run) {
         // 多步工具（等待/级联解析/凭据生成）：自持执行逻辑。
         // 契约：waitBased 工具返回 {json,...}；其余 run() 工具直接返回结果值。
-        const r = await tool.run(args, { runGrape: _runGrape, waitTask: _waitTask, apiModule })
+        const r = await tool.run(args, { runGrape: _runGrape, waitTask: _waitTask, apiModule, lifecycle })
         json = tool.waitBased ? { ...r.json, timedOut: !!r.timedOut, polls: r.polls } : r
       } else if (tool.native) {
         // v0.3.0 传输层原生化：优先原生 HTTP（无 Python/CLI 依赖）。
