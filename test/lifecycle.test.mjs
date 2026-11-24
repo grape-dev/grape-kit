@@ -4,7 +4,7 @@ import { spawnSync } from 'node:child_process'
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
-import { aggregateVersion, detectHostStatus, detectInstallForm, readDismissState, recordDismiss, updateDecision, HOST_NAMES } from '../src/lifecycle.mjs'
+import { aggregateVersion, checkForUpdate, detectHostStatus, detectInstallForm, readDismissState, recordDismiss, updateDecision, HOST_NAMES } from '../src/lifecycle.mjs'
 
 /* Issue #27 · 自管理 5 工具的公开 seam：
  * S1  detectHostStatus —— 五宿主只读检出（纯函数 + 显式 home/env 注入，不读进程真实 HOME）
@@ -444,4 +444,43 @@ test('S4 无凭据：版本查询照常可用（只读诊断不该被凭据卡�
   assert.equal(r.kitVersion, '0.4.0')
   assert.equal(r.credentials.configured, false)
   assert.match(r.credentials.hint, /GRAPE_API_TOKEN/, '缺凭据要给可执行指引')
+})
+
+/* ── S5a：check_update 的 dismiss 组合行为（npm 查询 + 状态记录 + 冷却判定一条链） ── */
+
+test('S5a checkForUpdate：dismiss=true 记录被忽略版本，并立即抑制「有新版本」', async () => {
+  const env = { ...baseEnv(), GRAPE_HOME: join(home(), '.grape') }
+  const r = await checkForUpdate({ pkgVersion: '0.4.0', env, fetchImpl: stubFetch({ latest: '0.5.0' }), now: T0, dismiss: true })
+  assert.equal(r.state, 'dismissed')
+  assert.equal(r.dismiss.version, '0.5.0')
+  assert.equal(r.updateAvailable, false)
+  assert.equal(readDismissState({ env }).version, '0.5.0', '状态已落盘')
+  assert.match(r.updateNotice, /冷却|忽略/, '提示要说清「忽略中」而不是「有新版本」')
+})
+
+test('S5a checkForUpdate：忽略后出现更新版本 → 重新提醒', async () => {
+  const env = { ...baseEnv(), GRAPE_HOME: join(home(), '.grape') }
+  await checkForUpdate({ pkgVersion: '0.4.0', env, fetchImpl: stubFetch({ latest: '0.5.0' }), now: T0, dismiss: true })
+  const r = await checkForUpdate({ pkgVersion: '0.4.0', env, fetchImpl: stubFetch({ latest: '0.6.0' }), now: T0 + DAY })
+  assert.equal(r.state, 'newer')
+  assert.equal(r.updateAvailable, true)
+})
+
+test('S5a checkForUpdate：dismissVersion 显式指定优先（registry 不可达也能记录）', async () => {
+  const env = { ...baseEnv(), GRAPE_HOME: join(home(), '.grape') }
+  const r = await checkForUpdate({
+    pkgVersion: '0.4.0', env, fetchImpl: stubFetch({ npmThrows: true }), now: T0,
+    dismiss: true, dismissVersion: '0.9.9',
+  })
+  assert.equal(r.dismiss.version, '0.9.9')
+  assert.equal(readDismissState({ env }).version, '0.9.9')
+})
+
+test('S5a checkForUpdate：无 dismiss 时不写状态文件（只读查询不产生副作用）', async () => {
+  const base = home()
+  const env = { ...baseEnv(), GRAPE_HOME: join(base, '.grape') }
+  const r = await checkForUpdate({ pkgVersion: '0.4.0', env, fetchImpl: stubFetch({ latest: '0.5.0' }), now: T0 })
+  assert.equal(r.state, 'newer')
+  assert.equal(r.dismiss, null)
+  assert.ok(!existsSync(join(base, '.grape')), '未 dismiss 时不得创建任何目录/文件')
 })
