@@ -61,6 +61,15 @@ PR 合入前必须同时满足：
 
 维护者对争议有一票裁定权。
 
+### CODEOWNERS 生效位置与开启步骤
+
+- 生效文件只有 `.github/CODEOWNERS`（解析优先级 `.github/CODEOWNERS` > 根目录 `CODEOWNERS` > `docs/CODEOWNERS`）。**不要**再新增根目录或 `docs/` 下的 `CODEOWNERS`：同一语义存在多份文件会让生效位置不确定，owner 名单也会漂移。
+- 当前规则为 `* @chenjingjie @songspace @yuanbeyond @Jason7602 @HugLovesWine`（5 位组织 Owner），刻意**不含 `grape_bot`**，避免 bot 自建 PR 时「自审自合」。
+- 该文件需管理员手动开启后才会拦截，代码合入本身不会自动生效：
+  1. 仓库 **Settings**（https://gitcode.com/grape-dev/grape-kit/settings）→ **合并请求** → 开启「按 CODEOWNERS 要求审批」；
+  2. 保护分支 `main` / `dev` → 必需审批数 ≥ 1，并禁止创建者自审自合。
+- 变更 owner 名单只改 `.github/CODEOWNERS` 一处；调整后用 1 个测试 PR 验证实际生效的就是该文件。
+
 ## 5. 提交规范
 
 采用 Conventional Commits（与历史提交一致）：
