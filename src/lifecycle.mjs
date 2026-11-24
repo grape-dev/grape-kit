@@ -505,3 +505,29 @@ export async function aggregateVersion({
     checkedAt: new Date(now).toISOString(),
   }
 }
+
+/**
+ * 主动更新检查（Spec §3.2）：npm 直查 + dismiss 冷却合成一条结论。
+ * dismiss=true 是**唯一**写路径（本地 dismiss 状态文件），不涉及服务端或宿主配置。
+ * @param {{pkgVersion?: string, env?: object, fetchImpl?: Function, now?: number,
+ *   dismiss?: boolean, dismissVersion?: string, timeoutMs?: number}} [opts]
+ */
+export async function checkForUpdate({
+  pkgVersion, env = process.env, fetchImpl = fetch, now = Date.now(),
+  dismiss = false, dismissVersion, timeoutMs = REGISTRY_TIMEOUT_MS,
+} = {}) {
+  const currentVersion = pkgVersion || readKitVersion()
+  const latestVersion = await fetchLatestVersion({ fetchImpl, timeoutMs })
+  let state = readDismissState({ env })
+  let recorded = null
+  if (dismiss) {
+    // dismissVersion 显式指定优先：registry 不可达时用户点名的版本同样能记住
+    const target = String(dismissVersion || latestVersion || currentVersion).trim()
+    if (target) {
+      recorded = recordDismiss(target, { env, now })
+      state = { version: recorded.version, at: recorded.at }
+    }
+  }
+  const decision = updateDecision({ currentVersion, latestVersion, dismissState: state, now })
+  return { ...decision, updateNotice: updateNoticeFor(decision), dismiss: recorded }
+}
