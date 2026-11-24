@@ -1092,13 +1092,37 @@ function stripHermesManaged(lines) {
   return { lines: [...lines.slice(0, start), ...lines.slice(end + 1)], removed: true }
 }
 
-/** 无法安全追加的 mcp_servers 形态：inline 非空映射、多行 flow map（`mcp_servers: {`）、序列、标量。
- *  这些形态下追加托管条目会生成第二个顶级 mcp_servers 键，YAML last-wins 会把用户原有映射整体丢弃。 */
+/** mcp_servers 头下允许追加的块映射子键（`  other:` / `  "other server":`），其余形态一律视为不可安全追加 */
+const HERMES_MAPPING_CHILD_RE = /^\s+(?:"[^"]*"|'[^']*'|[^\s#:'"-][^:]*)\s*:(?:\s|$)/
+
+/** 裸 `mcp_servers:` 头下的首个内容行形态：block（块映射子键）/ sequence（`- a`）/ scalar（`  foo`）/ empty。
+ *  只有 block / empty 能无损追加托管条目；sequence / scalar 追加后会变成 mapping+sequence 混层，
+ *  yaml.safe_load 直接抛 ParserError（QA#PR22 P1）。 */
+function hermesSectionShape(lines, header) {
+  for (let i = header + 1; i < lines.length; i++) {
+    const l = lines[i]
+    if (l.trim() === '' || l.trimStart().startsWith('#')) continue
+    if (!/^\s/.test(l)) return { kind: 'empty' }                       // 下一个顶级键 → 段内无子行
+    if (/^\s+-(?:\s|$)/.test(l) || l.trim() === '-') return { kind: 'sequence', line: i + 1, text: l.trim() }
+    if (HERMES_MAPPING_CHILD_RE.test(l)) return { kind: 'block' }
+    return { kind: 'scalar', line: i + 1, text: l.trim() }
+  }
+  return { kind: 'empty' }
+}
+
+/** 无法安全追加的 mcp_servers 形态：inline 非空映射、多行 flow map（`mcp_servers: {`）、空序列，
+ *  以及裸头 + 序列/标量子行。这些形态下追加托管条目会生成第二个顶级 mcp_servers 键（YAML last-wins
+ *  丢弃用户映射），或把序列/标量段扩成 mapping+sequence 混层（YAML 解析报错）。 */
 function hermesMapConflict(lines) {
   for (let i = 0; i < lines.length; i++) {
     const l = lines[i]
     if (!HERMES_TOP_KEY_RE.test(l)) continue
-    if (HERMES_HEADER_RE.test(l) || HERMES_EMPTY_FLOW_RE.test(l)) continue
+    if (HERMES_HEADER_RE.test(l)) {
+      const shape = hermesSectionShape(lines, i)
+      if (shape.kind === 'sequence' || shape.kind === 'scalar') return { line: shape.line, text: shape.text, shape: shape.kind }
+      continue
+    }
+    if (HERMES_EMPTY_FLOW_RE.test(l)) continue
     return { line: i + 1, text: l.trim() }
   }
   return null
@@ -1172,7 +1196,8 @@ function installHermes() {
   let lines = originalText === null ? [] : originalText.split('\n')
   const conflict = hermesMapConflict(lines)
   if (conflict) {
-    console.error(`检测到无法安全追加的 mcp_servers 取值（第 ${conflict.line} 行：${conflict.text}）——inline 非空映射 / 多行 flow map / 序列下追加托管条目会生成第二个顶级 mcp_servers 键，YAML last-wins 会丢弃你原有的映射；已拒绝安装。请先改为块格式后重跑：`)
+    const what = conflict.shape === 'sequence' ? '序列' : conflict.shape === 'scalar' ? '标量' : '非块映射取值'
+    console.error(`检测到无法安全追加的 mcp_servers 取值（第 ${conflict.line} 行：${conflict.text}）——inline 非空映射 / 多行 flow map / 序列 / 标量下追加托管条目会生成第二个顶级 mcp_servers 键（YAML last-wins 丢弃你原有的映射），或把${what}段扩成 mapping+sequence 混层（YAML 解析报错）；已拒绝安装。请先改为块映射格式后重跑：`)
     console.error('  mcp_servers:')
     console.error('    <宿主条目>')
     console.error(`  文件：${p.config}`)
