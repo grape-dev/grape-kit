@@ -506,13 +506,15 @@ const OWNER_REPO_NUM = {
 /* ── Issue #27 写工具公共层：只读检出 → 生成命令 → 决策门渲染（零执行） ── */
 
 const HOST_TARGETS = lifecycleModule.HOST_NAMES
+/** 状态词表与更新状态词表的唯一来源（lifecycle 导出）：判定与渲染共用常量，改名不会静默失效 */
+const { HOST_STATE, UPDATE_STATE } = lifecycleModule
 
 /** 检出状态的人类可读标签（damaged 必须显式「先修复」，否则用户会照装一遍再踩同样的坑） */
 const STATE_LABEL = {
-  installed: '已装配',
-  absent: '未装配（文件在、无条目）',
-  missing: '未装配（无配置文件）',
-  damaged: '配置损坏（先修复）',
+  [HOST_STATE.INSTALLED]: '已装配',
+  [HOST_STATE.ABSENT]: '未装配（文件在、无条目）',
+  [HOST_STATE.MISSING]: '未装配（无配置文件）',
+  [HOST_STATE.DAMAGED]: '配置损坏（先修复）',
 }
 
 const WRITE_GATE = '⚠️ 决策门：以上命令只生成、未执行。请先把命令块与影响范围交给用户确认，确认后再执行（可随时 Ctrl-C 打断）。'
@@ -534,12 +536,12 @@ function buildHostPlan(action, targetArg, L) {
   const rows = L.detectHostStatus({})
   const targets = target === 'all' ? HOST_TARGETS : [target]
   const hosts = targets.map((host) => {
-    const r = rows.find((x) => x.host === host) || { host, state: 'missing', installed: false, path: '', skillsDir: '', entry: '' }
-    const blocked = r.state === 'damaged'
+    const r = rows.find((x) => x.host === host) || { host, state: HOST_STATE.MISSING, installed: false, path: '', skillsDir: '', entry: '' }
+    const blocked = r.state === HOST_STATE.DAMAGED
     const needsAction = blocked ? false : action === 'install' ? !r.installed : !!r.installed
     return {
       host,
-      state: r.state || 'missing',
+      state: r.state || HOST_STATE.MISSING,
       path: r.path || '',
       entry: r.entry || '',
       skillsDir: r.skillsDir || '',
@@ -608,7 +610,10 @@ function renderHostPlan(json) {
       lines.push('', '**先预览（--dry-run 只列不删，推荐先跑一遍）**', '', '```bash', json.dryRun, '```')
     }
   } else {
-    lines.push('', '_本次没有需要生成的命令（目标宿主均为相反状态）。_')
+    // 空命令有两种真实原因：全 blocked（配置损坏待修）vs 全为相反状态——混说会让用户去查错方向（QA SJ5）
+    lines.push('', json.blocked?.length
+      ? '_本次没有可生成的命令：目标宿主配置均损坏（先按上方「先修复」逐条处理，修好后重跑本工具）。_'
+      : '_本次没有需要生成的命令（目标宿主均为相反状态）。_')
   }
   lines.push('', isUninstall
     ? '⚠️ 强决策门：卸载会移除宿主配置条目与 skill 副本（不可自动回滚），以上命令只生成、未执行——执行前必须向用户逐条确认影响范围。'
@@ -1876,10 +1881,10 @@ curl -sSL ${base}/api/runtime/install | bash -s -- --token <TOKEN> --server ${ba
           k: '更新',
           // 四态各有独立结论（dismissed ≠ latest ≠ newer），映射而非三元链，避免把「已忽略」说成「已是最新」（QA Q6）
           v: {
-            newer: '⬆️ 有可用更新',
-            latest: '✅ 已是最新',
-            dismissed: '🙈 已忽略（冷却中）',
-            unavailable: '检测不可用',
+            [UPDATE_STATE.NEWER]: '⬆️ 有可用更新',
+            [UPDATE_STATE.LATEST]: '✅ 已是最新',
+            [UPDATE_STATE.DISMISSED]: '🙈 已忽略（冷却中）',
+            [UPDATE_STATE.UNAVAILABLE]: '检测不可用',
           }[json.updateState] || (json.updateState || '-'),
           note: json.updateNotice || '',
         },
@@ -1925,10 +1930,10 @@ curl -sSL ${base}/api/runtime/install | bash -s -- --token <TOKEN> --server ${ba
     render(json) {
       if (!json || typeof json !== 'object') return R.fallbackJson(json)
       const conclusion = {
-        newer: '⬆️ 有新版本',
-        latest: '✅ 已是最新',
-        dismissed: '🙈 已按用户要求忽略（冷却中）',
-        unavailable: '❔ 检测不可用（npm registry 不可达或响应异常）',
+        [UPDATE_STATE.NEWER]: '⬆️ 有新版本',
+        [UPDATE_STATE.LATEST]: '✅ 已是最新',
+        [UPDATE_STATE.DISMISSED]: '🙈 已按用户要求忽略（冷却中）',
+        [UPDATE_STATE.UNAVAILABLE]: '❔ 检测不可用（npm registry 不可达或响应异常）',
       }[json.state] || (json.state || '-')
       const lines = [
         '### grape-kit 更新检查', '',
@@ -1956,7 +1961,7 @@ curl -sSL ${base}/api/runtime/install | bash -s -- --token <TOKEN> --server ${ba
     name: 'grape_kit_upgrade',
     description:
       '升级 grape-kit 自身：只读检出安装形态（全局 npm / npx 缓存 / ClawHub / 项目本地依赖 / 未知）并生成对应升级命令。' +
-      '⚠️ 用户决策层：执行前必须征得用户同意；本工具只生成命令、不执行。升级完成后需重启宿主会话才加载新版本。',
+      '⚠️ 用户决策层：执行前必须向用户确认（征得同意后方可执行）；本工具只生成命令、不执行。升级完成后需重启宿主会话才加载新版本。',
     schema: { type: 'object', properties: {} },
     async run(a, { lifecycle: L = lifecycleModule } = {}) {
       const plan = L.detectInstallForm({})

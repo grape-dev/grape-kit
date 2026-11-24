@@ -186,7 +186,7 @@ function isTopLevelSequence(text) {
 }
 
 const row = (host, state, path, extra = {}) => ({
-  host, label: host, state, path, installed: state === HOST_STATE.INSTALLED, ...extra,
+  host, state, path, installed: state === HOST_STATE.INSTALLED, ...extra,
 })
 
 /** 纯 JSON 宿主（mcpServers 容器）：同步指针：grape-kit.mjs detectJsonEntry
@@ -248,7 +248,7 @@ function detectDsh({ home, env }) {
 /**
  * 五宿主只读检出（Spec §3.4 / §4.2）。
  * @param {{home?: string, env?: object}} [opts] home/env 可注入——单测据此用临时目录夹具，不读真实 HOME
- * @returns {Array<{host:string,label:string,state:string,installed:boolean,path:string,entry:string,skillsDir?:string,evidence?:string,error?:string}>}
+ * @returns {Array<{host:string,state:string,installed:boolean,path:string,entry:string,skillsDir?:string,evidence?:string,error?:string}>}
  */
 export function detectHostStatus({ home = homedir(), env = process.env } = {}) {
   const ca = codeartsPaths(home, env)
@@ -392,6 +392,14 @@ export function recordDismiss(version, { env = process.env, file, now = Date.now
 }
 
 /**
+ * 更新判定四态单源：渲染层（tools.mjs）与判定层共用同一组常量——
+ * 字面量散落时改词表（如 newer→update_available）会让判定与渲染静默错配。
+ */
+export const UPDATE_STATE = {
+  NEWER: 'newer', LATEST: 'latest', DISMISSED: 'dismissed', UNAVAILABLE: 'unavailable',
+}
+
+/**
  * 更新判定（纯函数，无 IO）：把 npm latest、本地版本与 dismiss 状态合成一个结论。
  * state：newer（应提醒）/ latest（已是最新）/ dismissed（同版本冷却期内，不打扰）/ unavailable（查不到）
  */
@@ -401,17 +409,17 @@ export function updateDecision({
   const current = String(currentVersion ?? '').trim()
   const latest = String(latestVersion ?? '').trim()
   const base = { currentVersion: current, latestVersion: latest }
-  if (!latest) return { ...base, state: 'unavailable', updateAvailable: false, dismissed: false }
-  if (!isNewerVersion(latest, current)) return { ...base, state: 'latest', updateAvailable: false, dismissed: false }
+  if (!latest) return { ...base, state: UPDATE_STATE.UNAVAILABLE, updateAvailable: false, dismissed: false }
+  if (!isNewerVersion(latest, current)) return { ...base, state: UPDATE_STATE.LATEST, updateAvailable: false, dismissed: false }
   const at = Number(dismissState?.at)
   const dismissedNow = dismissState?.version === latest && Number.isFinite(at) && now - at < cooldownMs
   if (dismissedNow) {
     return {
-      ...base, state: 'dismissed', updateAvailable: false, dismissed: true,
+      ...base, state: UPDATE_STATE.DISMISSED, updateAvailable: false, dismissed: true,
       dismissedAt: at, cooldownUntil: at + cooldownMs,
     }
   }
-  return { ...base, state: 'newer', updateAvailable: true, dismissed: false }
+  return { ...base, state: UPDATE_STATE.NEWER, updateAvailable: true, dismissed: false }
 }
 
 /* ── S4：版本全景（Spec §3.1） ──
@@ -433,17 +441,19 @@ export function readKitVersion() {
 /** npm registry latest 的对外接口：直接复用 update-check.mjs 的实现（单源，失败返回 '' 由调用方降级） */
 export { fetchLatestVersion }
 
+/** 凭据来源档位的展示文案（单源；结构检测走 sourceKind，不按 source 字符串反推） */
+const CRED_SOURCE_LABEL = {
+  runtime: '一次性 env GRAPE_API_TOKEN_ONCE',
+  env: '环境变量 GRAPE_API_TOKEN',
+}
+
 /** 凭据来源摘要：只给来源与档位，绝不含 token 明文（AGENTS 红线） */
 export function credentialSummary(env = process.env) {
   const c = resolveCredentials(env)
   const configured = !!c.token
-  const source = c.sourceKind === 'runtime'
-    ? '一次性 env GRAPE_API_TOKEN_ONCE'
-    : c.sourceKind === 'env'
-      ? '环境变量 GRAPE_API_TOKEN'
-      : c.sourceKind === 'file'
-        ? `文件 ${String(c.source).slice('file:'.length)}`
-        : ''
+  const source = c.sourceKind === 'file'
+    ? `文件 ${String(c.source).slice('file:'.length)}`
+    : (CRED_SOURCE_LABEL[c.sourceKind] || '')
   return {
     configured,
     sourceKind: c.sourceKind || '',
@@ -496,11 +506,11 @@ async function probeServer({ env = process.env, fetchImpl = fetch, apiModule, ti
 /** 更新提示文案（按判定分行；dismiss 冷却期内不再说「有新版本」） */
 export function updateNoticeFor(decision) {
   switch (decision.state) {
-    case 'newer':
+    case UPDATE_STATE.NEWER:
       return `有新版本 ${decision.currentVersion} → ${decision.latestVersion}（npm i -g @grape-dev/grape-kit 更新；npx 用户下次拉取即最新）`
-    case 'dismissed':
+    case UPDATE_STATE.DISMISSED:
       return `${decision.latestVersion} 已被用户忽略，冷却至 ${new Date(decision.cooldownUntil).toISOString()}（新版本出现会重新提醒）`
-    case 'latest':
+    case UPDATE_STATE.LATEST:
       return `已是最新（${decision.currentVersion}）`
     default:
       return '检测不可用（npm registry 不可达或响应异常），不影响工具可用性'
