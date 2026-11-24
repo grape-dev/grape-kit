@@ -374,15 +374,21 @@ export function readDismissState({ env = process.env, file } = {}) {
   }
 }
 
-/** 记录拒绝的版本（唯一写路径：3 天冷却的状态落盘）；目录不存在则创建 */
+/**
+ * 记录拒绝的版本（唯一写路径：3 天冷却的状态落盘）；目录不存在则创建。
+ * 写盘结果**如实返回**（ok/error）：调用方据此决定是否宣称「已忽略」——
+ * 吞掉失败会让工具报「已记录…3 天内不再提示」，而下次启动照旧提醒（本次与下次结论互相矛盾）。
+ */
 export function recordDismiss(version, { env = process.env, file, now = Date.now() } = {}) {
   const target = file || dismissStatePath({ env })
   const state = { version: String(version ?? '').trim(), at: now }
   try {
     mkdirSync(dirname(target), { recursive: true })
     writeFileSync(target, JSON.stringify(state))
-  } catch { /* 落盘失败不阻断查询结果（下次仍会提醒，属可接受的降级） */ }
-  return { ...state, file: target }
+    return { ...state, file: target, ok: true }
+  } catch (e) {
+    return { ...state, file: target, ok: false, error: String(e?.message || e) }
+  }
 }
 
 /**
@@ -503,21 +509,24 @@ export function updateNoticeFor(decision) {
 
 /**
  * 版本全景聚合（只读）。
+ * dismiss 状态照读（与 check_update 同口径）：忽略冷却期内不得再报「有可用更新」，
+ * 否则两个工具的结论互相矛盾。本函数仍不写任何文件。
  * @param {{
  *   pkgVersion?: string, env?: object, fetchImpl?: Function, spawnImpl?: Function,
- *   apiModule?: object, now?: number, timeoutMs?: number
- * }} [opts]
+ *   apiModule?: object, now?: number, timeoutMs?: number, dismissState?: object|null
+ * }} [opts] dismissState 可注入（缺省按 env 从磁盘读），单测无需造真实 ~/.grape
  */
 export async function aggregateVersion({
   pkgVersion, env = process.env, fetchImpl = fetch, spawnImpl = nodeSpawnSync,
-  apiModule, now = Date.now(), timeoutMs = REGISTRY_TIMEOUT_MS,
+  apiModule, now = Date.now(), timeoutMs = REGISTRY_TIMEOUT_MS, dismissState,
 } = {}) {
   const kitVersion = pkgVersion || readKitVersion()
   const [latestVersion, server] = await Promise.all([
     fetchLatestVersion({ fetchImpl, timeoutMs }),
     probeServer({ env, fetchImpl, apiModule, timeoutMs }),
   ])
-  const decision = updateDecision({ currentVersion: kitVersion, latestVersion, now })
+  const state = dismissState === undefined ? readDismissState({ env }) : dismissState
+  const decision = updateDecision({ currentVersion: kitVersion, latestVersion, dismissState: state, now })
   return {
     kitVersion,
     latestVersion,
@@ -545,14 +554,20 @@ export async function checkForUpdate({
   const latestVersion = await fetchLatestVersion({ fetchImpl, timeoutMs })
   let state = readDismissState({ env })
   let recorded = null
+  let dismissSkipped = ''
   if (dismiss) {
-    // dismissVersion 显式指定优先：registry 不可达时用户点名的版本同样能记住
-    const target = String(dismissVersion || latestVersion || currentVersion).trim()
-    if (target) {
+    // dismissVersion 显式指定优先：registry 不可达时用户点名的版本同样能记住。
+    // 兜底不落 currentVersion——当前版本不是「可更新版本」，记它永远不会触发冷却，
+    // 而文案一旦承诺「3 天内不再提示」就是空头支票（QA Q5）。
+    const target = String(dismissVersion || latestVersion || '').trim()
+    if (!target) {
+      dismissSkipped = '未取到 npm 最新版且未指定 dismissVersion：没有可记录的被忽略版本（registry 不可达时请显式传 dismissVersion 再试）'
+    } else {
       recorded = recordDismiss(target, { env, now })
-      state = { version: recorded.version, at: recorded.at }
+      // 落盘失败不冒充「已忽略」：沿用磁盘上真实的状态，结论与下次启动一致（QA Q4）
+      if (recorded.ok) state = { version: recorded.version, at: recorded.at }
     }
   }
   const decision = updateDecision({ currentVersion, latestVersion, dismissState: state, now })
-  return { ...decision, updateNotice: updateNoticeFor(decision), dismiss: recorded }
+  return { ...decision, updateNotice: updateNoticeFor(decision), dismiss: recorded, dismissSkipped }
 }

@@ -1874,7 +1874,13 @@ curl -sSL ${base}/api/runtime/install | bash -s -- --token <TOKEN> --server ${ba
         { k: 'npm 最新版', v: json.latestVersion || 'unavailable', note: 'registry.npmjs.org 直查，5s 超时' },
         {
           k: '更新',
-          v: json.updateState === 'unavailable' ? '检测不可用' : json.updateAvailable ? '⬆️ 有可用更新' : '已是最新',
+          // 四态各有独立结论（dismissed ≠ latest ≠ newer），映射而非三元链，避免把「已忽略」说成「已是最新」（QA Q6）
+          v: {
+            newer: '⬆️ 有可用更新',
+            latest: '✅ 已是最新',
+            dismissed: '🙈 已忽略（冷却中）',
+            unavailable: '检测不可用',
+          }[json.updateState] || (json.updateState || '-'),
           note: json.updateNotice || '',
         },
         {
@@ -1933,8 +1939,14 @@ curl -sSL ${base}/api/runtime/install | bash -s -- --token <TOKEN> --server ${ba
         ], [{ h: '项', v: 'k' }, { h: '值', v: 'v' }]),
       ]
       if (json.updateNotice) lines.push('', json.updateNotice)
-      if (json.dismiss) {
+      // 三项互斥且必须如实：落盘成功才说「已记录」，失败说失败，没版本可记说没记（QA Q4/Q5）
+      if (json.dismiss && json.dismiss.ok === false) {
+        lines.push('', `**⚠️ 记录失败（路径不可写）**：未能写入 \`${json.dismiss.file || '~/.grape/grape-kit-dismiss.json'}\`（${json.dismiss.error || '落盘失败'}）。`
+          + `该版本**未被忽略**，下次检查仍会提示——请修好该路径权限（或 \`GRAPE_HOME\`）后重试。`)
+      } else if (json.dismiss) {
         lines.push('', `已记录忽略版本 \`${json.dismiss.version}\`：3 天内不再提示，出现新版本会重新提醒。`)
+      } else if (json.dismissSkipped) {
+        lines.push('', `**未记录忽略版本**：${json.dismissSkipped}——本次查询结论不受影响。`)
       }
       return lines.join('\n')
     },
