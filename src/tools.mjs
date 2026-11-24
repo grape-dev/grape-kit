@@ -1844,10 +1844,14 @@ curl -sSL ${base}/api/runtime/install | bash -s -- --token <TOKEN> --server ${ba
         },
         {
           k: '服务端',
-          v: srv.reachable ? `可达 ${srv.baseUrl || ''}` : `不可达 ${srv.baseUrl || ''}`,
-          note: srv.reachable
-            ? (srv.contractVersion ? `契约版本 ${srv.contractVersion}` : '契约版本未取到（404/不可达时省略）')
-            : (srv.error || '') + (srv.hint ? `（${srv.hint}）` : ''),
+          v: srv.probe === 'skipped'
+            ? `未探测（缺凭据）${srv.baseUrl || ''}`
+            : srv.reachable ? `可达 ${srv.baseUrl || ''}` : `不可达 ${srv.baseUrl || ''}`,
+          note: srv.probe === 'skipped'
+            ? (srv.reason || '未配置凭据') + (srv.contractVersion ? `；契约版本 ${srv.contractVersion}` : '')
+            : srv.reachable
+              ? (srv.contractVersion ? `契约版本 ${srv.contractVersion}` : '契约版本未取到（404/不可达时省略）')
+              : (srv.error || '') + (srv.hint ? `（${srv.hint}）` : '') + (srv.contractVersion ? `；契约版本 ${srv.contractVersion}` : ''),
         },
         {
           k: '凭据来源',

@@ -23,19 +23,11 @@ Grape-kit helps **mainstream agents** (opencode / CodeArts / WorkBuddy / dsh / o
 
 ```
 agent (MCP stdio: opencode / CodeArts / WorkBuddy / dsh…; other MCP-capable agents wire up manually)
-<<<<<<< HEAD
-  → grape-kit (43 tools · native HTTP · Markdown rendering · initialize-instruction bootstrap)
+  → grape-kit (45 tools · native HTTP · Markdown rendering · initialize-instruction bootstrap)
     → grape server (pipelines / events / takeover session API; CLI only as 401 fallback)
 ```
 
-## Capabilities (43 tools)
-=======
-  → grape-kit (44 tools · native HTTP · Markdown rendering · initialize-instruction bootstrap)
-    → grape server (pipelines / events / takeover session API; CLI only as 401 fallback)
-```
-
-## Capabilities (44 tools)
->>>>>>> 87fca5f (feat(#27): S7 三面口径同步 44 工具（smoke/sweep 断言、README 双语、CHANGELOG）+ 测试路径逃生口隔离)
+## Capabilities (45 tools)
 
 - **Pipeline control**: trigger (the only A2A entry) · wait_task · task status · cancel/resume with decision gates
 - **Issues & events**: list/detail/events/my-issues · create · structured hand-back templates
@@ -167,8 +159,7 @@ npx -y @grape-dev/grape-kit install --target dsh          # re-assembly after up
 npx -y @grape-dev/grape-kit uninstall --target dsh        # removes the managed block + skill copy only
 ```
 
-<<<<<<< HEAD
-> dsh uses the **MCP minimal path** (all 43 tools reused unchanged). The full native Cordis plugin lives in [grape-dsh](https://gitcode.com/grape-dev/grape-dsh); the two coexist.
+> dsh uses the **MCP minimal path** (all 45 tools reused unchanged). The full native Cordis plugin lives in [grape-dsh](https://gitcode.com/grape-dev/grape-dsh); the two coexist.
 
 ### Codex CLI
 
@@ -221,9 +212,6 @@ Writes `mcpServers.grape-kit` into the project-level `.trae/mcp.json` (Trae's of
 npx -y @grape-dev/grape-kit doctor --target trae --probe
 npx -y @grape-dev/grape-kit uninstall --target trae
 ```
-=======
-> dsh uses the **MCP minimal path** (all 44 tools reused unchanged). The full native Cordis plugin lives in [grape-dsh](https://gitcode.com/grape-dev/grape-dsh); the two coexist.
->>>>>>> 87fca5f (feat(#27): S7 三面口径同步 44 工具（smoke/sweep 断言、README 双语、CHANGELOG）+ 测试路径逃生口隔离)
 
 ### openclaw (ClawHub marketplace)
 
@@ -231,8 +219,7 @@ npx -y @grape-dev/grape-kit uninstall --target trae
 openclaw plugins install clawhub:grape-kit@latest
 ```
 
-<<<<<<< HEAD
-The `clawhub:` prefix is the source (matching devkit's listing form). Verify with the plugin's MCP tools list (43 tools). Marketplace page: https://clawhub.ai/grape-dev/plugins/grape-kit
+The `clawhub:` prefix is the source (matching devkit's listing form). Verify with the plugin's MCP tools list (45 tools). Marketplace page: https://clawhub.ai/grape-dev/plugins/grape-kit
 
 Alternatively, register the MCP server directly with the file-based installer (no marketplace needed):
 
@@ -240,9 +227,6 @@ Alternatively, register the MCP server directly with the file-based installer (n
 npx -y @grape-dev/grape-kit install --target openclaw   # ~/.openclaw/openclaw.json: mcp.servers.grape-kit (legacy mcpServers compatible)
 npx -y @grape-dev/grape-kit uninstall --target openclaw # dry-run with --dry-run
 ```
-=======
-The `clawhub:` prefix is the source (matching devkit's listing form). Verify with the plugin's MCP tools list (44 tools). Marketplace page: https://clawhub.ai/grape-dev/plugins/grape-kit
->>>>>>> 87fca5f (feat(#27): S7 三面口径同步 44 工具（smoke/sweep 断言、README 双语、CHANGELOG）+ 测试路径逃生口隔离)
 
 ### Version check & update (all targets)
 
@@ -312,11 +296,7 @@ Full release notes: [CHANGELOG.md](CHANGELOG.md) — 21 条发布记录（含 0.
 ```bash
 npm install
 
-<<<<<<< HEAD
-npm test        # 296 unit tests (fake-grape stand-in, no real server needed)
-=======
-npm test        # 315 unit tests (fake-grape stand-in, no real server needed)
->>>>>>> 87fca5f (feat(#27): S7 三面口径同步 44 工具（smoke/sweep 断言、README 双语、CHANGELOG）+ 测试路径逃生口隔离)
+npm test        # 340 unit tests (fake-grape stand-in, no real server needed)
 
 npm run smoke   # real stdio JSON-RPC round-trip: initialize → tools/list → tools/call
 ```

@@ -484,3 +484,18 @@ test('S5a checkForUpdate：无 dismiss 时不写状态文件（只读查询不�
   assert.equal(r.dismiss, null)
   assert.ok(!existsSync(join(base, '.grape')), '未 dismiss 时不得创建任何目录/文件')
 })
+
+test('S4 无凭据不得把「未探测」说成「不可达」：跳过连通性探测但仍可取契约版本', async () => {
+  let apiCalls = 0
+  const r = await aggregateVersion({
+    pkgVersion: '0.4.0',
+    env: { GRAPE_BASE_URL: 'https://grape.test', GRAPE_AUTH_FILE: '/nonexistent/x.json' },
+    fetchImpl: stubFetch(), spawnImpl: okSpawn,
+    apiModule: { scenesMarket: async () => { apiCalls++; throw new Error('不该被调用') } },
+  })
+  assert.equal(apiCalls, 0, '无凭据时不得打需要鉴权的端点（必 401，徒增误导）')
+  assert.equal(r.server.probe, 'skipped')
+  assert.match(r.server.reason, /凭据/)
+  assert.equal(r.server.reachable, false)
+  assert.equal(r.server.contractVersion, '2.1.0', '契约端点是公开的，无凭据也应尽力探测')
+})

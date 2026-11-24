@@ -444,12 +444,19 @@ async function probeServer({ env = process.env, fetchImpl = fetch, apiModule, ti
   const baseUrl = getBaseUrl(env)
   const out = { baseUrl, reachable: false }
   const A = apiModule || defaultApi
-  try {
-    await A.scenesMarket()
-    out.reachable = true
-  } catch (e) {
-    out.error = String(e?.message || e)
-    if (e?.hint) out.hint = String(e.hint)
+  // 无凭据时连通性判定必是 401「缺 token」——那不等于「服务端不可达」，
+  // 直接跳过鉴权探测并标注未探测（真正的原因在 credentials 行），契约端点照常尽力探测。
+  if (!resolveCredentials(env).token) {
+    out.probe = 'skipped'
+    out.reason = '未配置凭据，跳过连通性探测（需鉴权的只读调用必 401，不代表服务端不可达）'
+  } else {
+    try {
+      await A.scenesMarket()
+      out.reachable = true
+    } catch (e) {
+      out.error = String(e?.message || e)
+      if (e?.hint) out.hint = String(e.hint)
+    }
   }
   try {
     const r = await fetchImpl(`${baseUrl.replace(/\/$/, '')}/static/openapi.json`, { signal: AbortSignal.timeout(timeoutMs) })
