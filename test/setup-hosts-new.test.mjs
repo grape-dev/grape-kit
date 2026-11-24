@@ -274,31 +274,56 @@ test('atomcode 安装写入 mcpServers.grape-kit，ATOMCODE_HOME 覆盖根路径
 
 test('trae 项目级 .trae/mcp.json 安装/doctor/幂等/dry-run/卸载，detect 选中 trae', () => {
   const h = home()
-  const cfg = join(h, '.trae', 'mcp.json')
-  mkdirSync(join(h, '.trae'), { recursive: true })
+  const proj = join(h, 'proj')   // trae 是项目级宿主：cwd 必须是项目目录（≠ $HOME）
+  mkdirSync(proj, { recursive: true })
+  const cfg = join(proj, '.trae', 'mcp.json')
+  mkdirSync(join(proj, '.trae'), { recursive: true })
   writeFileSync(cfg, JSON.stringify({ mcpServers: { other: { command: 'node' } } }, null, 2) + '\n')
+  const env = { HOME: h }
 
-  assert.equal(run(['install', '--target', 'trae'], h).status, 0)
+  assert.equal(run(['install', '--target', 'trae'], proj, env).status, 0)
   const cfg1 = JSON.parse(readFileSync(cfg, 'utf8'))
   assert.ok(cfg1.mcpServers.other)
   assert.match(cfg1.mcpServers['grape-kit'].args.join(' '), /@grape-dev\/grape-kit/)
 
-  const doctor = run(['doctor', '--target', 'trae'], h)
+  const doctor = run(['doctor', '--target', 'trae'], proj, env)
   assert.match(doctor.stdout, /\[ok\][^\n]*trae/i)
 
   // 只有 .trae 痕迹时，不带 --target 的 install 自动命中 trae（detectHosts）
-  const auto = run(['install'], h)
+  const auto = run(['install'], proj, env)
   assert.equal(auto.status, 0, auto.stderr)
   assert.match(auto.stdout, /\.trae\/mcp\.json/)
 
   const before = readFileSync(cfg, 'utf8')
-  assert.equal(run(['uninstall', '--target', 'trae', '--dry-run'], h).status, 0)
+  assert.equal(run(['uninstall', '--target', 'trae', '--dry-run'], proj, env).status, 0)
   assert.equal(readFileSync(cfg, 'utf8'), before, 'dry-run 不得改动配置')
 
-  assert.equal(run(['uninstall', '--target', 'trae'], h).status, 0)
+  assert.equal(run(['uninstall', '--target', 'trae'], proj, env).status, 0)
   const cfg2 = JSON.parse(readFileSync(cfg, 'utf8'))
   assert.equal(cfg2.mcpServers['grape-kit'], undefined)
   assert.ok(cfg2.mcpServers.other)
+})
+
+test('trae cwd 等于 $HOME：安装拒绝并指路项目目录，不写用户级 ~/.trae/mcp.json', () => {
+  const h = home()
+  // run 默认 cwd = HOME：此时项目级路径 == 用户级路径，Spec Out of Scope（不做用户级）
+  const r = run(['install', '--target', 'trae'], h)
+  assert.notEqual(r.status, 0, 'cwd==$HOME 必须拒绝（否则等同用户级落盘）')
+  assert.match(`${r.stderr}${r.stdout}`, /项目目录/, '应提示到项目目录执行')
+  assert.ok(!existsSync(join(h, '.trae', 'mcp.json')), '不得写用户级 ~/.trae/mcp.json')
+})
+
+test('--target all 跳过 trae（项目级宿主），不静默创建 .trae/', () => {
+  const homeDir = home()
+  const proj = join(homeDir, 'proj')
+  mkdirSync(join(homeDir, '.codex'), { recursive: true })
+  mkdirSync(proj, { recursive: true })
+
+  const r = run(['install', '--target', 'all'], proj, { HOME: homeDir, GRAPE_DSH_DEP_CMD: process.execPath })
+  assert.equal(r.status, 0, r.stderr)
+  assert.ok(!existsSync(join(proj, '.trae', 'mcp.json')), '--target all 不得在任意目录静默创建 .trae/')
+  assert.match(r.stdout, /trae[^\n]*(跳过|项目级)/, '应披露跳过 trae 及原因')
+  assert.ok(existsSync(join(homeDir, '.codex', 'config.toml')), '其余宿主仍应装配')
 })
 
 test('trae 不回退用户级：仅存在 ~/.trae/mcp.json 时安装写入项目级，且不改写用户级文件', () => {
