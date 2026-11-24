@@ -121,6 +121,27 @@ test('S1 dsh 托管块不完整（有 start 缺 end）→ damaged，不得静默
   assert.match(r.error, /不完整|结束标记/, '应点名缺结束标记')
 })
 
+/* ── QA 复审（PR #21）Q1：BOM 口径必须与 CLI 同源，否则同一个配置两侧判定分歧（Spec §4.2 要防的漂移） ──
+ * CLI 侧 `JSON.parse(readFileSync(file,'utf8'))`（detectJsonEntry）**不剥 BOM** → BOM 配置报 damaged；
+ * CLI 侧 jsonc 通道的 parseLoose **剥 BOM** → BOM 的 jsonc 仍能解析。两处口径不同，非对称必须照抄：
+ * AGENTS「Windows 宿主注意 2」明确 BOM 是本仓现实风险，实测踩过的正是这两条。 */
+test('S1 BOM：纯 JSON 宿主不得私自剥 BOM（CLI doctor 报 damaged，lifecycle 必须同口径）', () => {
+  const h = home()
+  const bomText = `\uFEFF${JSON.stringify({ mcpServers: { 'grape-kit': { command: 'npx' } } }, null, 2)}`
+  writeFileAt(join(WB(h), 'mcp.json'), bomText)
+  const r = rowOf(detectHostStatus({ home: h, env: baseEnv() }), 'workbuddy')
+  assert.equal(r.state, 'damaged', 'BOM 的纯 JSON 配置在 CLI 侧解析失败 → 必须报 damaged（不得剥 BOM 后报 installed）')
+  assert.ok(r.error, 'damaged 要带 error，让用户知道是 BOM 问题')
+})
+
+test('S1 BOM：jsonc 宿主照 CLI parseLoose 口径剥 BOM（codearts 报 installed，不误报 damaged）', () => {
+  const h = home()
+  const bomText = `\uFEFF{\n  // 码道全局 MCP\n  "mcp": { "grape-kit": { "type": "local", "command": "npx" } }\n}\n`
+  writeFileAt(join(CA(h), 'codearts_cli.jsonc'), bomText)
+  const r = rowOf(detectHostStatus({ home: h, env: baseEnv() }), 'codearts')
+  assert.equal(r.state, 'installed', 'jsonc 通道的 CLI parseLoose 剥 BOM，条目本身在 → installed')
+})
+
 test('S1 检出是纯只读：不改配置字节、不在空 HOME 里造目录', () => {
   const h = home()
   seedAllHosts(h)
@@ -213,6 +234,23 @@ test('S1b 单条漂移夹具：手删 mcp.grape 条目（保留 mcp 块）→ �
   writeFileAt(join(OC(h), 'opencode.jsonc'), '{ "mcp": { "other": { "type": "local" } } }\n')
   assert.equal(cliVerdict('opencode', h), 'absent')
   assert.equal(normState(rowOf(detectHostStatus({ home: h, env: cliEnv(h) }), 'opencode').state), 'absent')
+})
+
+test('S1b BOM 夹具（纯 JSON 宿主 workbuddy）：两侧都报 damaged，不得一侧 installed', skipOnWin, () => {
+  const h = home()
+  writeFileAt(join(WB(h), 'mcp.json'), `\uFEFF${JSON.stringify({ mcpServers: { 'grape-kit': { command: 'npx' } } }, null, 2)}`)
+  assert.equal(cliVerdict('workbuddy', h), 'damaged', 'CLI detectJsonEntry 不剥 BOM → 解析失败即 damaged')
+  assertConsistent(h, ['workbuddy'], 'BOM 纯 JSON 夹具')
+})
+
+test('S1b BOM 夹具（jsonc 宿主 codearts）：两侧都报 installed（BOM 由 parseLoose 剥掉）', skipOnWin, () => {
+  const h = home()
+  writeFileAt(
+    join(CA(h), 'codearts_cli.jsonc'),
+    `\uFEFF{\n  // 码道全局 MCP\n  "mcp": { "grape-kit": { "type": "local", "command": "npx" } }\n}\n`,
+  )
+  assert.equal(cliVerdict('codearts', h), 'installed', 'CLI parseLoose 剥 BOM → jsonc 照常解析')
+  assertConsistent(h, ['codearts'], 'BOM jsonc 夹具')
 })
 
 /* ── S2：安装形态判定（升级命令按形态生成，Spec §3.3） ── */
