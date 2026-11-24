@@ -804,14 +804,26 @@ function doctorDsh(probe) {
 
 /* ---------- 通用 JSON 容器宿主（openclaw / atomcode / trae） ---------- */
 
+/** JSON 宿主配置的解析判据：严格 JSON 优先，含注释/尾随逗号（jsonc）时按 parseLoose 宽松读取
+ *  （Spec：JSON 组与既有宿主一致，容忍注释/尾随逗号）。install / 卸载判定 / detect 共用，避免
+ *  「install 能读、uninstall 报损坏」的口径漂移。 */
+function parseJsonHost(text) {
+  try { return { ok: true, cfg: JSON.parse(text), lenient: false } } catch (e) {
+    try { return { ok: true, cfg: parseLoose(text), lenient: true } } catch { return { ok: false, error: e.message } }
+  }
+}
+
 /** 纯 JSON 宿主读写共用：解析失败显式报错（不静默重置，保住用户其它连接器） */
 function readJsonHostForWrite(file) {
   if (!existsSync(file)) return { originalText: null, cfg: {} }
   const originalText = readFileSync(file, 'utf8')
-  try { return { originalText, cfg: JSON.parse(originalText) } } catch (e) {
-    console.error(`${file} 解析失败（${e.message}），请先修复或移走该文件后重试`)
+  const parsed = parseJsonHost(originalText)
+  if (!parsed.ok) {
+    console.error(`${file} 解析失败（${parsed.error}），请先修复或移走该文件后重试`)
     process.exit(1)
   }
+  if (parsed.lenient) console.warn(`${file} 含注释/尾随逗号：已按宽松 JSON 读取，写入会规范化该文件（写前备份原文）`)
+  return { originalText, cfg: parsed.cfg }
 }
 
 /** JSON 容器条目卸载判定（dry-run 与真实卸载同源） */
@@ -819,14 +831,14 @@ function inspectJsonContainerUninstall(file, getContainer) {
   const steps = { path: file, exists: existsSync(file), status: STEP.ABSENT, beforeText: null, nextText: null }
   if (!steps.exists) return steps
   const text = readFileSync(file, 'utf8')
-  let cfg
-  try { cfg = JSON.parse(text) } catch { steps.status = STEP.DAMAGED; return steps }
-  const container = getContainer(cfg, false)
+  const parsed = parseJsonHost(text)
+  if (!parsed.ok) { steps.status = STEP.DAMAGED; return steps }
+  const container = getContainer(parsed.cfg, false)
   if (container && container['grape-kit']) {
     delete container['grape-kit']
     steps.status = STEP.REMOVE
     steps.beforeText = text
-    steps.nextText = JSON.stringify(cfg, null, 2) + '\n'
+    steps.nextText = JSON.stringify(parsed.cfg, null, 2) + '\n'
   }
   return steps
 }
@@ -834,13 +846,12 @@ function inspectJsonContainerUninstall(file, getContainer) {
 /** JSON 容器条目检出：解析失败带 error，doctor 可区分「未装配」与「配置损坏」 */
 function detectJsonContainer(file, getContainer) {
   if (!existsSync(file)) return { ok: false, path: file }
-  try {
-    const cfg = JSON.parse(readFileSync(file, 'utf8'))
-    const container = getContainer(cfg, false)
-    return { ok: !!(container && container['grape-kit']), path: file }
-  } catch (e) {
-    return { ok: false, path: file, error: e.message }
-  }
+  let text
+  try { text = readFileSync(file, 'utf8') } catch (e) { return { ok: false, path: file, error: e.message } }
+  const parsed = parseJsonHost(text)
+  if (!parsed.ok) return { ok: false, path: file, error: parsed.error }
+  const container = getContainer(parsed.cfg, false)
+  return { ok: !!(container && container['grape-kit']), path: file }
 }
 
 /* ---------- codex（OpenAI Codex CLI）：~/.codex/config.toml TOML 表 ---------- */
@@ -1066,6 +1077,12 @@ function hermesBlockLines(indent = '  ') {
   ]
 }
 
+/** 顶层 mcp_servers 键的两种安全形态：块映射头 / 空 flow map（可无损转为块格式） */
+const HERMES_HEADER_RE = /^mcp_servers:\s*(?:#.*)?$/
+const HERMES_EMPTY_FLOW_RE = /^mcp_servers:\s*\{\s*\}\s*(?:#.*)?$/
+/** 顶层 mcp_servers 键（含 `mcp_servers :` 与引号键）：用于「顶层键唯一」兜底校验 */
+const HERMES_TOP_KEY_RE = /^(?:mcp_servers|["']mcp_servers["'])\s*:/
+
 /** 摘除托管块（含标记行，行首缩进容错） */
 function stripHermesManaged(lines) {
   const start = lines.findIndex((l) => l.trim() === HERMES_BLOCK_START)
@@ -1075,19 +1092,49 @@ function stripHermesManaged(lines) {
   return { lines: [...lines.slice(0, start), ...lines.slice(end + 1)], removed: true }
 }
 
-/** 摘除用户手工写入的 mcp_servers.grape-kit（只删该键及其缩进子行；缩进不限定 2 空格） */
+/** 无法安全追加的 mcp_servers 形态：inline 非空映射、多行 flow map（`mcp_servers: {`）、序列、标量。
+ *  这些形态下追加托管条目会生成第二个顶级 mcp_servers 键，YAML last-wins 会把用户原有映射整体丢弃。 */
+function hermesMapConflict(lines) {
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i]
+    if (!HERMES_TOP_KEY_RE.test(l)) continue
+    if (HERMES_HEADER_RE.test(l) || HERMES_EMPTY_FLOW_RE.test(l)) continue
+    return { line: i + 1, text: l.trim() }
+  }
+  return null
+}
+
+/** 顶级 mcp_servers 键个数：写入前兜底校验，任何路径都不得产出两个同级键 */
+function hermesTopLevelKeyCount(text) {
+  return text.split('\n').filter((l) => HERMES_TOP_KEY_RE.test(l)).length
+}
+
+/** mcp_servers 段内既有子条目的缩进（默认两空格），用于托管条目对齐与同层判定 */
+function hermesSectionIndent(lines, header) {
+  for (let i = header + 1; i < lines.length; i++) {
+    const l = lines[i]
+    if (l.trim() === '' || l.trimStart().startsWith('#')) continue
+    const m = l.match(/^(\s+)\S/)
+    return m ? m[1] : '  '
+  }
+  return '  '
+}
+
+/** 摘除用户手工写入的 mcp_servers.grape-kit（只删该键及其缩进子行）。
+ *  必须与段内子条目**同缩进**：`mcp_servers.other.grape-kit` 这类更深层的同名键属于他人配置，不得命中。 */
 function stripHermesExistingEntry(lines) {
-  const header = lines.findIndex((l) => /^mcp_servers:\s*(?:#.*)?$/.test(l))
+  const header = lines.findIndex((l) => HERMES_HEADER_RE.test(l))
   if (header < 0) return lines
+  const sectionIndent = hermesSectionIndent(lines, header)
   let start = -1
-  let indent = 0
   for (let i = header + 1; i < lines.length; i++) {
     const l = lines[i]
     if (l.trim() !== '' && !l.trimStart().startsWith('#') && !/^\s/.test(l)) break
     const m = l.match(/^(\s+)grape-kit:\s*(?:#.*)?$/)
-    if (m) { start = i; indent = m[1].length; break }
+    if (m && m[1] === sectionIndent) { start = i; break }
   }
   if (start < 0) return lines
+  const indent = sectionIndent.length
   let end = start + 1
   while (end < lines.length) {
     const l = lines[end]
@@ -1099,28 +1146,20 @@ function stripHermesExistingEntry(lines) {
   return [...lines.slice(0, start), ...lines.slice(end)]
 }
 
+/** 段内同层是否已有 grape-kit 条目（其它 server 下的嵌套同名键不算） */
 function hermesHasEntry(text) {
   const lines = text.split('\n')
   if (lines.some((l) => l.trim() === HERMES_BLOCK_START)) return true
-  const header = lines.findIndex((l) => /^mcp_servers:\s*(?:#.*)?$/.test(l))
+  const header = lines.findIndex((l) => HERMES_HEADER_RE.test(l))
   if (header < 0) return false
+  const sectionIndent = hermesSectionIndent(lines, header)
   for (let i = header + 1; i < lines.length; i++) {
     const l = lines[i]
     if (l.trim() !== '' && !l.trimStart().startsWith('#') && !/^\s/.test(l)) break
-    if (/^\s+grape-kit:\s*(?:#.*)?$/.test(l)) return true
+    const m = l.match(/^(\s+)grape-kit:\s*(?:#.*)?$/)
+    if (m && m[1] === sectionIndent) return true
   }
   return false
-}
-
-/** mcp_servers 段内既有子条目的缩进（默认两空格），用于托管条目对齐 */
-function hermesSectionIndent(lines, header) {
-  for (let i = header + 1; i < lines.length; i++) {
-    const l = lines[i]
-    if (l.trim() === '' || l.trimStart().startsWith('#')) continue
-    const m = l.match(/^(\s+)\S/)
-    return m ? m[1] : '  '
-  }
-  return '  '
 }
 
 function installHermes() {
@@ -1131,15 +1170,18 @@ function installHermes() {
     process.exit(1)
   }
   let lines = originalText === null ? [] : originalText.split('\n')
-  const inlineMap = lines.findIndex((l) => /^mcp_servers:\s*\{(.*)\}\s*(?:#.*)?$/.test(l))
-  if (inlineMap >= 0 && !/^mcp_servers:\s*\{\s*\}\s*(?:#.*)?$/.test(lines[inlineMap])) {
-    console.error(`检测到非空 inline mcp_servers 映射，追加托管条目会生成重复顶级键；已拒绝安装，请先将其改为块格式：${p.config}`)
+  const conflict = hermesMapConflict(lines)
+  if (conflict) {
+    console.error(`检测到无法安全追加的 mcp_servers 取值（第 ${conflict.line} 行：${conflict.text}）——inline 非空映射 / 多行 flow map / 序列下追加托管条目会生成第二个顶级 mcp_servers 键，YAML last-wins 会丢弃你原有的映射；已拒绝安装。请先改为块格式后重跑：`)
+    console.error('  mcp_servers:')
+    console.error('    <宿主条目>')
+    console.error(`  文件：${p.config}`)
     process.exit(1)
   }
   lines = stripHermesManaged(lines).lines
   lines = stripHermesExistingEntry(lines)
-  const header = lines.findIndex((l) => /^mcp_servers:\s*(?:#.*)?$/.test(l))
-  const inlineEmpty = lines.findIndex((l) => /^mcp_servers:\s*\{\s*\}\s*(?:#.*)?$/.test(l))
+  const header = lines.findIndex((l) => HERMES_HEADER_RE.test(l))
+  const inlineEmpty = lines.findIndex((l) => HERMES_EMPTY_FLOW_RE.test(l))
   if (inlineEmpty >= 0) lines[inlineEmpty] = 'mcp_servers:'
   const h = header >= 0 ? header : inlineEmpty
   if (h >= 0) {
@@ -1150,6 +1192,11 @@ function installHermes() {
     lines.push('mcp_servers:', ...hermesBlockLines())
   }
   const next = lines.join('\n').replace(/\n*$/, '\n')
+  const keys = hermesTopLevelKeyCount(next)
+  if (keys !== 1) {
+    console.error(`内部校验失败：生成结果包含 ${keys} 个顶级 mcp_servers 键（预期 1 个，重复键会让 YAML 丢弃用户映射）；已拒绝写入 ${p.config}，原文件保持不变`)
+    process.exit(1)
+  }
   mkdirSync(dirname(p.config), { recursive: true })
   const backup = backupOf(p.config, originalText)
   writeFileSync(p.config, next)
@@ -1158,28 +1205,17 @@ function installHermes() {
   console.log('hermes：重启会话后加载 grape-kit 的 MCP 工具；grape-remote skill 已复制到 skills/')
 }
 
-function uninstallHermes() {
+/** 卸载决策：dry-run 预览与真实卸载同源（QA#PR22 P1：预览报「将移除」而执行 exit 1 的口径漂移）。
+ *  action: missing | damaged | absent | remove */
+function hermesUninstallDecision() {
   const p = hermesPaths()
-  if (!existsSync(p.config)) {
-    console.log(`未找到 ${p.config}，无需卸载`)
-  } else {
-    const text = readFileSync(p.config, 'utf8')
-    const stripped = stripHermesManaged(text.split('\n'))
-    if (stripped.incomplete) {
-      console.error(`检测到不完整托管块（有起始标记、缺结束标记），已拒绝卸载：${p.config}`)
-      process.exit(1)
-    }
-    const nextLines = stripHermesExistingEntry(stripped.lines)
-    const next = nextLines.join('\n').replace(/\n*$/, '\n')
-    if (next === text) console.log('未发现 mcp_servers.grape-kit 条目，跳过')
-    else {
-      const backup = backupOf(p.config, text)
-      writeFileSync(p.config, next)
-      console.log(`已移除 mcp_servers.grape-kit 条目（备份: ${backup}）`)
-    }
-  }
-  const steps = skillUninstallSteps(p.skillsDir)
-  applySkillUninstall(steps)
+  if (!existsSync(p.config)) return { path: p.config, skillsDir: p.skillsDir, action: 'missing' }
+  const text = readFileSync(p.config, 'utf8')
+  const stripped = stripHermesManaged(text.split('\n'))
+  if (stripped.incomplete) return { path: p.config, skillsDir: p.skillsDir, action: 'damaged', text }
+  const next = stripHermesExistingEntry(stripped.lines).join('\n').replace(/\n*$/, '\n')
+  if (!hermesHasEntry(text) || next === text) return { path: p.config, skillsDir: p.skillsDir, action: 'absent', text, next }
+  return { path: p.config, skillsDir: p.skillsDir, action: 'remove', text, next }
 }
 
 const HERMES_COPY = {
@@ -1188,22 +1224,40 @@ const HERMES_COPY = {
   removed: (s, backup) => `已移除 mcp_servers.grape-kit 条目（备份: ${backup}）`,
   preview: (s) => `将移除 mcp_servers.grape-kit 条目（${s.path}）`,
 }
-function inspectUninstallHermes() {
-  const p = hermesPaths()
-  const steps = { path: p.config, exists: existsSync(p.config), status: STEP.ABSENT, beforeText: null, nextText: null, ...skillUninstallSteps(p.skillsDir) }
-  if (!existsSync(p.config)) return steps
-  const text = readFileSync(p.config, 'utf8')
-  if (hermesHasEntry(text)) steps.status = STEP.REMOVE
+
+/** 决策 → 共享卸载步骤：plan 与 apply 都从这里取，判定与动作单源 */
+function hermesUninstallSteps(d) {
+  const steps = { path: d.path, exists: d.action !== 'missing', status: STEP.ABSENT, beforeText: null, nextText: null, ...skillUninstallSteps(d.skillsDir) }
+  if (d.action === 'remove') {
+    steps.status = STEP.REMOVE
+    steps.beforeText = d.text
+    steps.nextText = d.next
+    // YAML 不走 writeValidated 的 JSON 结构校验：写前备份 + 原样落盘
+    steps.writeNext = () => {
+      const backup = backupOf(d.path, d.text)
+      writeFileSync(d.path, d.next)
+      return backup
+    }
+  }
   return steps
 }
-function planUninstallHermes() { return planUninstallSteps(inspectUninstallHermes(), HERMES_COPY) }
+
+/** 不完整托管块的同一句结论：预览与执行共用，避免「预览说移除、执行说拒绝」 */
+const hermesDamagedLine = (path) => `检测到不完整托管块（有起始标记、缺结束标记），已拒绝卸载：${path}`
+
+function planUninstallHermes() {
+  const d = hermesUninstallDecision()
+  if (d.action === 'damaged') return [`${hermesDamagedLine(d.path)}（--dry-run 仅预览，未改动文件；请先补齐结束标记或手工删除该块后重跑）`]
+  return planUninstallSteps(hermesUninstallSteps(d), HERMES_COPY)
+}
+
 function applyUninstallHermes() {
-  const steps = inspectUninstallHermes()
-  if (steps.status === STEP.REMOVE) uninstallHermes()
-  else {
-    console.log(steps.exists ? HERMES_COPY.absent(steps) : HERMES_COPY.missing(steps))
-    applySkillUninstall(steps)
+  const d = hermesUninstallDecision()
+  if (d.action === 'damaged') {
+    console.error(hermesDamagedLine(d.path))
+    process.exit(1)
   }
+  applyUninstallSteps(hermesUninstallSteps(d), HERMES_COPY)
 }
 function detectHermes() {
   const p = hermesPaths()
@@ -1676,11 +1730,13 @@ function damagedEntryLine(steps) {
 }
 
 /** 各宿主卸载流程共用的渲染层（QA#PR13 判断项 7：8 处 if/else 复制收敛到这里）。
- *  copy 只提供文案差异，判定与动作单源——预览与执行走同一 steps，不会再出现「预览说 A、执行做 B」。 */
+ *  copy 只提供文案差异，判定与动作单源——预览与执行走同一 steps，不会再出现「预览说 A、执行做 B」。
+ *  `steps.writeNext`：非 JSON 宿主（hermes 的 YAML）自带的落盘钩子——writeValidated 的 JSON 结构校验
+ *  对 YAML/TOML 不适用。钩子返回备份路径；缺省走 writeValidated（JSON 宿主）。 */
 function applyUninstallSteps(steps, copy) {
   if (!steps.exists) console.log(copy.missing(steps))
   else if (steps.status === STEP.REMOVE) {
-    const backup = writeValidated(steps.path, steps.nextText, steps.beforeText)
+    const backup = steps.writeNext ? steps.writeNext() : writeValidated(steps.path, steps.nextText, steps.beforeText)
     console.log(copy.removed(steps, backup))
   } else if (steps.status === STEP.DAMAGED) console.log(damagedEntryLine(steps))
   else console.log(copy.absent(steps))
@@ -1928,7 +1984,7 @@ function detectHosts() {
   if (existsSync(join(home, '.config', 'opencode'))) found.push('opencode')
   if (existsSync(join(home, '.codex'))) found.push('codex')
   if (existsSync(join(home, '.openclaw'))) found.push('openclaw')
-  if (existsSync(join(home, '.hermes'))) found.push('hermes')
+  if (existsSync(hermesPaths().home)) found.push('hermes')   // HERMES_HOME 覆盖时以覆盖路径为准
   if (existsSync(atomcodePaths().root)) found.push('atomcode')
   if (existsSync(traePaths().config)) found.push('trae')
   return found

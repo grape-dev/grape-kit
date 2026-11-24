@@ -19,7 +19,7 @@
 - hermes：`~/.hermes/config.yaml` 的 `mcp_servers.grape-kit`（保注释/保序）+ `grape-remote` skill 副本到 `~/.hermes/skills/`；`HERMES_HOME` / `GRAPE_HERMES_CONFIG` 可覆盖。
 - atomcode：`~/.atomcode/mcp.json` 的 `mcpServers.grape-kit`，`ATOMCODE_HOME` 可覆盖根路径。
 - trae：项目级 `.trae/mcp.json` 的 `mcpServers.grape-kit`（仅项目级语义，不做用户级兜底），`GRAPE_TRAE_CONFIG` 可覆盖；路径对齐 Trae 官方 MCP 入口。
-- 每个新宿主补 fake HOME 单测（含 TOML 注释/他人表保留、YAML 保注释与条目隔离、JSON 容器兼容、dry-run 不动盘、幂等与备份），单测 270→280；README / README.zh 新增 10 宿主支持矩阵与 5 个宿主专段。
+- 每个新宿主补 fake HOME 单测（含 TOML 注释/他人表保留、YAML 保注释与条目隔离、JSON 容器兼容、dry-run 不动盘、幂等与备份），单测 270→291；README / README.zh 新增 10 宿主支持矩阵与 5 个宿主专段。
 
 ### Changed
 
@@ -38,6 +38,12 @@
 - trae 探测收窄为 `.trae/mcp.json` 文件存在，避免仅有空目录时误判。
 - hermes 手写条目缩进泛化（不再只认 2 空格）：4 空格等合法 YAML 条目安装时去重、doctor 可检出；托管条目缩进对齐既有段落。
 - hermes 遇非空 inline `mcp_servers` 映射时中止安装并保持文件原样，避免生成重复顶级键。
+- hermes 卸载判定收敛为单一 `hermesUninstallDecision()`：`--dry-run` 预览与执行共用同一决策，不完整托管块下预览不再承诺「将移除」而执行 exit 1；同一决策下不再二次读盘。
+- hermes 手写条目按 `mcp_servers` 段内缩进精确匹配：`mcp_servers.other.grape-kit` 这类其它 server 下的同名嵌套键不再被误删、不再被误判为已安装。
+- hermes 对无法安全追加的 `mcp_servers` 取值（inline 非空映射、多行 flow map、序列/标量）一律中止并保持文件原样，写入前另做「顶级键唯一」兜底校验，杜绝 YAML last-wins 丢弃用户映射。
+- JSON 宿主（openclaw / atomcode / trae）改用宽松解析判据：含注释/尾随逗号的配置不再直接 exit 1，写入前备份原文并在 stderr 披露规范化。
+- `test/setup-dsh.test.mjs` 的 `run()` 补齐 `HERMES_HOME` / `GRAPE_*_CONFIG` / `ATOMCODE_HOME` / `GRAPE_HOME` 置空：`--target all` 不再因继承变量写进真实用户目录。
+- `detectHosts` 的 hermes 探测改用 `hermesPaths().home`，`HERMES_HOME` 覆盖时可被自动命中。
 - codex `uninstall --dry-run` 在文件仅剩托管条目时明确披露「将删除整个文件」，预览与执行同源。
 
 ## 0.4.0 (2026-11-23)
