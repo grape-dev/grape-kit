@@ -11,9 +11,31 @@ import { dirname, join } from 'node:path'
 import { grapeHome } from './api.mjs'
 
 const CACHE_TTL_MS = 24 * 3600 * 1000
-const REGISTRY = 'https://registry.npmjs.org'
+
+/** registry 访问单源（Issue #27 QA SJ2）：URL 与有界超时由本模块导出，
+ *  src/lifecycle.mjs 的版本全景/主动检查直接复用，不再自带第二份常量与第二份 fetch。 */
+export const REGISTRY_URL = 'https://registry.npmjs.org'
+export const REGISTRY_TIMEOUT_MS = 5000
 // GRAPE_HOME 覆盖点单源：与凭据文件通道共用 src/api.mjs 的 grapeHome()（QA P2 去重）
 const cachePath = () => join(grapeHome(), 'grape-kit-update-check.json')
+
+/**
+ * 取 npm registry 上的 latest 版本号（best-effort）。
+ * 任何失败（网络/非 2xx/响应不可解析/无 version 字段）一律返回空串，由调用方自行降级——
+ * 版本提示是尽力而为，绝不影响工具可用性。
+ * @param {{fetchImpl?: Function, timeoutMs?: number}} [opts]
+ * @returns {Promise<string>}
+ */
+export async function fetchLatestVersion({ fetchImpl = fetch, timeoutMs = REGISTRY_TIMEOUT_MS } = {}) {
+  try {
+    const r = await fetchImpl(`${REGISTRY_URL}/@grape-dev/grape-kit/latest`, { signal: AbortSignal.timeout(timeoutMs) })
+    if (!r || !r.ok) return ''
+    const d = await r.json()
+    return d && typeof d.version === 'string' ? d.version.trim() : ''
+  } catch {
+    return ''
+  }
+}
 
 /** 写缓存：目录不存在时先创建（首次运行 HOME 下通常没有 ~/.grape） */
 function writeCache(data) {
@@ -106,9 +128,7 @@ export async function checkUpdateStatus(localVersion, { now = Date.now(), fetchI
   } catch { /* 缓存损坏 → 视为无缓存 */ }
 
   try {
-    const r = await fetchImpl(`${REGISTRY}/@grape-dev/grape-kit/latest`, { signal: AbortSignal.timeout(5000) })
-    const d = r.ok ? await r.json() : null
-    const latest = d && typeof d.version === 'string' ? d.version : ''
+    const latest = await fetchLatestVersion({ fetchImpl })
     const newer = !!latest && isNewerVersion(latest, localVersion)
     writeCache({ checkedAt: now, latest, notified: newer ? latest : '' })
     if (newer) return { state: 'newer', latest, cached: false }

@@ -16,7 +16,8 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawnSync as nodeSpawnSync } from 'node:child_process'
 import { api as defaultApi, grapeHome, getBaseUrl, npxCacheRoot, resolveCredentials } from './api.mjs'
-import { isNewerVersion } from './update-check.mjs'
+// registry 访问单源（QA SJ2）：URL / 有界超时 / 取数实现都来自 update-check.mjs，本模块不再自带第二份
+import { fetchLatestVersion, isNewerVersion, REGISTRY_TIMEOUT_MS } from './update-check.mjs'
 
 /** 五宿主标识：与 `grape-kit.mjs` 的 `SUPPORTED_TARGETS`（opencode/workbuddy/codearts/officeace/dsh）逐一对应 */
 export const HOST_NAMES = ['opencode', 'workbuddy', 'codearts', 'officeace', 'dsh']
@@ -412,8 +413,6 @@ export function updateDecision({
  * 每个外部通道都 best-effort：单一通道失败只把该字段降级为 unavailable，不阻塞其余字段。
  * 幂等只读：本函数不写任何缓存（被动提醒的 24h 缓存归 update-check.mjs，语义解耦）。 */
 
-const NPM_REGISTRY = 'https://registry.npmjs.org'
-const REGISTRY_TIMEOUT_MS = 5000
 const CLI_HINT = '未安装（可选：pip install git+https://gitcode.com/grape-dev/grape-cli.git）'
 
 /** 本地 kit 版本：与 src/server.mjs 同源（包根 package.json） */
@@ -425,20 +424,8 @@ export function readKitVersion() {
   }
 }
 
-/**
- * npm registry latest（5s 有界超时；任何失败返回 ''，调用方自行降级为 unavailable）。
- * @param {{fetchImpl?: Function, timeoutMs?: number}} [opts]
- */
-export async function fetchLatestVersion({ fetchImpl = fetch, timeoutMs = REGISTRY_TIMEOUT_MS } = {}) {
-  try {
-    const r = await fetchImpl(`${NPM_REGISTRY}/@grape-dev/grape-kit/latest`, { signal: AbortSignal.timeout(timeoutMs) })
-    if (!r || !r.ok) return ''
-    const d = await r.json()
-    return d && typeof d.version === 'string' ? d.version.trim() : ''
-  } catch {
-    return ''
-  }
-}
+/** npm registry latest 的对外接口：直接复用 update-check.mjs 的实现（单源，失败返回 '' 由调用方降级） */
+export { fetchLatestVersion }
 
 /** 凭据来源摘要：只给来源与档位，绝不含 token 明文（AGENTS 红线） */
 export function credentialSummary(env = process.env) {

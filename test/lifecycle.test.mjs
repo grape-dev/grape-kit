@@ -575,7 +575,8 @@ test('SJ2 registry 取数单源：lifecycle 复用 update-check 的实现与常�
   assert.equal(REGISTRY_TIMEOUT_MS, 5000, '5s 有界超时单源')
   const src = lifecycleSource()
   assert.doesNotMatch(src, /registry\.npmjs\.org/, 'lifecycle 不得再自带 registry URL 字面量')
-  assert.doesNotMatch(src, /AbortSignal\.timeout\(/, 'lifecycle 不得再自带一份带超时的 fetch')
+  // 只约束 registry 通道；probeServer 取 openapi.json 属另一端点，自带超时是正当的
+  assert.doesNotMatch(src, /grape-kit\/latest/, 'lifecycle 不得再自拼 registry 取数 URL')
 })
 
 test('SJ2 fetchLatestVersion：成功取 version（去空白），非 2xx / 抛错 / 无 version 一律空串', async () => {
