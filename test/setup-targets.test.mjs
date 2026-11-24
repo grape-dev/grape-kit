@@ -45,6 +45,9 @@ function run(args, h, extraEnv = {}) {
       GRAPE_TRAE_CONFIG: '',
       HERMES_HOME: '',
       ATOMCODE_HOME: '',
+      // dsh 是第 6 个已支持宿主（#21）：缺 DSH_HOME 隔离时子进程会走真实 ~/.dsh，
+      // 使「零宿主痕迹」用例假绿（反而命中真实 dsh），并对真实宿主配置执行卸载
+      DSH_HOME: '',
       ...extraEnv,
     },
     timeout: 30_000,
