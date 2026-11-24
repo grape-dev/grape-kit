@@ -473,3 +473,55 @@ for (const variant of SERVER_VARIANTS) {
     for (const re of variant.noNote) assert.doesNotMatch(md, re, '不得混入其它分支的文案')
   })
 }
+
+/* ── QA 第 3 轮（PR #21）Q4/Q5/Q6：dismiss 状态在渲染面必须如实 ── */
+
+test('Q4 grape_kit_check_update：落盘失败渲染「记录失败（路径不可写）」，不得虚报「已记录」', async () => {
+  const L = fakeLifecycle({
+    async checkForUpdate() {
+      return {
+        currentVersion: '0.4.0', latestVersion: '0.5.0', state: 'newer', updateAvailable: true, dismissed: false,
+        dismiss: { version: '0.5.0', at: 0, file: '/h/.grape/grape-kit-dismiss.json', ok: false, error: 'ENOTDIR: not a directory, mkdir /h/not-a-dir/.grape' },
+        updateNotice: '有新版本 0.4.0 → 0.5.0（npm i -g @grape-dev/grape-kit 更新）',
+      }
+    },
+  })
+  const t = findTool('grape_kit_check_update')
+  const md = t.render(await t.run({ dismiss: true }, { lifecycle: L }))
+  assert.match(md, /记录失败/, '写盘失败必须显式报失败')
+  assert.match(md, /路径不可写|ENOTDIR/, '带出失败原因与路径')
+  assert.doesNotMatch(md, /已记录忽略版本/, '虚报成功会让用户下次启动被同样提醒')
+  assert.doesNotMatch(md, /3 天内不再提示/, '未生效的冷却不得承诺')
+})
+
+test('Q5 grape_kit_check_update：无版本可记时渲染「未记录」并给 dismissVersion 指引', async () => {
+  const L = fakeLifecycle({
+    async checkForUpdate() {
+      return {
+        currentVersion: '0.4.0', latestVersion: '', state: 'unavailable', updateAvailable: false, dismissed: false,
+        dismiss: null,
+        dismissSkipped: '未取到 npm 最新版且未指定 dismissVersion：registry 不可达时请显式传 dismissVersion 再试',
+        updateNotice: '检测不可用（npm registry 不可达或响应异常），不影响工具可用性',
+      }
+    },
+  })
+  const t = findTool('grape_kit_check_update')
+  const md = t.render(await t.run({ dismiss: true }, { lifecycle: L }))
+  assert.match(md, /未记录/, '没记成就不能沉默，否则用户以为已忽略')
+  assert.match(md, /dismissVersion/, '给出可执行的补救参数')
+  assert.doesNotMatch(md, /3 天内不再提示/, '不得承诺未落盘的冷却')
+})
+
+test('Q6 grape_kit_version：dismiss 冷却中渲染「已忽略」，不得再说「有可用更新」或「已是最新」', () => {
+  const t = findTool('grape_kit_version')
+  const md = t.render({
+    kitVersion: '0.4.0', latestVersion: '0.5.0', updateAvailable: false, updateState: 'dismissed',
+    updateNotice: '0.5.0 已被用户忽略，冷却至 2026-11-27T12:00:00.000Z（新版本出现会重新提醒）',
+    grapeCli: { status: 'ok', bin: 'grape', version: 'grape 0.3.4' },
+    server: { baseUrl: 'https://grape.test', reachable: true, contractVersion: '2.1.0' },
+    credentials: { configured: true, sourceKind: 'env', source: '环境变量 GRAPE_API_TOKEN', hint: '' },
+  })
+  assert.match(md, /已忽略|忽略/, 'dismiss 后全景与 check_update 必须同口径')
+  assert.doesNotMatch(md, /有可用更新/, '已忽略的版本不得再标「有可用更新」')
+  assert.doesNotMatch(md, /已是最新/, '被忽略不等于已是最新：两者是不同结论')
+})

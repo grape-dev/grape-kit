@@ -585,3 +585,75 @@ test('SJ2 fetchLatestVersion：成功取 version（去空白），非 2xx / 抛�
   assert.equal(await fetchLatestVersion({ fetchImpl: async () => { throw new Error('network down') } }), '')
   assert.equal(await fetchLatestVersion({ fetchImpl: async () => ({ ok: true, json: async () => ({}) }) }), '')
 })
+
+/* ── QA 第 3 轮（PR #21）Q4/Q5/Q6：dismiss 的三处口径必须与磁盘真实一致 ──
+ * Q4 落盘失败被 catch 吞掉仍返回 {version,at} → 工具渲染「已记录忽略版本…3 天内不再提示」，
+ *    而下次启动照旧提醒（本次结论与下次结论互相矛盾）；
+ * Q5 registry 不可达时兜底记 currentVersion，而该版本永不会触发冷却（承诺无效）；
+ * Q6 aggregateVersion 不读 dismiss 状态 → 全景说「有可用更新」，check_update 说「已忽略」。 */
+
+/** 落盘必失败的 GRAPE_HOME：父路径是普通文件 → mkdirSync 报 ENOTDIR（不依赖 chmod/root 权限语义） */
+function blockedGraveHome() {
+  const h = home()
+  const file = join(h, 'not-a-dir')
+  writeFileSync(file, 'x')
+  return { env: { ...baseEnv(), GRAPE_HOME: join(file, '.grape') }, file }
+}
+
+test('Q4 recordDismiss 落盘失败返回 ok:false + 原因，不留下半截状态', () => {
+  const { env } = blockedGraveHome()
+  const r = recordDismiss('0.5.0', { env, now: T0 })
+  assert.equal(r.ok, false, '写盘失败必须如实返回（否则调用方会当真）')
+  assert.equal(r.version, '0.5.0')
+  assert.ok(r.error, '失败原因要带回：用户需要知道哪条路径不可写')
+  assert.equal(readDismissState({ env }), null, '失败后不得读到一份「已记录」的假状态')
+})
+
+test('Q4 checkForUpdate：落盘失败不得判 dismissed（与下次启动的结论一致）', async () => {
+  const { env } = blockedGraveHome()
+  const r = await checkForUpdate({
+    pkgVersion: '0.4.0', env, fetchImpl: stubFetch({ latest: '0.5.0' }), now: T0, dismiss: true,
+  })
+  assert.equal(r.dismiss.ok, false)
+  assert.notEqual(r.state, 'dismissed', '写盘失败还判「已忽略」= 用户在下次启动被同样的提醒打脸')
+  assert.equal(r.state, 'newer')
+  assert.equal(r.updateAvailable, true, '未生效的忽略不得把更新说成不存在')
+})
+
+test('Q5 registry 不可达且未传 dismissVersion：不落盘当前版本，也不承诺冷却', async () => {
+  const base = home()
+  const env = { ...baseEnv(), GRAPE_HOME: join(base, '.grape') }
+  const r = await checkForUpdate({
+    pkgVersion: '0.4.0', env, fetchImpl: stubFetch({ npmThrows: true }), now: T0, dismiss: true,
+  })
+  assert.equal(r.dismiss, null, '当前版本不是「可更新版本」，记它永远不会触发冷却')
+  assert.ok(r.dismissSkipped, '必须说清「没记」的原因，否则用户以为已忽略')
+  assert.match(r.dismissSkipped, /dismissVersion/, '给出可执行的补救参数')
+  assert.equal(r.state, 'unavailable')
+  assert.ok(!existsSync(join(base, '.grape', 'grape-kit-dismiss.json')), '不得落盘不可冷却的版本')
+})
+
+test('Q6 aggregateVersion 读 dismiss 状态：全景与 check_update 同口径', async () => {
+  const base = home()
+  const env = { ...baseEnv(), GRAPE_HOME: join(base, '.grape') }
+  recordDismiss('0.5.0', { env, now: T0 })
+  const r = await aggregateVersion({
+    pkgVersion: '0.4.0', env, now: T0 + DAY,
+    fetchImpl: stubFetch({ latest: '0.5.0' }), spawnImpl: okSpawn,
+    apiModule: { scenesMarket: async () => [] },
+  })
+  assert.equal(r.updateState, 'dismissed', '忽略后全景不得再报「有可用更新」')
+  assert.equal(r.updateAvailable, false)
+  assert.match(r.updateNotice, /忽略/, '全景文案与 check_update 的「已忽略」同口径')
+})
+
+test('Q6 aggregateVersion 不写盘：只读聚合读 dismiss 状态但不落任何文件', async () => {
+  const base = home()
+  const env = { ...baseEnv(), GRAPE_HOME: join(base, '.grape') }
+  await aggregateVersion({
+    pkgVersion: '0.4.0', env, now: T0,
+    fetchImpl: stubFetch({ latest: '0.5.0' }), spawnImpl: okSpawn,
+    apiModule: { scenesMarket: async () => [] },
+  })
+  assert.deepEqual(readdirSync(base), [], '版本全景是只读诊断：不得创建状态文件/目录')
+})
