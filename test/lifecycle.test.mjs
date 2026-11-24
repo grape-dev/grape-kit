@@ -4,7 +4,8 @@ import { spawnSync } from 'node:child_process'
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
-import { aggregateVersion, checkForUpdate, detectHostStatus, detectInstallForm, readDismissState, recordDismiss, updateDecision, HOST_NAMES, SYNC_POINTERS } from '../src/lifecycle.mjs'
+import { aggregateVersion, checkForUpdate, detectHostStatus, detectInstallForm, readDismissState, recordDismiss, updateDecision, HOST_NAMES, SYNC_POINTERS, fetchLatestVersion } from '../src/lifecycle.mjs'
+import { fetchLatestVersion as ucFetchLatestVersion, REGISTRY_URL, REGISTRY_TIMEOUT_MS } from '../src/update-check.mjs'
 
 /* Issue #27 · 自管理 5 工具的公开 seam：
  * S1  detectHostStatus —— 五宿主只读检出（纯函数 + 显式 home/env 注入，不读进程真实 HOME）
@@ -564,4 +565,22 @@ test('P3/SJ1 同步指针不得回退成行号（行号随无关改动漂移，�
   for (const { symbol } of SYNC_POINTERS) {
     assert.ok(src.includes(symbol), `lifecycle.mjs 注释应点名 ${symbol}（否则指针等于没有）`)
   }
+})
+
+/* ── QA 复审（PR #21）SJ2：registry 访问与 src/update-check.mjs 单源，不再两份常量/两份 fetch ──
+ * 两份实现漂移过一次的表面症状是「同一台机器两种超时/两种 URL」，而单源只需 import。 */
+test('SJ2 registry 取数单源：lifecycle 复用 update-check 的实现与常量，不自带第二份', () => {
+  assert.equal(fetchLatestVersion, ucFetchLatestVersion, 'lifecycle 必须复用 update-check 的 fetchLatestVersion（同引用）')
+  assert.equal(REGISTRY_URL, 'https://registry.npmjs.org', 'registry URL 常量应由 update-check 导出单源')
+  assert.equal(REGISTRY_TIMEOUT_MS, 5000, '5s 有界超时单源')
+  const src = lifecycleSource()
+  assert.doesNotMatch(src, /registry\.npmjs\.org/, 'lifecycle 不得再自带 registry URL 字面量')
+  assert.doesNotMatch(src, /AbortSignal\.timeout\(/, 'lifecycle 不得再自带一份带超时的 fetch')
+})
+
+test('SJ2 fetchLatestVersion：成功取 version（去空白），非 2xx / 抛错 / 无 version 一律空串', async () => {
+  assert.equal(await fetchLatestVersion({ fetchImpl: async () => ({ ok: true, json: async () => ({ version: ' 0.5.0 ' }) }) }), '0.5.0')
+  assert.equal(await fetchLatestVersion({ fetchImpl: async () => ({ ok: false, status: 500, json: async () => ({}) }) }), '')
+  assert.equal(await fetchLatestVersion({ fetchImpl: async () => { throw new Error('network down') } }), '')
+  assert.equal(await fetchLatestVersion({ fetchImpl: async () => ({ ok: true, json: async () => ({}) }) }), '')
 })
