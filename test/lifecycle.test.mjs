@@ -4,8 +4,7 @@ import { spawnSync } from 'node:child_process'
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
-import { aggregateVersion, checkForUpdate, credentialSummary, detectHostStatus, detectInstallForm, readDismissState, recordDismiss, updateDecision, HOST_NAMES, SYNC_POINTERS, UPDATE_STATE, fetchLatestVersion } from '../src/lifecycle.mjs'
-import { fetchLatestVersion as ucFetchLatestVersion, REGISTRY_URL, REGISTRY_TIMEOUT_MS } from '../src/update-check.mjs'
+import { aggregateVersion, checkForUpdate, credentialSummary, detectHostStatus, detectInstallForm, readDismissState, recordDismiss, updateDecision, HOST_NAMES, REGISTRY_TIMEOUT_MS, REGISTRY_URL, SYNC_POINTERS, UPDATE_STATE, fetchLatestVersion } from '../src/lifecycle.mjs'
 
 /* Issue #27 · 自管理 5 工具的公开 seam：
  * S1  detectHostStatus —— 五宿主只读检出（纯函数 + 显式 home/env 注入，不读进程真实 HOME）
@@ -567,19 +566,35 @@ test('P3/SJ1 同步指针不得回退成行号（行号随无关改动漂移，�
   }
 })
 
-/* ── QA 复审（PR #21）SJ2：registry 访问与 src/update-check.mjs 单源，不再两份常量/两份 fetch ──
- * 两份实现漂移过一次的表面症状是「同一台机器两种超时/两种 URL」，而单源只需 import。 */
-test('SJ2 registry 取数单源：lifecycle 复用 update-check 的实现与常量，不自带第二份', () => {
-  assert.equal(fetchLatestVersion, ucFetchLatestVersion, 'lifecycle 必须复用 update-check 的 fetchLatestVersion（同引用）')
-  assert.equal(REGISTRY_URL, 'https://registry.npmjs.org', 'registry URL 常量应由 update-check 导出单源')
-  assert.equal(REGISTRY_TIMEOUT_MS, 5000, '5s 有界超时单源')
-  const src = lifecycleSource()
-  assert.doesNotMatch(src, /registry\.npmjs\.org/, 'lifecycle 不得再自带 registry URL 字面量')
-  // 只约束 registry 通道；probeServer 取 openapi.json 属另一端点，自带超时是正当的
-  assert.doesNotMatch(src, /grape-kit\/latest/, 'lifecycle 不得再自拼 registry 取数 URL')
+/* ── 硬约束 ③（QA 第 3 轮）：`src/update-check.mjs` 是红线文件，PR diff 中不得出现 ──
+ * 上一轮 SJ2 为「registry 单源」改了它（+24-4），Spec 硬约束 ③ 需人工拍板放宽；无裁定即回退——
+ * lifecycle 自持 URL/超时/取数，只从红线文件 import 纯 semver 函数。红线文件是否被改由
+ * 下面两条「不得出现 SJ2 导出面」的断言兜住（不依赖 git 历史，浅克隆同样成立）。 */
+test('硬约束 ③ lifecycle 只 import update-check 的纯 semver 函数（registry 面自持）', () => {
+  const imp = /import\s*\{([^}]*)\}\s*from\s*'\.\/update-check\.mjs'/.exec(lifecycleSource())
+  assert.ok(imp, 'lifecycle 仍应复用 update-check 的纯 semver 函数')
+  assert.deepEqual(
+    imp[1].split(',').map((s) => s.trim()).filter(Boolean), ['isNewerVersion'],
+    '只允许 import isNewerVersion（纯函数）；registry 常量与取数不得再改红线文件去导出',
+  )
 })
 
-test('SJ2 fetchLatestVersion：成功取 version（去空白），非 2xx / 抛错 / 无 version 一律空串', async () => {
+test('硬约束 ③ 红线文件 update-check.mjs 未新增导出面（SJ2 回退后不得复发）', () => {
+  const uc = readFileSync(new URL('../src/update-check.mjs', import.meta.url), 'utf8')
+  assert.doesNotMatch(uc, /export\s+const\s+REGISTRY_(URL|TIMEOUT_MS)/, 'registry 常量不得从红线文件导出（SJ2 需人工放宽后才能改）')
+  assert.doesNotMatch(uc, /export\s+(async\s+)?function\s+fetchLatestVersion/, 'fetch 不得从红线文件抽出导出（行为等价的改动也属红线内）')
+  assert.match(uc, /registry\.npmjs\.org/, '红线文件的 registry 字面量是漂移锚，必须仍在')
+})
+
+test('硬约束 ③ lifecycle 自持 registry URL/超时，与红线文件同值（两份写法漂移即红）', () => {
+  const uc = readFileSync(new URL('../src/update-check.mjs', import.meta.url), 'utf8')
+  const anchor = /'([^']*registry\.npmjs\.org[^']*)'/.exec(uc)
+  assert.ok(anchor, 'update-check.mjs 应仍持有 registry URL 字面量')
+  assert.equal(REGISTRY_URL, anchor[1], 'lifecycle 自持的 URL 必须与红线文件同值')
+  assert.equal(REGISTRY_TIMEOUT_MS, 5000, '有界超时 5s（与红线文件同口径）')
+})
+
+test('硬约束 ③ fetchLatestVersion：成功取 version（去空白），非 2xx / 抛错 / 无 version 一律空串', async () => {
   assert.equal(await fetchLatestVersion({ fetchImpl: async () => ({ ok: true, json: async () => ({ version: ' 0.5.0 ' }) }) }), '0.5.0')
   assert.equal(await fetchLatestVersion({ fetchImpl: async () => ({ ok: false, status: 500, json: async () => ({}) }) }), '')
   assert.equal(await fetchLatestVersion({ fetchImpl: async () => { throw new Error('network down') } }), '')
