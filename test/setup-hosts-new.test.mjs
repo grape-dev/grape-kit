@@ -322,7 +322,7 @@ test('--target all 跳过 trae（项目级宿主），不静默创建 .trae/', (
   const r = run(['install', '--target', 'all'], proj, { HOME: homeDir, GRAPE_DSH_DEP_CMD: process.execPath })
   assert.equal(r.status, 0, r.stderr)
   assert.ok(!existsSync(join(proj, '.trae', 'mcp.json')), '--target all 不得在任意目录静默创建 .trae/')
-  assert.match(r.stdout, /trae[^\n]*(跳过|项目级)/, '应披露跳过 trae 及原因')
+  assert.match(r.stdout, /跳过项目级宿主[^\n]*trae/, '应披露跳过 trae 及原因（不静默跳过）')
   assert.ok(existsSync(join(homeDir, '.codex', 'config.toml')), '其余宿主仍应装配')
 })
 
@@ -524,11 +524,15 @@ test('detectHosts 的 hermes 探测以 HERMES_HOME 覆盖路径为准（无 --ta
 
 test('#26 裸 doctor 汇总覆盖全部 10 宿主，新装 5 宿主均报 [ok]', skipOnWin, () => {
   const h = home()
-  for (const t of ['codex', 'openclaw', 'hermes', 'atomcode', 'trae']) {
+  const proj = join(h, 'proj')   // trae 项目级：从项目目录装配，doctor 也从该目录汇总
+  mkdirSync(proj, { recursive: true })
+  for (const t of ['codex', 'openclaw', 'hermes', 'atomcode']) {
     const r = run(['install', '--target', t], h)
     assert.equal(r.status, 0, `${t}: ${r.stderr}`)
   }
-  const doctor = run(['doctor'], h)
+  const trae = run(['install', '--target', 'trae'], proj, { HOME: h })
+  assert.equal(trae.status, 0, `trae: ${trae.stderr}`)
+  const doctor = run(['doctor'], proj, { HOME: h })
   assert.equal(doctor.status, 0, doctor.stderr)
   for (const t of ['codex', 'openclaw', 'hermes', 'atomcode', 'trae']) {
     assert.match(doctor.stdout, new RegExp(`\\[ok\\][^\\n]*${t}`, 'i'), `汇总自检应检出 ${t}`)

@@ -1340,11 +1340,21 @@ function doctorAtomcode(probe) {
 
 /* ---------- trae：项目级 .trae/mcp.json（Spec Out of Scope：不做用户级兜底） ---------- */
 
-/** 路径优先级：GRAPE_TRAE_CONFIG 覆盖 > 当前项目 .trae/mcp.json（Trae 官方入口，项目级语义） */
+/** 路径优先级：GRAPE_TRAE_CONFIG 覆盖 > 当前项目 .trae/mcp.json（Trae 官方入口，项目级语义）。
+ *  userLevel：cwd 与 $HOME 相同——此时「项目级路径」就是用户级路径，等同用户级落盘（Spec Out of Scope）。 */
 function traePaths() {
   const override = String(process.env.GRAPE_TRAE_CONFIG || '').trim()
-  if (override) return { config: override }
-  return { config: join(process.cwd(), '.trae', 'mcp.json') }
+  if (override) return { config: override, userLevel: false }
+  return { config: join(process.cwd(), '.trae', 'mcp.json'), userLevel: resolve(process.cwd()) === resolve(homedir()) }
+}
+
+/** trae 项目级闸门：install / uninstall / --dry-run 三条写路径共用，防「在 $HOME 里悄悄写用户级」 */
+function traeRequireProjectDir(action) {
+  const p = traePaths()
+  if (!p.userLevel) return
+  console.error(`trae 是项目级宿主（.trae/mcp.json 按当前项目目录解析），当前目录与 $HOME 相同——${action}会作用于用户级 ${p.config}，Spec 明确不做用户级落盘，已拒绝。`)
+  console.error(`请在你要装配的目标项目目录执行：npx -y @grape-dev/grape-kit ${action === '安装' ? 'install' : 'uninstall'} --target trae`)
+  process.exit(1)
 }
 function traeContainer(cfg, create) {
   if (cfg.mcpServers && typeof cfg.mcpServers === 'object') return cfg.mcpServers
@@ -1353,6 +1363,7 @@ function traeContainer(cfg, create) {
   return cfg.mcpServers
 }
 function installTrae() {
+  traeRequireProjectDir('安装')
   const { config } = traePaths()
   const { originalText, cfg } = readJsonHostForWrite(config)
   mkdirSync(dirname(config), { recursive: true })
@@ -1368,13 +1379,20 @@ const TRAE_COPY = {
   preview: (s) => `将移除 mcpServers.grape-kit 条目（${s.path}）`,
 }
 function inspectUninstallTrae() { return inspectJsonContainerUninstall(traePaths().config, traeContainer) }
-function uninstallTrae() { applyUninstallSteps(inspectUninstallTrae(), TRAE_COPY) }
-function planUninstallTrae() { return planUninstallSteps(inspectUninstallTrae(), TRAE_COPY) }
-function detectTrae() { return detectJsonContainer(traePaths().config, traeContainer) }
+function uninstallTrae() { traeRequireProjectDir('卸载'); applyUninstallSteps(inspectUninstallTrae(), TRAE_COPY) }
+function planUninstallTrae() { traeRequireProjectDir('卸载'); return planUninstallSteps(inspectUninstallTrae(), TRAE_COPY) }
+/** 检出同样只在项目目录成立：cwd==$HOME 时不做「已安装」断言（也不去读用户级文件） */
+function detectTrae() {
+  const p = traePaths()
+  if (p.userLevel) return { ok: false, path: p.config }
+  return detectJsonContainer(p.config, traeContainer)
+}
 function doctorTrae(probe) {
+  const p = traePaths()
   const checks = baseChecks()
   const found = detectTrae()
   checks.push(entryCheck('trae mcpServers.grape-kit', found, 'npx -y @grape-dev/grape-kit install --target trae'))
+  if (p.userLevel) checks.push(['trae 项目级位置', '当前目录与 $HOME 相同：请在目标项目目录执行 --target trae（不做用户级）'])
   if (probe) checks.push(['契约连通性', connectivityCheck(getBaseUrl())])
   printChecks(checks)
 }
@@ -1999,6 +2017,18 @@ const HOSTS = {
  * dsh 走 MCP 最小路径，原生 Cordis 插件形态由 grape-dsh 承载，二者并存） */
 const SUPPORTED_TARGETS = Object.keys(HOSTS)
 
+/** 项目级宿主（路径按当前项目目录解析）：全量模式无法确定项目，一律不进 --target all，
+ *  否则在任意目录 `--target all` 都会静默建出 .trae/（QA#PR22 P2） */
+const PROJECT_LEVEL_TARGETS = new Set(['trae'])
+/** 全量枚举：受支持宿主 - 项目级宿主（install / uninstall / clean-global 共用同一口径） */
+const allTargets = () => SUPPORTED_TARGETS.filter((n) => !PROJECT_LEVEL_TARGETS.has(n))
+/** 全量模式跳过项目级宿主时的一次性披露（不静默跳过） */
+function announceSkippedProjectHosts() {
+  const skipped = SUPPORTED_TARGETS.filter((n) => PROJECT_LEVEL_TARGETS.has(n))
+  if (!skipped.length) return
+  console.log(`跳过项目级宿主 ${skipped.join(' + ')}：.trae/mcp.json 按项目目录解析，全量模式无法确定项目——请在目标项目目录单独执行 --target ${skipped[0]}`)
+}
+
 function detectHosts() {
   const home = homedir()
   const found = []
@@ -2011,7 +2041,8 @@ function detectHosts() {
   if (existsSync(join(home, '.openclaw'))) found.push('openclaw')
   if (existsSync(hermesPaths().home)) found.push('hermes')   // HERMES_HOME 覆盖时以覆盖路径为准
   if (existsSync(atomcodePaths().root)) found.push('atomcode')
-  if (existsSync(traePaths().config)) found.push('trae')
+  // cwd==$HOME 时项目级路径即用户级路径，不参与「已安装宿主」判定（Spec 不做用户级）
+  if (!traePaths().userLevel && existsSync(traePaths().config)) found.push('trae')
   return found
 }
 
@@ -2532,8 +2563,9 @@ if (cmd === 'intro') {
     if (!found.length) {
       console.log(`未检测到宿主 agent 痕迹，跳过宿主卸载${dryRun ? '（预览）' : ''}，${dryRun ? '直接预览全局清理' : '直接执行全局清理'}`)
     } else {
-      const names = found.length === 1 ? found : SUPPORTED_TARGETS
+      const names = found.length === 1 ? found : allTargets()
       if (names.length > 1) console.log(`检测到多个宿主痕迹，全部${dryRun ? '预览' : '卸载'}: ${names.join(' + ')}`)
+      if (found.length !== 1) announceSkippedProjectHosts()
       for (const n of names) uninstallHostOrPlan(n)
     }
     runCleanGlobal()
@@ -2550,8 +2582,9 @@ if (cmd === 'intro') {
     if (!targetExplicit && cmd !== 'doctor') target = await resolveTargetAuto()
     const t = resolveTarget()
     if (t === 'all') {
-      const names = SUPPORTED_TARGETS
+      const names = allTargets()
       console.log(`检测到多个宿主痕迹，全部${cmd === 'uninstall' && dryRun ? '预览' : '安装/自检'}: ${names.join(' + ')}`)
+      announceSkippedProjectHosts()
       for (const n of names) {
         if (cmd === 'install') { console.log(`
 ===== ${n} =====`); HOSTS[n].install() }
