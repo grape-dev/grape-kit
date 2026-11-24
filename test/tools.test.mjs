@@ -427,3 +427,49 @@ test('Q3 grape_kit_uninstall：damaged 宿主同样不生成命令（无从判�
   assert.match(md, /先修复/)
   assert.doesNotMatch(md, /uninstall --target workbuddy/)
 })
+
+/* ── QA 复审（PR #21）SJ4：版本全景「服务端」一行的四层三元链抽成小函数 ──
+ * 先补三个分支的渲染特征（未探测/不可达/可达无契约版本），重构时用它守住文案不漂。 */
+const SERVER_VARIANTS = [
+  {
+    name: '无凭据跳过探测：说「未探测（缺凭据）」，不说「不可达」',
+    server: { baseUrl: 'https://grape.test', reachable: false, probe: 'skipped', reason: '未配置凭据，跳过连通性探测', contractVersion: '2.3.0' },
+    v: /未探测（缺凭据）https:\/\/grape\.test/,
+    note: [/未配置凭据/, /契约版本 2\.3\.0/],
+    noNote: [/不可达/],
+  },
+  {
+    name: '不可达：带错误与 hint，契约版本照常透出',
+    server: { baseUrl: 'https://grape.test', reachable: false, error: 'connect ECONNREFUSED', hint: '检查 GRAPE_BASE_URL', contractVersion: '2.3.0' },
+    v: /不可达 https:\/\/grape\.test/,
+    note: [/connect ECONNREFUSED/, /（检查 GRAPE_BASE_URL）/, /契约版本 2\.3\.0/],
+    noNote: [/未探测/],
+  },
+  {
+    name: '可达但契约端点拿不到：明说「未取到」，不伪造版本',
+    server: { baseUrl: 'https://grape.test', reachable: true },
+    v: /可达 https:\/\/grape\.test/,
+    note: [/契约版本未取到/],
+    // 第三分支的备注本就含「（404/不可达时省略）」字样，故不在此断言 noNote
+    noNote: [],
+  },
+]
+
+for (const variant of SERVER_VARIANTS) {
+  test(`SJ4 grape_kit_version 服务端行：${variant.name}`, async () => {
+    const L = fakeLifecycle({
+      aggregateVersion: async () => ({
+        kitVersion: '0.4.0', latestVersion: '0.5.0', updateAvailable: true, updateState: 'newer',
+        updateNotice: '有新版本 0.4.0 → 0.5.0',
+        grapeCli: { status: 'missing', bin: 'grape', version: '', hint: '未安装（可选：pip install grape-cli）' },
+        server: variant.server,
+        credentials: { configured: true, sourceKind: 'env', source: '环境变量 GRAPE_API_TOKEN', hint: '' },
+      }),
+    })
+    const t = findTool('grape_kit_version')
+    const md = t.render(await t.run({}, { lifecycle: L }))
+    assert.match(md, variant.v, '值列文案')
+    for (const re of variant.note) assert.match(md, re, '备注列必须带出该分支的信息')
+    for (const re of variant.noNote) assert.doesNotMatch(md, re, '不得混入其它分支的文案')
+  })
+}
