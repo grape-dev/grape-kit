@@ -1,0 +1,15 @@
+# CODEOWNERS for @grape-dev/grape-kit
+# 变更审批映射：以下路径的 PR 将自动请求对应 owner review。
+# 生效前提：仓库设置「合并请求 → 按 CODEOWNERS 要求审批」已开启（需管理员在
+# https://gitcode.com/grape-dev/grape-kit/settings 下配置，见 issue #11）。
+#
+# 注意：grape_bot 作为流程机器人不应出现在 owner 列表中——
+# 否则 bot 自建 PR 时会形成「自审自合」，失去人工把关意义（PR !17 复盘）。
+
+# 全仓库默认 owner：组织管理员（5 位 org Owner）
+* @chenjingjie @songspace @yuanbeyond @Jason7602 @HugLovesWine
+
+# 发版簿记（版本号/CHANGELOG）同样走默认 owner 审批
+/package.json     @chenjingjie @songspace @yuanbeyond @Jason7602 @HugLovesWine
+/package-lock.json @chenjingjie @songspace @yuanbeyond @Jason7602 @HugLovesWine
+/CHANGELOG.md     @chenjingjie @songspace @yuanbeyond @Jason7602 @HugLovesWine
