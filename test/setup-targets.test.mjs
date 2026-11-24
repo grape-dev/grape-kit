@@ -46,8 +46,10 @@ function run(args, h, extraEnv = {}) {
       HERMES_HOME: '',
       ATOMCODE_HOME: '',
       // dsh 是第 6 个已支持宿主（#21）：缺 DSH_HOME 隔离时子进程会走真实 ~/.dsh，
-      // 使「零宿主痕迹」用例假绿（反而命中真实 dsh），并对真实宿主配置执行卸载
+      // 使「零宿主痕迹」用例假绿（反而命中真实 dsh），并对真实宿主配置执行卸载；
+      // 宿主运行环境若导出 DSH_HOME（如 AI Shell 的 ~/.aishell），零痕迹夹具同样会被检出幽灵 dsh 宿主
       DSH_HOME: '',
+      GRAPE_DSH_PATCH: '',
       ...extraEnv,
     },
     timeout: 30_000,

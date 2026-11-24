@@ -135,7 +135,7 @@ test('Issue #27 README 双语：工具数 44 + 自管理五工具逐个点名 + 
       assert.ok(md.includes(tool), `${name} 应点名 ${tool}`)
     }
     assert.match(md, /自管理|Self-management/, `${name} 应有自管理能力条目`)
-    assert.match(md, /只生成命令|command generation|commands only/, `${name} 应写明写工具只生成命令、不执行`)
+    assert.match(md, /只生成命令|command generation|commands only/i, `${name} 应写明写工具只生成命令、不执行`)
   }
 })
 

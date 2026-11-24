@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * 冒烟：以真实 stdio 方式拉起 grape-kit-mcp.mjs，走完整 JSON-RPC 往返。
- * 验收：initialize 带 instructions → tools/list 13 个 → tools/call 返回 Markdown。
+ * 验收：initialize 带 instructions → tools/list 44 个 → tools/call 返回 Markdown（含自管理只读工具）。
  * 运行：GRAPE_CLI_BIN 指向 fake grape（默认），或指向真实 grape CLI + 真实服务端。
  */
 import { spawn } from 'node:child_process'
@@ -29,6 +29,8 @@ const proc = spawn(process.execPath, [SERVER], {
     // 隔离宿主机 ~/.grape/config.json 文件通道（0.3.8 起为正式凭据来源，
     // 不隔离会让 native 直连真实服务端），native 必 401，CLI fake 通道兜底。
     GRAPE_AUTH_FILE: join(dir, 'no-such-auth.json'),
+    // 自管理工具的 dismiss/缓存状态落临时 HOME，绝不触碰真实 ~/.grape（Issue #27）
+    GRAPE_HOME: join(dir, 'grape-home'),
     ...(process.env.GRAPE_API_TOKEN ? {} : {}),
   },
 })
@@ -76,7 +78,27 @@ try {
 
   const tools = await rpc('tools/list', {})
   console.log(`[ok] tools/list: ${tools.tools.length} tools`)
-  if (tools.tools.length !== 39) throw new Error(`期望 39 个工具，实际 ${tools.tools.length}`)
+  if (tools.tools.length !== 44) throw new Error(`期望 44 个工具，实际 ${tools.tools.length}`)
+  // 自管理五工具（Issue #27）必须在 tools/list 里可见——缺一个就是工具面回退
+  for (const name of ['grape_kit_version', 'grape_kit_check_update', 'grape_kit_upgrade', 'grape_kit_install', 'grape_kit_uninstall']) {
+    if (!tools.tools.some((t) => t.name === name)) throw new Error(`tools/list 缺 ${name}`)
+  }
+
+  // 自管理只读工具（Issue #27）：真实宿主路径同样走 tools/call；版本全景不依赖服务端与网络
+  const v = await rpc('tools/call', { name: 'grape_kit_version', arguments: {} })
+  const vt = v.content[0].text
+  if (/版本全景/.test(vt) && /本地 kit 版本/.test(vt) && /grape CLI/.test(vt)) {
+    console.log('[ok] tools/call grape_kit_version → 版本全景（只读）')
+  } else {
+    throw new Error(`grape_kit_version 渲染异常: ${vt.slice(0, 300)}`)
+  }
+  const c = await rpc('tools/call', { name: 'grape_kit_check_update', arguments: {} })
+  const ct = c.content[0].text
+  if (/更新检查/.test(ct) && /当前版本/.test(ct)) {
+    console.log('[ok] tools/call grape_kit_check_update → 更新检查（只读，不写状态）')
+  } else {
+    throw new Error(`grape_kit_check_update 渲染异常: ${ct.slice(0, 300)}`)
+  }
 
   const r1 = await rpc('tools/call', { name: 'grape_list_issues', arguments: { owner: 'acme', repo: 'demo' } })
   const t1 = r1.content[0].text

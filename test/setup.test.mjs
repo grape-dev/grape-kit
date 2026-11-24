@@ -23,7 +23,8 @@ function run(args, h, extraEnv = {}) {
     encoding: 'utf8',
     // AC4（QA 复审）：显式清 GRAPE_HOME/GRAPE_AUTH_FILE——不隔离时外部继承值会让
     // doctor/update-check 的 grapeHome() 指向外部目录（QA 实测 GRAPE_HOME=x npm test 13 红）
-    env: { ...process.env, HOME: h, GRAPE_HOME: '', GRAPE_AUTH_FILE: '', ...extraEnv },
+    // DSH_HOME/GRAPE_DSH_PATCH 同属路径逃生口：宿主环境导出时会把 dsh 检出成已装配
+    env: { ...process.env, HOME: h, GRAPE_HOME: '', GRAPE_AUTH_FILE: '', DSH_HOME: '', GRAPE_DSH_PATCH: '', ...extraEnv },
     timeout: 30_000,
   })
 }
