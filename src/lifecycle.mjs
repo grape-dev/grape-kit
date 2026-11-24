@@ -13,7 +13,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { npxCacheRoot } from './api.mjs'
+import { grapeHome, npxCacheRoot } from './api.mjs'
+import { isNewerVersion } from './update-check.mjs'
 
 /** 五宿主标识：与 `grape-kit.mjs` 的 `SUPPORTED_TARGETS`（opencode/workbuddy/codearts/officeace/dsh）逐一对应 */
 export const HOST_NAMES = ['opencode', 'workbuddy', 'codearts', 'officeace', 'dsh']
@@ -312,4 +313,64 @@ export function detectInstallForm({ pkgPath = KIT_ROOT, env = process.env, platf
   }
 
   return formOf(INSTALL_FORM.UNKNOWN, { pkgPath: path, evidence: '包路径不符合已知安装形态（全局 / npx / ClawHub / 项目依赖）' })
+}
+
+/* ── S3：dismiss（拒绝更新）3 天冷却（Spec §3.2） ──
+ * 独立状态文件 ~/.grape/grape-kit-dismiss.json（{ version, at }）：
+ * 被动提醒（update-check.mjs 的 24h 缓存）与主动查询语义解耦——本模块不读写那份缓存，
+ * 只 import 其 semver 纯函数。冷却只对**同一版本**生效：出现新版本立即重新提醒。 */
+
+export const DISMISS_COOLDOWN_MS = 3 * 24 * 3600 * 1000
+
+/** dismiss 状态文件路径：与凭据/缓存同根（api.mjs 的 grapeHome 单源） */
+export function dismissStatePath({ env = process.env } = {}) {
+  return join(grapeHome(env), 'grape-kit-dismiss.json')
+}
+
+/** 读 dismiss 状态；文件缺失/损坏/形状不对一律 null（按「从未拒绝过」处理，冷却绝不误判） */
+export function readDismissState({ env = process.env, file } = {}) {
+  const target = file || dismissStatePath({ env })
+  try {
+    const raw = JSON.parse(readFileSync(target, 'utf8').replace(/^\uFEFF/, ''))
+    const version = typeof raw?.version === 'string' ? raw.version.trim() : ''
+    const at = Number(raw?.at)
+    if (!version || !Number.isFinite(at)) return null
+    return { version, at }
+  } catch {
+    return null
+  }
+}
+
+/** 记录拒绝的版本（唯一写路径：3 天冷却的状态落盘）；目录不存在则创建 */
+export function recordDismiss(version, { env = process.env, file, now = Date.now() } = {}) {
+  const target = file || dismissStatePath({ env })
+  const state = { version: String(version ?? '').trim(), at: now }
+  try {
+    mkdirSync(dirname(target), { recursive: true })
+    writeFileSync(target, JSON.stringify(state))
+  } catch { /* 落盘失败不阻断查询结果（下次仍会提醒，属可接受的降级） */ }
+  return { ...state, file: target }
+}
+
+/**
+ * 更新判定（纯函数，无 IO）：把 npm latest、本地版本与 dismiss 状态合成一个结论。
+ * state：newer（应提醒）/ latest（已是最新）/ dismissed（同版本冷却期内，不打扰）/ unavailable（查不到）
+ */
+export function updateDecision({
+  currentVersion, latestVersion, dismissState = null, now = Date.now(), cooldownMs = DISMISS_COOLDOWN_MS,
+} = {}) {
+  const current = String(currentVersion ?? '').trim()
+  const latest = String(latestVersion ?? '').trim()
+  const base = { currentVersion: current, latestVersion: latest }
+  if (!latest) return { ...base, state: 'unavailable', updateAvailable: false, dismissed: false }
+  if (!isNewerVersion(latest, current)) return { ...base, state: 'latest', updateAvailable: false, dismissed: false }
+  const at = Number(dismissState?.at)
+  const dismissedNow = dismissState?.version === latest && Number.isFinite(at) && now - at < cooldownMs
+  if (dismissedNow) {
+    return {
+      ...base, state: 'dismissed', updateAvailable: false, dismissed: true,
+      dismissedAt: at, cooldownUntil: at + cooldownMs,
+    }
+  }
+  return { ...base, state: 'newer', updateAvailable: true, dismissed: false }
 }
