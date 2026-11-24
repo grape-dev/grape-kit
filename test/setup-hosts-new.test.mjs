@@ -436,13 +436,20 @@ test('hermes 其它 server 下的同名嵌套 grape-kit 键：不误判已安装
   assert.match(readFileSync(cfg, 'utf8'), /keep\.mjs/, '卸载只删自己的托管条目')
 })
 
-test('hermes mcp_servers 非块格式取值（多行 flow map / 序列）：安装中止并保持文件原样', () => {
+test('hermes mcp_servers 非块映射取值（多行 flow map / 空序列 / 块序列 / 标量）：安装中止并保持文件原样', () => {
   const h = home()
   const dir = join(h, '.hermes')
   mkdirSync(dir, { recursive: true })
   const cfg = join(dir, 'config.yaml')
 
-  for (const original of ['mcp_servers: {\n  other: {command: node}\n}\nhooks: {}\n', 'mcp_servers: []\n']) {
+  // 裸 `mcp_servers:` 头后跟序列项 / 标量：追加 `  grape-kit:` 会产出 mapping+sequence 混层（yaml ParserError）
+  const nonBlock = [
+    'mcp_servers: {\n  other: {command: node}\n}\nhooks: {}\n',
+    'mcp_servers: []\n',
+    'mcp_servers:\n  - a\n',
+    'mcp_servers:\n  foo\n',
+  ]
+  for (const original of nonBlock) {
     writeFileSync(cfg, original)
     const r = run(['install', '--target', 'hermes'], h)
     assert.notEqual(r.status, 0, `非块格式 mcp_servers 必须中止安装：${original}`)
