@@ -16,8 +16,8 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawnSync as nodeSpawnSync } from 'node:child_process'
 import { api as defaultApi, grapeHome, getBaseUrl, npxCacheRoot, resolveCredentials } from './api.mjs'
-// registry 访问单源（QA SJ2）：URL / 有界超时 / 取数实现都来自 update-check.mjs，本模块不再自带第二份
-import { fetchLatestVersion, isNewerVersion, REGISTRY_TIMEOUT_MS } from './update-check.mjs'
+// 只 import 纯 semver 函数（Spec 硬约束 ③：`src/update-check.mjs` 是红线文件，不得改动）
+import { isNewerVersion } from './update-check.mjs'
 
 /** 五宿主标识：与 `grape-kit.mjs` 的 `SUPPORTED_TARGETS`（opencode/workbuddy/codearts/officeace/dsh）逐一对应 */
 export const HOST_NAMES = ['opencode', 'workbuddy', 'codearts', 'officeace', 'dsh']
@@ -438,9 +438,6 @@ export function readKitVersion() {
   }
 }
 
-/** npm registry latest 的对外接口：直接复用 update-check.mjs 的实现（单源，失败返回 '' 由调用方降级） */
-export { fetchLatestVersion }
-
 /** 凭据来源档位的展示文案（单源；结构检测走 sourceKind，不按 source 字符串反推） */
 const CRED_SOURCE_LABEL = {
   runtime: '一次性 env GRAPE_API_TOKEN_ONCE',
@@ -501,6 +498,32 @@ async function probeServer({ env = process.env, fetchImpl = fetch, apiModule, ti
     }
   } catch { /* 契约版本是加分项：拿不到就省略，不报错误值 */ }
   return out
+}
+
+/* ── registry 访问：本模块自持（Spec 硬约束 ③）──
+ * `src/update-check.mjs` 是红线文件（启动期 24h 缓存链路，行为必须零改动）。上一轮的「registry 单源」
+ * 改动（导出常量 + 抽 fetch）落在红线内、需人工拍板放宽；无裁定即回退——这里自持 URL / 有界超时 /
+ * 取数，只从红线文件复用纯 semver 函数。两份 URL 的同值由 test/lifecycle.test.mjs 断言兜住漂移。 */
+
+export const REGISTRY_URL = 'https://registry.npmjs.org'
+export const REGISTRY_TIMEOUT_MS = 5000
+
+/**
+ * 取 npm registry 上的 latest 版本号（best-effort）。
+ * 任何失败（网络/非 2xx/响应不可解析/无 version 字段）一律返回空串，由调用方自行降级——
+ * 版本提示是尽力而为，绝不影响工具可用性。
+ * @param {{fetchImpl?: Function, timeoutMs?: number}} [opts]
+ * @returns {Promise<string>}
+ */
+export async function fetchLatestVersion({ fetchImpl = fetch, timeoutMs = REGISTRY_TIMEOUT_MS } = {}) {
+  try {
+    const r = await fetchImpl(`${REGISTRY_URL}/@grape-dev/grape-kit/latest`, { signal: AbortSignal.timeout(timeoutMs) })
+    if (!r || !r.ok) return ''
+    const d = await r.json()
+    return d && typeof d.version === 'string' ? d.version.trim() : ''
+  } catch {
+    return ''
+  }
 }
 
 /** 更新提示文案（按判定分行；dismiss 冷却期内不再说「有新版本」） */
