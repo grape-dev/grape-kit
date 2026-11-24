@@ -4,7 +4,7 @@ import { spawnSync } from 'node:child_process'
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
-import { detectHostStatus, detectInstallForm, readDismissState, recordDismiss, updateDecision, HOST_NAMES } from '../src/lifecycle.mjs'
+import { aggregateVersion, detectHostStatus, detectInstallForm, readDismissState, recordDismiss, updateDecision, HOST_NAMES } from '../src/lifecycle.mjs'
 
 /* Issue #27 · 自管理 5 工具的公开 seam：
  * S1  detectHostStatus —— 五宿主只读检出（纯函数 + 显式 home/env 注入，不读进程真实 HOME）
@@ -343,4 +343,104 @@ test('S3 dismissVersion 显式指定优先于 npm latest（用户点名的版本
     dismissState: readDismissState({ env }), now: T0 + DAY,
   })
   assert.equal(d.state, 'dismissed', '显式 dismissVersion 与 latest 相同 → 冷却生效')
+})
+
+/* ── S4：版本全景 aggregateVersion（fetch / spawn / api 全注入，Spec §3.1） ── */
+
+/** 注入用桩：npm registry latest + 服务端 openapi.json 两条 fetch 分流 */
+function stubFetch({ latest = '0.5.0', openapi = { status: 200, body: { info: { version: '2.1.0' } } }, npmThrows = false, seen = [] } = {}) {
+  return async (url, opts = {}) => {
+    seen.push({ url: String(url), signal: opts.signal })
+    if (String(url).includes('registry.npmjs.org')) {
+      if (npmThrows) throw new Error('registry unreachable')
+      return { ok: true, status: 200, json: async () => ({ version: latest }) }
+    }
+    if (String(url).includes('/static/openapi.json')) {
+      return { ok: openapi.status === 200, status: openapi.status, json: async () => openapi.body }
+    }
+    return { ok: false, status: 404, json: async () => ({}) }
+  }
+}
+
+const okSpawn = () => ({ status: 0, stdout: 'grape 0.3.4\n', stderr: '' })
+const missingSpawn = () => ({ status: 127, stdout: '', stderr: 'not found' })
+const okApi = () => ({ scenesMarket: async () => [{ scene_id: 'default' }] })
+
+test('S4 全景：kit 版本 / npm latest / 更新可用 / CLI / 服务端连通+契约版本 / 凭据来源', async () => {
+  const seen = []
+  const r = await aggregateVersion({
+    pkgVersion: '0.4.0',
+    env: { GRAPE_BASE_URL: 'https://grape.test', GRAPE_API_TOKEN: 'grape_fake', GRAPE_AUTH_FILE: '/nonexistent/x.json' },
+    fetchImpl: stubFetch({ latest: '0.5.0', seen }),
+    spawnImpl: okSpawn,
+    apiModule: okApi(),
+  })
+  assert.equal(r.kitVersion, '0.4.0')
+  assert.equal(r.latestVersion, '0.5.0')
+  assert.equal(r.updateAvailable, true)
+  assert.equal(r.updateState, 'newer')
+  assert.equal(r.grapeCli.status, 'ok')
+  assert.equal(r.grapeCli.version, 'grape 0.3.4')
+  assert.equal(r.server.reachable, true)
+  assert.equal(r.server.contractVersion, '2.1.0', '契约版本取自 {base_url}/static/openapi.json 的 info.version')
+  assert.equal(r.server.baseUrl, 'https://grape.test')
+  assert.equal(r.credentials.sourceKind, 'env', '凭据来源结构化标注（不回显 token）')
+  assert.ok(!JSON.stringify(r).includes('grape_fake'), '工具结果绝不能回显凭据明文')
+  assert.ok(seen.some((s) => s.url.startsWith('https://grape.test/static/openapi.json')), 'base_url 来自 env 单源')
+  assert.ok(seen.every((s) => s.signal), '每个请求都要带超时 signal（5s 上限，不能挂死）')
+})
+
+test('S4 npm registry 不可达：标记 unavailable，且不阻塞 CLI / 服务端字段', async () => {
+  const r = await aggregateVersion({
+    pkgVersion: '0.4.0',
+    env: { GRAPE_BASE_URL: 'https://grape.test', GRAPE_API_TOKEN: 'grape_fake', GRAPE_AUTH_FILE: '/nonexistent/x.json' },
+    fetchImpl: stubFetch({ npmThrows: true }),
+    spawnImpl: okSpawn,
+    apiModule: okApi(),
+  })
+  assert.equal(r.latestVersion, '')
+  assert.equal(r.updateState, 'unavailable')
+  assert.equal(r.updateAvailable, false)
+  assert.equal(r.grapeCli.status, 'ok', 'registry 挂了不影响 CLI 探测')
+  assert.equal(r.server.reachable, true, 'registry 挂了不影响服务端连通')
+})
+
+test('S4 grape CLI 未安装：可选回退通道提示 + pip 安装指引（与 doctor 同文案口径）', async () => {
+  const r = await aggregateVersion({
+    pkgVersion: '0.4.0', env: {}, fetchImpl: stubFetch(), spawnImpl: missingSpawn, apiModule: okApi(),
+  })
+  assert.equal(r.grapeCli.status, 'missing')
+  assert.match(r.grapeCli.hint, /pip install git\+https:\/\/gitcode\.com\/grape-dev\/grape-cli\.git/)
+})
+
+test('S4 服务端不可达 / 契约端点 404：不阻塞其余字段，不伪造契约版本', async () => {
+  const downApi = { scenesMarket: async () => { const e = new Error('无法连接 https://grape.test'); e.status = 0; e.hint = '检查 GRAPE_BASE_URL 是否正确 / 网络可达'; throw e } }
+  const down = await aggregateVersion({
+    pkgVersion: '0.4.0',
+    env: { GRAPE_BASE_URL: 'https://grape.test', GRAPE_API_TOKEN: 'grape_fake', GRAPE_AUTH_FILE: '/nonexistent/x.json' },
+    fetchImpl: stubFetch(), spawnImpl: okSpawn, apiModule: downApi,
+  })
+  assert.equal(down.server.reachable, false)
+  assert.ok(down.server.error)
+  assert.equal(down.server.contractVersion, undefined)
+  assert.equal(down.kitVersion, '0.4.0', '服务端挂了照样报本地版本')
+
+  const noContract = await aggregateVersion({
+    pkgVersion: '0.4.0',
+    env: { GRAPE_BASE_URL: 'https://grape.test', GRAPE_API_TOKEN: 'grape_fake', GRAPE_AUTH_FILE: '/nonexistent/x.json' },
+    fetchImpl: stubFetch({ openapi: { status: 404, body: {} } }),
+    spawnImpl: okSpawn, apiModule: okApi(),
+  })
+  assert.equal(noContract.server.reachable, true)
+  assert.equal(noContract.server.contractVersion, undefined, '404 时省略契约版本，不报错误值')
+})
+
+test('S4 无凭据：版本查询照常可用（只读诊断不该被凭据卡住）', async () => {
+  const r = await aggregateVersion({
+    pkgVersion: '0.4.0', env: { GRAPE_AUTH_FILE: '/nonexistent/x.json' },
+    fetchImpl: stubFetch(), spawnImpl: okSpawn, apiModule: okApi(),
+  })
+  assert.equal(r.kitVersion, '0.4.0')
+  assert.equal(r.credentials.configured, false)
+  assert.match(r.credentials.hint, /GRAPE_API_TOKEN/, '缺凭据要给可执行指引')
 })
