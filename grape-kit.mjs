@@ -1399,7 +1399,12 @@ function traeRequireProjectDir(action) {
   const p = traePaths()
   if (!p.userLevel) return
   console.error(`trae 是项目级宿主（.trae/mcp.json 按当前项目目录解析），当前目录与 $HOME 相同——${action}会作用于用户级 ${p.config}，Spec 明确不做用户级落盘，已拒绝。`)
-  console.error(`请在你要装配的目标项目目录执行：npx -y @grape-dev/grape-kit ${action === '安装' ? 'install' : 'uninstall'} --target trae`)
+  if (action === '安装') {
+    console.error('请在你要装配的目标项目目录执行：npx -y @grape-dev/grape-kit install --target trae')
+  } else {
+    // 旧版本可能在 $HOME 里写出过用户级文件：给出去处，不代劳也不装作动过
+    console.error(`如该用户级文件里仍留有 grape-kit 条目，请在目标项目目录执行 uninstall --target trae，或手工删除 ${p.config} 中的 grape-kit 条目`)
+  }
   process.exit(1)
 }
 function traeContainer(cfg, create) {
