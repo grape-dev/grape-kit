@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { TOOL_NAMES } from '../src/tools.mjs'
 
 /* ── Issue #17 / CONTRIBUTING §7：用户可见变更必须双语 README + CHANGELOG Unreleased 同 PR 同步 ── */
 
@@ -162,4 +163,16 @@ test('Issue #27 CHANGELOG Unreleased 覆盖自管理五工具（Added/Changed �
 test('Issue #27 冒烟/巡检脚本的工具数断言同步为 44', () => {
   assert.match(read('scripts/smoke.mjs'), /!== 44/, 'smoke 应断言 44 个工具')
   assert.match(read('scripts/sweep-0.2.mjs'), /=== 44/, 'sweep 应断言 44 个工具')
+})
+
+/* ── QA 复审（PR #21）S1：CONTRIBUTING 自身也是工具面口径载体，必须与 TOOL_NAMES 实际数量同源 ──
+ * 39 → 44 时漏改本文件即失真；断言取实际注册数（非硬编码），后续增删工具时同样自动变红。 */
+test('CONTRIBUTING 工具面口径与 TOOL_NAMES 实际数量一致（漏改即失真）', () => {
+  const md = read('CONTRIBUTING.md')
+  const n = String(TOOL_NAMES.size)
+  assert.match(md, new RegExp(`（${n} tools）`), `CONTRIBUTING 开发环境节应写「（${n} tools）」`)
+  assert.match(md, new RegExp(`工具数变化（当前 ${n}）`), `CONTRIBUTING §6 应写「工具数变化（当前 ${n}）」`)
+  assert.doesNotMatch(md, /（39 tools）/, '不得残留旧口径 39 tools')
+  // 同步清单必须把本文件自身算进去，否则「漏改 CONTRIBUTING」永远落在规范文字之外
+  assert.match(md, /工具数变化[\s\S]{0,200}CONTRIBUTING\.md/, 'CONTRIBUTING §6 同步清单应包含本文件自身')
 })
