@@ -384,21 +384,31 @@ const DAMAGED_ROW = {
   path: '/h/.workbuddy/mcp.json', entry: 'mcpServers.grape-kit', skillsDir: '/h/.workbuddy/skills',
   error: 'Unexpected token } in JSON at position 12',
 }
+const INSTALLED_OPENCODE = {
+  host: 'opencode', label: 'opencode', state: 'installed', installed: true,
+  path: '/h/.config/opencode/opencode.jsonc', entry: 'mcp.grape', skillsDir: '/h/.config/opencode/skills', evidence: 'mcp.grape 条目存在',
+}
+/** 五宿主全量夹具（target=all 逐宿主处理，缺行会走 missing 默认值 → 断言不确定，故一律给全） */
+const fiveRows = ({ workbuddy = DAMAGED_ROW } = {}) => ([
+  INSTALLED_OPENCODE,
+  workbuddy,
+  { host: 'codearts', label: 'codearts', state: 'absent', installed: false, path: '/h/.codeartsdoer/codearts_cli.jsonc', entry: 'mcp.grape-kit', skillsDir: '' },
+  { host: 'officeace', label: 'officeace', state: 'missing', installed: false, path: '/h/.officeace/mcp.json', entry: 'mcpServers.grape-kit', skillsDir: '' },
+  { host: 'dsh', label: 'dsh', state: 'missing', installed: false, path: '/h/.dsh/profiles/web/cordis.patch.yml', entry: '托管块 id: grape-kit', skillsDir: '/h/.dsh/skills' },
+])
 
 test('Q3 grape_kit_install：damaged 宿主不生成命令，单列「先修复」并带出解析错误', async () => {
-  const L = fakeLifecycle({
-    detectHostStatus: () => ([
-      { host: 'opencode', label: 'opencode', state: 'installed', installed: true, path: '/h/.config/opencode/opencode.jsonc', entry: 'mcp.grape', skillsDir: '/h/.config/opencode/skills' },
-      DAMAGED_ROW,
-      { host: 'dsh', label: 'dsh', state: 'missing', installed: false, path: '/h/.dsh/profiles/web/cordis.patch.yml', entry: '托管块 id: grape-kit', skillsDir: '/h/.dsh/skills' },
-    ]),
-  })
+  const L = fakeLifecycle({ detectHostStatus: () => fiveRows() })
   const t = findTool('grape_kit_install')
   const json = await t.run({ target: 'all' }, { lifecycle: L })
-  assert.ok(!json.commands.some((c) => /--target workbuddy$/.test(c)), 'damaged 宿主不得出现在可执行命令里（实跑必被 CLI 拒）')
-  assert.deepEqual(json.commands, ['npx -y @grape-dev/grape-kit install --target dsh'], '只给真正可装配的宿主生成命令')
+  assert.deepEqual(json.commands, [
+    'npx -y @grape-dev/grape-kit install --target codearts',
+    'npx -y @grape-dev/grape-kit install --target officeace',
+    'npx -y @grape-dev/grape-kit install --target dsh',
+  ], '只给真正可装配的宿主生成命令（damaged 的 workbuddy 不得在列——实跑必被 CLI 拒）')
   assert.deepEqual((json.blocked || []).map((b) => b.host), ['workbuddy'], 'damaged 宿主单列 blocked')
   assert.ok(!json.skipped.includes('workbuddy'), 'damaged 不算「已装配跳过」，否则用户以为无需动作')
+  assert.deepEqual(json.skipped, ['opencode'], '已装配的宿主才是 skipped')
   assert.match(json.blocked[0].error, /Unexpected token/, 'blocked 要带出解析错误，用户才知道修什么')
   const md = t.render(json)
   assert.match(md, /先修复/, '渲染要给出先修复的动作')
@@ -407,16 +417,12 @@ test('Q3 grape_kit_install：damaged 宿主不生成命令，单列「先修复�
 })
 
 test('Q3 grape_kit_uninstall：damaged 宿主同样不生成命令（无从判定条目，先修复）', async () => {
-  const L = fakeLifecycle({
-    detectHostStatus: () => ([
-      { host: 'opencode', label: 'opencode', state: 'installed', installed: true, path: '/h/.config/opencode/opencode.jsonc', entry: 'mcp.grape', skillsDir: '/h/.config/opencode/skills' },
-      DAMAGED_ROW,
-    ]),
-  })
+  const L = fakeLifecycle({ detectHostStatus: () => fiveRows() })
   const t = findTool('grape_kit_uninstall')
   const json = await t.run({ target: 'all' }, { lifecycle: L })
   assert.deepEqual(json.commands, ['npx -y @grape-dev/grape-kit uninstall --target opencode'])
   assert.deepEqual((json.blocked || []).map((b) => b.host), ['workbuddy'])
+  assert.deepEqual(json.skipped, ['codearts', 'officeace', 'dsh'], '未装配的宿主照旧跳过')
   const md = t.render(json)
   assert.match(md, /先修复/)
   assert.doesNotMatch(md, /uninstall --target workbuddy/)
