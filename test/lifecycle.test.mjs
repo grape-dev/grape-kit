@@ -4,7 +4,7 @@ import { spawnSync } from 'node:child_process'
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
-import { aggregateVersion, checkForUpdate, detectHostStatus, detectInstallForm, readDismissState, recordDismiss, updateDecision, HOST_NAMES } from '../src/lifecycle.mjs'
+import { aggregateVersion, checkForUpdate, detectHostStatus, detectInstallForm, readDismissState, recordDismiss, updateDecision, HOST_NAMES, SYNC_POINTERS } from '../src/lifecycle.mjs'
 
 /* Issue #27 · 自管理 5 工具的公开 seam：
  * S1  detectHostStatus —— 五宿主只读检出（纯函数 + 显式 home/env 注入，不读进程真实 HOME）
@@ -498,4 +498,32 @@ test('S4 无凭据不得把「未探测」说成「不可达」：跳过连通�
   assert.match(r.server.reason, /凭据/)
   assert.equal(r.server.reachable, false)
   assert.equal(r.server.contractVersion, '2.1.0', '契约端点是公开的，无凭据也应尽力探测')
+})
+
+/* ── QA 复审（PR #21）P3/SJ1：同步指针只留函数名锚，漂移由校验测试兜住 ──
+ * 行号指针在「CLI 侧任何无关改动」后立即失真（实测 7/14 已失准），而名字是稳定锚点：
+ * 真正的漂移风险是**重命名/删除**（成对维护的那一侧没了），因此断言每个指针名在 grape-kit.mjs 中仍有定义。 */
+const CLI_SRC = new URL('../grape-kit.mjs', import.meta.url)
+const cliSource = () => readFileSync(CLI_SRC, 'utf8')
+const lifecycleSource = () => readFileSync(new URL('../src/lifecycle.mjs', import.meta.url), 'utf8')
+
+test('P3/SJ1 SYNC_POINTERS：每个同步指针在 grape-kit.mjs 中仍有定义（重命名/删除即变红）', () => {
+  const src = cliSource()
+  assert.ok(SYNC_POINTERS.length >= 14, `同步指针应覆盖全部成对维护点（当前 ${SYNC_POINTERS.length}）`)
+  const names = SYNC_POINTERS.map((p) => p.symbol)
+  assert.equal(new Set(names).size, names.length, '同步指针不得重复登记')
+  for (const { symbol } of SYNC_POINTERS) {
+    const re = new RegExp(`(?:function\\s+${symbol}\\s*\\(|(?:const|let|class)\\s+${symbol}\\s*=)`)
+    assert.match(src, re, `同步指针 ${symbol} 在 grape-kit.mjs 中已不存在（CLI 侧改名/删除 → lifecycle 必须同改）`)
+  }
+})
+
+test('P3/SJ1 同步指针不得回退成行号（行号随无关改动漂移，实测 7/14 已失准）', () => {
+  const src = lifecycleSource()
+  assert.doesNotMatch(src, /grape-kit\.mjs:\d+/, '不得写 grape-kit.mjs:<行号>（改为函数名锚 + SYNC_POINTERS 校验）')
+  assert.doesNotMatch(src, /grape-kit\.mjs:\d+-\d+/, '不得写行号区间')
+  // 函数名锚必须真实写在注释里：至少覆盖指针表里的每个名字，人读注释即可定位
+  for (const { symbol } of SYNC_POINTERS) {
+    assert.ok(src.includes(symbol), `lifecycle.mjs 注释应点名 ${symbol}（否则指针等于没有）`)
+  }
 })
