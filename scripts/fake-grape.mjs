@@ -6,6 +6,8 @@
  */
 const args = process.argv.slice(2)
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 const fail = process.env.GRAPE_FAKE_FAIL || ''
 if (fail) {
   process.stderr.write(`Error: HTTP ${fail}: simulated failure\n`)
@@ -17,12 +19,24 @@ const val = (s) => { const i = args.indexOf(s); return i >= 0 ? args[i + 1] : un
 const out = (o) => process.stdout.write(JSON.stringify(o) + '\n')
 
 // wait 轮询测试：同 seq 第二次查询返回终态（计数器落临时文件）
+//
+// 目录必须是「当前用户可写」的临时目录：原先硬编码到某个共享的 opencode 临时目录，
+// 在多用户机器上该目录属主是别的用户（实测 755 + 非属主），非属主运行 `npm test` 时
+// mkdir/write 抛 EACCES，waitTask 轮询用例必挂——测试脚手架缺陷，不是产品问题。
+// 改为 os.tmpdir() 下按 uid 隔离，Windows 上 getuid 不存在时回退。
+const fakeTmpDir = () => {
+  if (process.env.GRAPE_FAKE_TMPDIR) return process.env.GRAPE_FAKE_TMPDIR
+  const uid = typeof process.getuid === 'function' ? process.getuid() : 'win'
+  return join(tmpdir(), `grape-fake-${uid}`)
+}
+
 function pollStatus(seq) {
   const scope = process.env.GRAPE_FAKE_SCOPE || "noscope"
-  const key = `/tmp/opencode/fake-grape-${scope}-${seq}.count`
+  const dir = fakeTmpDir()
+  const key = join(dir, `fake-grape-${scope}-${seq}.count`)
   let n = 0
   try { n = Number(readFileSync(key, 'utf8')) || 0 } catch {}
-  mkdirSync('/tmp/opencode', { recursive: true })
+  mkdirSync(dir, { recursive: true })
   writeFileSync(key, String(n + 1))
   return n === 0 ? 'running' : 'completed'
 }

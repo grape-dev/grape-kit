@@ -26,6 +26,7 @@ export const INSTRUCTIONS = `Grape DevOps 流水线遥控（多 agent：vod→is
 三条最容易搞错的语义：
 1. 场景三段式：市场模板（数字 id）→ \`grape_apply_scene\` 在仓库内创建副本（custom-xxxxxxxx）→ \`grape_set_repo_scene\` 设为仓库默认。
    「应用场景」≠「切换场景」：\`POST /api/scenes/apply/{owner}/{repo}\` 只把节点技能与引擎绑定刷进 agent_session，不改仓库归属，响应里也没有 scene_id。
+   **只对新建生效**：已存在的 issue 保留自己的 scene_id 快照，切场景/设默认都不会追溯改动它——要换已建单的链，只能在建单时显式指定或重开一单。
 2. 技能 scope：user 级技能不能绑进 repo 级场景（平台 403 级拦截）。先 \`grape_convert_skill\` 复制成 repo 技能，再改节点 skill_id。
    上传/升级用 \`grape_upload_skill\` / \`grape_update_skill\`：本地预检 frontmatter 与 ZIP 顶层目录，服务端 errors 全量透出。
 3. 端云接管：\`takeover_start\` 只能对准**当前活跃节点**（409 agent_mismatch 时按 60-120s 轮询再试）。

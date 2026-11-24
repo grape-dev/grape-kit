@@ -277,3 +277,8 @@ test('upload_skill：repo scope 缺 owner/repo 立刻报错；合格目录按顶
   assert.equal(out.skill_id, 3625)
   assert.match(findTool('grape_upload_skill').render(out), /技能已上传/)
 })
+test('upload_skill 的下一步提示必须承认 D5 缺口（不承诺做不到的节点级绑定）', () => {
+  const text = findTool('grape_upload_skill').render({ skill_id: 3625, root_name: 'deploy-playbook' })
+  assert.match(text, /没有节点级写端点/, '必须写明平台暂无节点级端点')
+  assert.match(text, /整场景/, '必须给出当前唯一可行路径：整场景 PUT')
+})

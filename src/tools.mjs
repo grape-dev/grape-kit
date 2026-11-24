@@ -492,7 +492,7 @@ function renderSkillWrite(json, verb) {
   if (json.scope) lines.push(`- scope: ${json.scope}${json.repo ? ` · 仓库 ${json.repo}` : ''}`)
   if (json.bytes) lines.push(`- 包大小: ${json.bytes} B（${json.files_count ?? '?'} 个文件）`)
   if (json.message) lines.push(`- ${json.message}`)
-  lines.push('', `_下一步：把技能绑到场景节点——grape_list_scenes(owner, repo) 找节点，节点 skill_id 指向 \`${sid || '新 id'}\`；repo 级场景不能引用 user 级技能（先 grape_convert_skill）。_`)
+  lines.push('', `_下一步（绑到场景节点）：grape_list_scenes(owner, repo) 取场景副本 → 读场景详情拿 nodes → 把目标节点的 \`skill_id\` 改成 \`${sid || '新 id'}\` → 整场景 PUT 回去。平台目前**没有节点级写端点**（D5 缺口），只能整场景提交；repo 级场景不能引用 user 级技能，个人技能先用 grape_convert_skill 复制成 repo 技能。_`)
   return lines.join('\n')
 }
 
