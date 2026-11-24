@@ -381,6 +381,113 @@ test('codex 仅剩托管条目时 dry-run 披露将删除整个文件，且与�
   assert.ok(!existsSync(cfg), '执行时应删除仅剩托管条目的文件')
 })
 
+/* ---------- QA 复审（PR #22 · P2）：其它 server 下的同名嵌套键 / 多行 flow map ---------- */
+
+const HERMES_START_MARK = '# >>> grape-kit managed block (hermes mcp_servers) >>>'
+
+test('hermes 不完整托管块：dry-run 与执行同判「拒绝卸载」，执行 exit 1 且不动配置与 skill', () => {
+  const h = home()
+  const dir = join(h, '.hermes')
+  mkdirSync(join(dir, 'skills', 'grape-remote'), { recursive: true })
+  writeFileSync(join(dir, 'skills', 'grape-remote', 'SKILL.md'), '# skill\n')
+  const cfg = join(dir, 'config.yaml')
+  const broken = `mcp_servers:\n  other:\n    command: node\n  ${HERMES_START_MARK}\n  grape-kit:\n    command: npx\n`
+  writeFileSync(cfg, broken)
+
+  const dry = run(['uninstall', '--target', 'hermes', '--dry-run'], h)
+  assert.equal(dry.status, 0, dry.stderr)
+  assert.doesNotMatch(dry.stdout, /将移除 mcp_servers\.grape-kit/, 'dry-run 不得承诺一个执行时会拒绝的动作')
+  assert.match(dry.stdout, /不完整托管块/, 'dry-run 应披露不完整托管块')
+  assert.equal(readFileSync(cfg, 'utf8'), broken, 'dry-run 不得改动配置')
+
+  const un = run(['uninstall', '--target', 'hermes'], h)
+  assert.equal(un.status, 1, '不完整托管块必须拒绝卸载')
+  assert.match(un.stderr, /不完整托管块/)
+  assert.equal(readFileSync(cfg, 'utf8'), broken, '拒绝卸载时不得改动配置')
+  assert.ok(existsSync(join(dir, 'skills', 'grape-remote', 'SKILL.md')), '拒绝卸载时不得清理 skill（与预览口径一致）')
+})
+
+test('hermes 其它 server 下的同名嵌套 grape-kit 键：不误判已安装、不误删、安装后仍保留', () => {
+  const h = home()
+  const dir = join(h, '.hermes')
+  mkdirSync(dir, { recursive: true })
+  const cfg = join(dir, 'config.yaml')
+  const original = '# 用户注释\nmcp_servers:\n  other:\n    grape-kit:\n      command: node\n      args: ["keep.mjs"]\n  keep:\n    command: node\n'
+  writeFileSync(cfg, original)
+
+  const doctor = run(['doctor', '--target', 'hermes'], h)
+  assert.doesNotMatch(doctor.stdout, /\[ok\][^\n]*hermes[^\n]*mcp_servers/i, '嵌套同名键不算已安装')
+
+  const dry = run(['uninstall', '--target', 'hermes', '--dry-run'], h)
+  assert.equal(dry.status, 0, dry.stderr)
+  assert.doesNotMatch(dry.stdout, /将移除 mcp_servers\.grape-kit/, '无同层条目时不得预告移除')
+
+  const un = run(['uninstall', '--target', 'hermes'], h)
+  assert.equal(un.status, 0, un.stderr)
+  assert.equal(readFileSync(cfg, 'utf8'), original, '其它 server 下的嵌套同名键不得被删除')
+
+  assert.equal(run(['install', '--target', 'hermes'], h).status, 0)
+  const text = readFileSync(cfg, 'utf8')
+  assert.match(text, /keep\.mjs/, '安装不得吞掉他人嵌套条目')
+  assert.equal((text.match(/^  grape-kit:/gm) || []).length, 1, '同层托管条目应有且只有一个')
+  assert.equal((text.match(/^\s{4}grape-kit:/gm) || []).length, 1, '嵌套条目应原位保留')
+
+  assert.equal(run(['uninstall', '--target', 'hermes'], h).status, 0)
+  assert.match(readFileSync(cfg, 'utf8'), /keep\.mjs/, '卸载只删自己的托管条目')
+})
+
+test('hermes mcp_servers 非块格式取值（多行 flow map / 序列）：安装中止并保持文件原样', () => {
+  const h = home()
+  const dir = join(h, '.hermes')
+  mkdirSync(dir, { recursive: true })
+  const cfg = join(dir, 'config.yaml')
+
+  for (const original of ['mcp_servers: {\n  other: {command: node}\n}\nhooks: {}\n', 'mcp_servers: []\n']) {
+    writeFileSync(cfg, original)
+    const r = run(['install', '--target', 'hermes'], h)
+    assert.notEqual(r.status, 0, `非块格式 mcp_servers 必须中止安装：${original}`)
+    assert.match(r.stderr, /mcp_servers/, '应点名 mcp_servers 与修复方式')
+    assert.equal(readFileSync(cfg, 'utf8'), original, '中止时不得改动配置')
+    assert.ok(!existsSync(join(dir, 'skills', 'grape-remote')), '中止时不得复制 skill')
+  }
+})
+
+test('JSON 宿主（openclaw）含注释/尾随逗号：宽松解析后安装/卸载可用，且写前备份原文', () => {
+  const h = home()
+  const dir = join(h, '.openclaw')
+  mkdirSync(dir, { recursive: true })
+  const cfg = join(dir, 'openclaw.json')
+  const jsonc = '{\n  // 用户注释\n  "mcp": { "servers": { "other": { "command": "node" }, }, },\n}\n'
+  writeFileSync(cfg, jsonc)
+
+  const inst = run(['install', '--target', 'openclaw'], h)
+  assert.equal(inst.status, 0, `含注释/尾随逗号的 JSON 不得直接 exit 1：${inst.stderr}`)
+  assert.match(inst.stderr, /宽松|注释/, '应披露宽松解析与写入规范化')
+  const cfg1 = JSON.parse(readFileSync(cfg, 'utf8'))
+  assert.ok(cfg1.mcp.servers.other, '他人连接器必须保留')
+  assert.equal(cfg1.mcp.servers['grape-kit'].command, 'npx')
+  assert.equal(backupsIn(dir).length, 1, '规范化写入前应留一份原文备份')
+  assert.equal(readFileSync(join(dir, backupsIn(dir)[0]), 'utf8'), jsonc)
+
+  const un = run(['uninstall', '--target', 'openclaw'], h)
+  assert.equal(un.status, 0, `卸载不得把 jsonc 判成配置损坏：${un.stderr}`)
+  const cfg2 = JSON.parse(readFileSync(cfg, 'utf8'))
+  assert.equal(cfg2.mcp.servers['grape-kit'], undefined)
+  assert.ok(cfg2.mcp.servers.other)
+})
+
+test('detectHosts 的 hermes 探测以 HERMES_HOME 覆盖路径为准（无 --target 也能命中）', () => {
+  const h = home()
+  const custom = join(h, 'custom-hermes')
+  mkdirSync(custom, { recursive: true })
+
+  const r = run(['install'], h, { HERMES_HOME: custom })
+  assert.equal(r.status, 0, `HERMES_HOME 有痕迹时应自动命中 hermes：${r.stderr}`)
+  assert.match(r.stdout, /hermes/)
+  assert.ok(existsSync(join(custom, 'config.yaml')), '配置应写入 HERMES_HOME 覆盖路径')
+  assert.ok(!existsSync(join(h, '.hermes')), '不得写到默认 ~/.hermes')
+})
+
 /* ---------- 汇总自检覆盖全部 10 宿主 ---------- */
 
 test('#26 裸 doctor 汇总覆盖全部 10 宿主，新装 5 宿主均报 [ok]', skipOnWin, () => {
