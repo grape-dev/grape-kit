@@ -30,7 +30,8 @@ after(() => {
 function run(args, h, extraEnv = {}) {
   return spawnSync(process.execPath, [SETUP, ...args], {
     encoding: 'utf8',
-    // 每个用例隔离 HOME，杜绝污染真实宿主配置；显式清掉路径逃生口
+    // 每个用例隔离 HOME 与 cwd（trae 项目级 .trae 按 cwd 解析），杜绝污染真实宿主配置；显式清掉路径逃生口
+    cwd: h,
     env: {
       ...process.env,
       HOME: h,
@@ -38,6 +39,12 @@ function run(args, h, extraEnv = {}) {
       GRAPE_OFFICEACE_MANIFEST: '',
       GRAPE_HOME: '',
       GRAPE_AUTH_FILE: '',
+      GRAPE_CODEX_CONFIG: '',
+      GRAPE_OPENCLAW_CONFIG: '',
+      GRAPE_HERMES_CONFIG: '',
+      GRAPE_TRAE_CONFIG: '',
+      HERMES_HOME: '',
+      ATOMCODE_HOME: '',
       ...extraEnv,
     },
     timeout: 30_000,

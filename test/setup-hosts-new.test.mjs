@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import { mkdtempSync, readFileSync, writeFileSync, existsSync, rmSync, mkdirSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, dirname } from 'node:path'
 
 const SETUP = new URL('../grape-kit.mjs', import.meta.url).pathname
 const isWin = process.platform === 'win32'
@@ -299,6 +299,86 @@ test('trae 项目级 .trae/mcp.json 安装/doctor/幂等/dry-run/卸载，detect
   const cfg2 = JSON.parse(readFileSync(cfg, 'utf8'))
   assert.equal(cfg2.mcpServers['grape-kit'], undefined)
   assert.ok(cfg2.mcpServers.other)
+})
+
+test('trae 不回退用户级：仅存在 ~/.trae/mcp.json 时安装写入项目级，且不改写用户级文件', () => {
+  const project = home()
+  const userHome = join(project, 'home')
+  const userCfg = join(userHome, '.trae', 'mcp.json')
+  mkdirSync(dirname(userCfg), { recursive: true })
+  const userOriginal = JSON.stringify({ mcpServers: { user: { command: 'x' } } }, null, 2) + '\n'
+  writeFileSync(userCfg, userOriginal)
+
+  const r = run(['install', '--target', 'trae'], project, { HOME: userHome })
+  assert.equal(r.status, 0, r.stderr)
+  assert.equal(readFileSync(userCfg, 'utf8'), userOriginal, '用户级文件不得被改写')
+
+  const projectCfg = join(project, '.trae', 'mcp.json')
+  assert.ok(existsSync(projectCfg), '应写入项目级 .trae/mcp.json')
+  const cfg = JSON.parse(readFileSync(projectCfg, 'utf8'))
+  assert.match(cfg.mcpServers['grape-kit'].args.join(' '), /@grape-dev\/grape-kit/)
+})
+
+test('detectHosts 的 trae 探测要求 .trae/mcp.json 文件存在（空目录不误判）', () => {
+  const h = home()
+  mkdirSync(join(h, '.trae'), { recursive: true })
+  const r = run(['install'], h)
+  assert.notEqual(r.status, 0)
+  assert.match(r.stderr, /未检测到/)
+})
+
+test('hermes 4 空格缩进的合法手写条目：安装去重为单一托管条目，doctor 检出，卸载只删自身', () => {
+  const h = home()
+  const dir = join(h, '.hermes')
+  mkdirSync(dir, { recursive: true })
+  const cfg = join(dir, 'config.yaml')
+  writeFileSync(cfg, 'mcp_servers:\n    grape-kit:\n        command: node\n        args: ["old.mjs"]\n    keep:\n        command: node\n')
+
+  assert.equal(run(['install', '--target', 'hermes'], h).status, 0)
+  const text = readFileSync(cfg, 'utf8')
+  assert.equal((text.match(/^\s+grape-kit:/gm) || []).length, 1, '不得出现重复 grape-kit 键')
+  assert.doesNotMatch(text, /old\.mjs/)
+  assert.match(text, /^    keep:/m)
+  assert.match(text, /^    grape-kit:/m, '新条目应与既有段落同缩进')
+
+  const doctor = run(['doctor', '--target', 'hermes'], h)
+  assert.match(doctor.stdout, /\[ok\][^\n]*hermes[^\n]*mcp_servers/i)
+
+  assert.equal(run(['uninstall', '--target', 'hermes'], h).status, 0)
+  const after = readFileSync(cfg, 'utf8')
+  assert.doesNotMatch(after, /grape-kit:/)
+  assert.match(after, /^    keep:/m)
+})
+
+test('hermes mcp_servers 为非空 inline map 时安装中止并保持文件原样', () => {
+  const h = home()
+  const dir = join(h, '.hermes')
+  mkdirSync(dir, { recursive: true })
+  const cfg = join(dir, 'config.yaml')
+  const original = 'mcp_servers: {other: 1}\nhooks: {}\n'
+  writeFileSync(cfg, original)
+
+  const r = run(['install', '--target', 'hermes'], h)
+  assert.notEqual(r.status, 0)
+  assert.match(r.stderr, /inline|内联|mcp_servers/i)
+  assert.equal(readFileSync(cfg, 'utf8'), original, '中止时不得改动配置')
+  assert.ok(!existsSync(join(dir, 'skills', 'grape-remote')), '中止时不得复制 skill')
+})
+
+test('codex 仅剩托管条目时 dry-run 披露将删除整个文件，且与执行一致', () => {
+  const h = home()
+  const dir = join(h, '.codex')
+  const cfg = join(dir, 'config.toml')
+  assert.equal(run(['install', '--target', 'codex'], h).status, 0)
+
+  const dry = run(['uninstall', '--target', 'codex', '--dry-run'], h)
+  assert.equal(dry.status, 0)
+  assert.match(dry.stdout, /删除/)
+  assert.ok(existsSync(cfg), 'dry-run 不得删文件')
+
+  const un = run(['uninstall', '--target', 'codex'], h)
+  assert.equal(un.status, 0)
+  assert.ok(!existsSync(cfg), '执行时应删除仅剩托管条目的文件')
 })
 
 /* ---------- 汇总自检覆盖全部 10 宿主 ---------- */
