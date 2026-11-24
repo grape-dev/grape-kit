@@ -892,15 +892,26 @@ function stripCodexManaged(text) {
   return { text: [...before, ...after].join('\n'), removed: true }
 }
 
-/** 摘除用户手工写入的 [mcp_servers.grape-kit] 及其 .env 子表（只认这两张表，不碰其它表） */
+/** 摘除用户手工写入的 [mcp_servers.grape-kit] 及其 .env 子表（只认这两张表，不碰其它表）。
+ *  表头行按「可选尾注释」识别；注释行（`# [mcp_servers.grape-kit]`）不是表头，原样保留。 */
+const CODEX_TABLE_RE = /^\s*\[([^\]]+)\]\s*(?:#.*)?$/
+const CODEX_TABLES = new Set(['mcp_servers.grape-kit', 'mcp_servers.grape-kit.env'])
+
+/** 行级剥离注释后按表头精确匹配（QA#PR22 P2：裸子串判定会被注释行骗成「已安装」） */
+function codexHasTable(text) {
+  return text.split('\n').some((line) => {
+    const m = line.match(CODEX_TABLE_RE)
+    return !!m && CODEX_TABLES.has(m[1].trim())
+  })
+}
+
 function stripCodexExistingTables(text) {
-  const drop = new Set(['mcp_servers.grape-kit', 'mcp_servers.grape-kit.env'])
   const lines = text.split('\n')
   const out = []
   let skipping = false
   for (const line of lines) {
-    const m = line.trim().match(/^\[([^\]]+)\]$/)
-    if (m) skipping = drop.has(m[1].trim())
+    const m = line.match(CODEX_TABLE_RE)
+    if (m) skipping = CODEX_TABLES.has(m[1].trim())
     if (!skipping) out.push(line)
   }
   return out.join('\n')
@@ -941,7 +952,7 @@ function codexUninstallDecision() {
   const managed = stripCodexManaged(text)
   if (managed.incomplete) return { path: config, action: 'damaged', text }
   const next = stripCodexExistingTables(managed.text)
-  if (!text.includes('[mcp_servers.grape-kit]')) return { path: config, action: 'absent', text, next }
+  if (!codexHasTable(text)) return { path: config, action: 'absent', text, next }
   if (next.trim() === '') return { path: config, action: 'removeFile', text, next }
   return { path: config, action: 'remove', text, next }
 }
@@ -986,7 +997,7 @@ function detectCodex() {
   const { config } = codexPaths()
   if (!existsSync(config)) return { ok: false, path: config }
   try {
-    return { ok: readFileSync(config, 'utf8').includes('[mcp_servers.grape-kit]'), path: config }
+    return { ok: codexHasTable(readFileSync(config, 'utf8')), path: config }
   } catch (e) {
     return { ok: false, path: config, error: e.message }
   }
