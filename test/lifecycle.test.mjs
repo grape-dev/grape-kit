@@ -4,7 +4,7 @@ import { spawnSync } from 'node:child_process'
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
-import { aggregateVersion, checkForUpdate, detectHostStatus, detectInstallForm, readDismissState, recordDismiss, updateDecision, HOST_NAMES, SYNC_POINTERS, fetchLatestVersion } from '../src/lifecycle.mjs'
+import { aggregateVersion, checkForUpdate, credentialSummary, detectHostStatus, detectInstallForm, readDismissState, recordDismiss, updateDecision, HOST_NAMES, SYNC_POINTERS, UPDATE_STATE, fetchLatestVersion } from '../src/lifecycle.mjs'
 import { fetchLatestVersion as ucFetchLatestVersion, REGISTRY_URL, REGISTRY_TIMEOUT_MS } from '../src/update-check.mjs'
 
 /* Issue #27 · 自管理 5 工具的公开 seam：
@@ -656,4 +656,60 @@ test('Q6 aggregateVersion 不写盘：只读聚合读 dismiss 状态但不落任
     apiModule: { scenesMarket: async () => [] },
   })
   assert.deepEqual(readdirSync(base), [], '版本全景是只读诊断：不得创建状态文件/目录')
+})
+
+/* ── QA 第 3 轮（PR #21）SJ6/SJ7：状态字面量与重复字段收敛到单源 ──
+ * 词表改名（HOST_STATE / UPDATE_STATE）时，散落的字面量判定会静默失效；
+ * credentialSummary 三层嵌套三元与 row() 的重复 label 同属可读性异味。 */
+
+test('SJ6 tools.mjs blocked 判定走 lifecycle HOST_STATE 常量（词表改名不得静默失效）', () => {
+  const src = readFileSync(new URL('../src/tools.mjs', import.meta.url), 'utf8')
+  assert.match(src, /HOST_STATE\.DAMAGED/, 'blocked 判定必须用 HOST_STATE.DAMAGED')
+  assert.match(src, /HOST_STATE\.MISSING/, '缺省状态回填必须用 HOST_STATE.MISSING')
+  assert.doesNotMatch(src, /===\s*'damaged'/, '不得再写 damaged 字面量')
+  assert.doesNotMatch(src, /\|\|\s*'missing'/, '不得再写 missing 字面量回填')
+  assert.doesNotMatch(src, /installed:\s*'已装配'/, 'STATE_LABEL 的键也必须来自 HOST_STATE')
+})
+
+test('SJ7 UPDATE_STATE 常量单源：updateDecision 状态值可取常量名', () => {
+  assert.deepEqual(UPDATE_STATE, {
+    NEWER: 'newer', LATEST: 'latest', DISMISSED: 'dismissed', UNAVAILABLE: 'unavailable',
+  })
+  assert.equal(updateDecision({ currentVersion: '0.4.0', latestVersion: '0.5.0' }).state, UPDATE_STATE.NEWER)
+  assert.equal(updateDecision({ currentVersion: '0.5.0', latestVersion: '0.5.0' }).state, UPDATE_STATE.LATEST)
+  assert.equal(updateDecision({ currentVersion: '0.4.0', latestVersion: '' }).state, UPDATE_STATE.UNAVAILABLE)
+  assert.equal(updateDecision({
+    currentVersion: '0.4.0', latestVersion: '0.5.0', dismissState: { version: '0.5.0', at: T0 }, now: T0 + DAY,
+  }).state, UPDATE_STATE.DISMISSED)
+})
+
+test('SJ7 tools.mjs 两端更新状态渲染用 UPDATE_STATE 常量（不散落字面量 key）', () => {
+  const src = readFileSync(new URL('../src/tools.mjs', import.meta.url), 'utf8')
+  assert.match(src, /\[UPDATE_STATE\.NEWER\]/, '版本全景的更新行应使用常量做映射键')
+  assert.match(src, /\[UPDATE_STATE\.DISMISSED\]/, 'check_update 结论行同样用常量')
+  assert.doesNotMatch(src, /json\.updateState === 'unavailable'/, '不得用字面量直接比较状态')
+})
+
+test('SJ7 credentialSummary 档位映射单源：runtime / env / file / 未配置四分支', () => {
+  const file = join(home(), 'config.json')
+  writeFileAt(file, JSON.stringify({ token: 'grape_fake' }))
+  const cases = [
+    [{ GRAPE_API_TOKEN_ONCE: 'grape_fake', GRAPE_AUTH_FILE: file }, 'runtime', /GRAPE_API_TOKEN_ONCE/],
+    [{ GRAPE_API_TOKEN: 'grape_fake', GRAPE_AUTH_FILE: file }, 'env', /环境变量 GRAPE_API_TOKEN/],
+    [{ GRAPE_AUTH_FILE: file }, 'file', /^文件 /],
+    [{ GRAPE_AUTH_FILE: join(home(), 'none.json') }, '', /^$/],
+  ]
+  for (const [env, kind, re] of cases) {
+    const s = credentialSummary(env)
+    assert.equal(s.sourceKind, kind, `sourceKind=${kind}`)
+    assert.match(s.source, re, `source 文案（${kind || '未配置'}）`)
+    assert.equal(s.configured, kind !== '')
+    assert.ok(!JSON.stringify(s).includes('grape_fake'), '绝不回显 token 明文')
+  }
+})
+
+test('SJ7 检出结果不再重复 label 字段（host 已是唯一标识，渲染只用 host）', () => {
+  const rows = detectHostStatus({ home: home(), env: baseEnv() })
+  assert.equal(rows.length, HOST_NAMES.length)
+  for (const r of rows) assert.ok(!('label' in r), `${r.host} 行的 label 与 host 重复，应删掉`)
 })

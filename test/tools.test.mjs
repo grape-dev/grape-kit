@@ -83,7 +83,12 @@ test('render: 非预期结构回退 JSON 不抛错', () => {
 })
 
 test('决策层工具描述强制「需用户确认」', () => {
-  for (const name of ['grape_cancel_issue', 'grape_resume_issue', 'grape_start_issue', 'grape_host_repo', 'grape_apply_scene', 'grape_create_project']) {
+  // Issue #27 的三个写工具（upgrade/install/uninstall）同属用户决策层，必须纳入同一张断言表，
+  // 否则「新增写工具」只需绕开这张表就能省掉确认纪律（QA SJ8）。
+  for (const name of [
+    'grape_cancel_issue', 'grape_resume_issue', 'grape_start_issue', 'grape_host_repo', 'grape_apply_scene', 'grape_create_project',
+    'grape_kit_upgrade', 'grape_kit_install', 'grape_kit_uninstall',
+  ]) {
     const t = findTool(name)
     assert.ok(t, `${name} 存在`)
     assert.match(t.description, /用户决策层.*确认|必须向用户确认|未选择不得执行/, `${name} 描述缺确认纪律`)
@@ -525,3 +530,18 @@ test('Q6 grape_kit_version：dismiss 冷却中渲染「已忽略」，不得再�
   assert.doesNotMatch(md, /有可用更新/, '已忽略的版本不得再标「有可用更新」')
   assert.doesNotMatch(md, /已是最新/, '被忽略不等于已是最新：两者是不同结论')
 })
+
+/* ── QA 第 3 轮（PR #21）SJ5/SJ8：命令生成面与决策门口径 ── */
+
+test('SJ5 目标宿主全为 damaged：空命令文案说「配置损坏待修复」，不再说「均为相反状态」', async () => {
+  const L = fakeLifecycle({ detectHostStatus: () => fiveRows() })
+  const t = findTool('grape_kit_install')
+  const json = await t.run({ target: 'workbuddy' }, { lifecycle: L })
+  assert.deepEqual(json.commands, [], 'damaged 宿主不生成命令')
+  assert.deepEqual((json.blocked || []).map((b) => b.host), ['workbuddy'])
+  const md = t.render(json)
+  assert.doesNotMatch(md, /均为相反状态/, '真实原因是 blocked（配置损坏），不是「状态相反」')
+  assert.match(md, /配置损坏|先修复/, '空命令时必须指出真正的阻塞原因与修复动作')
+})
+
+
