@@ -617,6 +617,29 @@ function renderHostPlan(json) {
   return lines.join('\n')
 }
 
+/**
+ * 版本全景「服务端」一行：值列与备注列由同一组分支决定（三分支：未探测 / 不可达 / 可达）。
+ * 抽成函数的原因：原先内联四层三元链，改一个分支要看穿整行才能确认其余分支没被带歪。
+ * @returns {{v: string, note: string}}
+ */
+function serverRow(srv = {}) {
+  const url = srv.baseUrl || ''
+  const contract = srv.contractVersion ? `契约版本 ${srv.contractVersion}` : ''
+  if (srv.probe === 'skipped') {
+    return {
+      v: `未探测（缺凭据）${url}`,
+      note: `${srv.reason || '未配置凭据'}${contract ? `；${contract}` : ''}`,
+    }
+  }
+  if (srv.reachable) {
+    return { v: `可达 ${url}`, note: contract || '契约版本未取到（404/不可达时省略）' }
+  }
+  return {
+    v: `不可达 ${url}`,
+    note: `${srv.error || ''}${srv.hint ? `（${srv.hint}）` : ''}${contract ? `；${contract}` : ''}`,
+  }
+}
+
 export const TOOLS = [
   {
     name: 'grape_trigger_pipeline',
@@ -1861,14 +1884,7 @@ curl -sSL ${base}/api/runtime/install | bash -s -- --token <TOKEN> --server ${ba
         },
         {
           k: '服务端',
-          v: srv.probe === 'skipped'
-            ? `未探测（缺凭据）${srv.baseUrl || ''}`
-            : srv.reachable ? `可达 ${srv.baseUrl || ''}` : `不可达 ${srv.baseUrl || ''}`,
-          note: srv.probe === 'skipped'
-            ? (srv.reason || '未配置凭据') + (srv.contractVersion ? `；契约版本 ${srv.contractVersion}` : '')
-            : srv.reachable
-              ? (srv.contractVersion ? `契约版本 ${srv.contractVersion}` : '契约版本未取到（404/不可达时省略）')
-              : (srv.error || '') + (srv.hint ? `（${srv.hint}）` : '') + (srv.contractVersion ? `；契约版本 ${srv.contractVersion}` : ''),
+          ...serverRow(srv),
         },
         {
           k: '凭据来源',
