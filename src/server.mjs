@@ -39,7 +39,7 @@ export const INSTRUCTIONS = `Grape DevOps 流水线遥控（多 agent：vod→is
 - 403 分两类：tk_ 专属端点（review-pass / review-reject / confirm-done）属通道边界，**不要重试**，改用 WebUI 或请用户执行；
   仓库未纳管导致的 403（无权对该仓库发起 A2A）先用 \`grape_host_repo\` 纳管（需用户确认）。
 - 事件是事实源：QA 打回与评论从 \`grape_get_issue_events\` 读；下一节点是否已派发看 \`next_seq\` 与 issue 事件，别重复派发。
-- 自管理属用户决策层：grape_kit_version / grape_kit_check_update 只读直执行（check_update 的 dismiss 只写本地忽略状态文件）；grape_kit_upgrade / grape_kit_install / grape_kit_uninstall **只生成命令、工具本身不执行任何变更**——必须先把命令块与影响范围交给用户，获得确认后再由用户（或用户允许的终端）执行。`
+8. 自管理属用户决策层：grape_kit_version / grape_kit_check_update 只读直执行（check_update 的 dismiss 只写本地忽略状态文件）；grape_kit_upgrade / grape_kit_install / grape_kit_uninstall **只生成命令、工具本身不执行任何变更**——必须先把命令块与影响范围交给用户，获得确认后再由用户（或用户允许的终端）执行。`
 
 /**
  * 创建 server 实例（依赖注入便于测试）。
