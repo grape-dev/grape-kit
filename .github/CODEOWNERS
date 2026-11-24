@@ -1,10 +1,26 @@
-# 代码所有者：与 GitCode「保护分支 → 需要代码所有者审批」配合生效。
-# 本文件当前为模板，启用前请把真实维护者账号填进下面的规则（账号名带 @）。
+# CODEOWNERS for @grape-dev/grape-kit
+#
+# 生效位置：本文件（.github/CODEOWNERS）。解析优先级为
+# .github/CODEOWNERS > 根目录 CODEOWNERS > docs/CODEOWNERS，
+# owner 变更只在此处维护，不要再新增根目录或 docs/ 下的 CODEOWNERS，
+# 避免同一语义出现多份文件、生效位置不确定与内容漂移。
+#
+# 生效前提（需管理员在仓库设置中开启，本文件不会自动生效）：
+# 1. 打开 https://gitcode.com/grape-dev/grape-kit/settings
+# 2. 「合并请求」→ 开启「按 CODEOWNERS 要求审批」
+# 3. 保护分支 main / dev 上设置「必需审批数 ≥ 1」并「禁止创建者自审自合」
+# 详细步骤见 CONTRIBUTING.md §4。
+#
+# 注意：grape_bot 作为流程机器人不应出现在 owner 列表中——否则 bot 自建 PR
+# 时会形成「自审自合」，失去人工把关意义（PR !17 复盘）。
 #
 # 语法：<路径模式>  <@账号或组>  [<@账号> ...]
-#
-# 建议配置（取消注释并替换为实际维护者）：
-# *                 @songspace @Jason7602
-# /src/             @<核心维护者>
-# /.github/         @<负责 CI 的维护者>
-# /SECURITY.md      @<安全Owner>
+
+# 全仓库默认 owner：组织管理员（5 位 org Owner）
+* @chenjingjie @songspace @yuanbeyond @Jason7602 @HugLovesWine
+
+# 发版簿记路径（版本号 / CHANGELOG）当前已被上方 `*` 覆盖、无独立行为差异；
+# 若后续按模块拆分 owner，在此取消注释并按路径指定责任人即可。
+# /package.json      @chenjingjie @songspace @yuanbeyond @Jason7602 @HugLovesWine
+# /package-lock.json @chenjingjie @songspace @yuanbeyond @Jason7602 @HugLovesWine
+# /CHANGELOG.md      @chenjingjie @songspace @yuanbeyond @Jason7602 @HugLovesWine
