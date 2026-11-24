@@ -520,6 +520,9 @@ const NO_TERMINAL_HINT = '无终端工具的宿主：把命令与需要编辑的
 
 /**
  * install / uninstall 共用的计划构建：逐宿主只读检出 → 需要动作的宿主才生成命令。
+ * damaged 宿主（配置解析失败）**一律不生成命令**：CLI 侧的 install/uninstall 对解析失败的
+ * 配置直接 `exit 1`（「请先修复或移走该文件后重试」），照给命令等于给一条必失败的动作；
+ * 它们单列进 `blocked`，带出解析错误，让用户先修配置。
  * @param {'install'|'uninstall'} action
  * @param {string} targetArg 宿主名或 all（缺省 all）
  */
@@ -532,7 +535,8 @@ function buildHostPlan(action, targetArg, L) {
   const targets = target === 'all' ? HOST_TARGETS : [target]
   const hosts = targets.map((host) => {
     const r = rows.find((x) => x.host === host) || { host, state: 'missing', installed: false, path: '', skillsDir: '', entry: '' }
-    const needsAction = action === 'install' ? !r.installed : !!r.installed
+    const blocked = r.state === 'damaged'
+    const needsAction = blocked ? false : action === 'install' ? !r.installed : !!r.installed
     return {
       host,
       state: r.state || 'missing',
@@ -540,17 +544,23 @@ function buildHostPlan(action, targetArg, L) {
       entry: r.entry || '',
       skillsDir: r.skillsDir || '',
       installed: !!r.installed,
+      blocked,
       evidence: r.evidence || r.error || '',
+      error: r.error || '',
+      // 修复指引不给可执行命令：配置坏着跑 install/uninstall 必被 CLI 拒，只说明「改什么、改完怎么办」
+      repair: blocked ? `先修复或移走 ${r.path}（${r.error || '配置解析失败'}），修好后重跑本工具即可生成${action === 'install' ? '装配' : '卸载'}命令` : '',
       command: needsAction ? `npx -y @grape-dev/grape-kit ${action} --target ${host}` : '',
     }
   })
   const active = hosts.filter((h) => h.command)
+  const blocked = hosts.filter((h) => h.blocked)
   const plan = {
     action,
     target,
     hosts,
     commands: active.map((h) => h.command),
-    skipped: hosts.filter((h) => !h.command).map((h) => h.host),
+    skipped: hosts.filter((h) => !h.command && !h.blocked).map((h) => h.host),
+    blocked: blocked.map((h) => ({ host: h.host, path: h.path, error: h.error, repair: h.repair })),
   }
   if (action === 'uninstall') {
     // 影响预览：只列不删。条目 + skill 副本 + （officeace）客户端侧手动删除提示
@@ -580,6 +590,13 @@ function renderHostPlan(json) {
   ]
   if (json.skipped?.length) {
     lines.push('', `已${isUninstall ? '跳过' : '装配'}的宿主本次不生成命令：${json.skipped.join(' / ')}`)
+  }
+  // damaged 宿主单列：表内既已写「配置损坏（先修复）」，命令块就不能照给（CLI 会 exit 1）
+  if (json.blocked?.length) {
+    lines.push('', '**⚠️ 配置损坏的宿主本次不生成命令（照着执行必被 CLI 拒绝，先修复）：**')
+    for (const b of json.blocked) {
+      lines.push(`- ${b.host} — ${b.repair || `${b.path}（${b.error || '配置解析失败'}）`}`)
+    }
   }
   if (isUninstall && json.effects?.length) {
     lines.push('', '**将移除的内容（只列不删，执行前请逐条确认）**', '')
