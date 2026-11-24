@@ -574,6 +574,52 @@ test('detectHosts 的 hermes 探测以 HERMES_HOME 覆盖路径为准（无 --ta
   assert.ok(!existsSync(join(h, '.hermes')), '不得写到默认 ~/.hermes')
 })
 
+test('卸载仅剩空容器：hermes / JSON 宿主删除空文件（写前备份），dry-run 同样披露', skipOnWin, () => {
+  // hermes：只剩 `mcp_servers:`（解析为 null）不得留在盘上
+  const h = home()
+  const dir = join(h, '.hermes')
+  mkdirSync(dir, { recursive: true })
+  const cfg = join(dir, 'config.yaml')
+  assert.equal(run(['install', '--target', 'hermes'], h).status, 0)
+
+  const dry = run(['uninstall', '--target', 'hermes', '--dry-run'], h)
+  assert.equal(dry.status, 0, dry.stderr)
+  assert.match(dry.stdout, /删除[^\n]*文件/, 'dry-run 应披露将删除仅剩空容器的文件')
+  assert.ok(existsSync(cfg), 'dry-run 不得删文件')
+
+  const un = run(['uninstall', '--target', 'hermes'], h)
+  assert.equal(un.status, 0, un.stderr)
+  assert.ok(!existsSync(cfg), 'hermes 仅剩空 mcp_servers 段时应删除整个文件')
+  assert.ok(backupsIn(dir).length >= 1, '删除前必须写一份原文备份')
+
+  // JSON 宿主：{"mcp": {"servers": {}}} / {"mcpServers": {}} 同样不得残留
+  const jsonHosts = [['openclaw', ['.openclaw', 'openclaw.json']], ['atomcode', ['.atomcode', 'mcp.json']]]
+  for (const [t, parts] of jsonHosts) {
+    const hj = home()
+    const file = join(hj, ...parts)
+    mkdirSync(dirname(file), { recursive: true })
+    assert.equal(run(['install', '--target', t], hj).status, 0, `${t} 安装失败`)
+    const d = run(['uninstall', '--target', t, '--dry-run'], hj)
+    assert.equal(d.status, 0, d.stderr)
+    assert.match(d.stdout, /删除[^\n]*文件/, `${t} dry-run 应披露将删除仅剩空容器的文件`)
+    assert.ok(existsSync(file), `${t} dry-run 不得删文件`)
+    assert.equal(run(['uninstall', '--target', t], hj).status, 0, `${t} 卸载失败`)
+    assert.ok(!existsSync(file), `${t} 仅剩空容器时应删除整个文件`)
+    assert.ok(backupsIn(dirname(file)).length >= 1, `${t} 删除前必须写一份原文备份`)
+  }
+
+  // trae（项目级）：同样口径
+  const hp = home()
+  const proj = join(hp, 'proj')
+  mkdirSync(proj, { recursive: true })
+  const traeCfg = join(proj, '.trae', 'mcp.json')
+  assert.equal(run(['install', '--target', 'trae'], proj, { HOME: hp }).status, 0)
+  const td = run(['uninstall', '--target', 'trae', '--dry-run'], proj, { HOME: hp })
+  assert.match(td.stdout, /删除[^\n]*文件/, 'trae dry-run 应披露将删除仅剩空容器的文件')
+  assert.equal(run(['uninstall', '--target', 'trae'], proj, { HOME: hp }).status, 0)
+  assert.ok(!existsSync(traeCfg), 'trae 仅剩空容器时应删除整个文件')
+})
+
 /* ---------- 汇总自检覆盖全部 10 宿主 ---------- */
 
 test('#26 裸 doctor 汇总覆盖全部 10 宿主，新装 5 宿主均报 [ok]', skipOnWin, () => {
