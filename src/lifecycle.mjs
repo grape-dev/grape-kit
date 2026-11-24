@@ -188,12 +188,16 @@ const row = (host, state, path, extra = {}) => ({
   host, label: host, state, path, installed: state === HOST_STATE.INSTALLED, ...extra,
 })
 
-/** 纯 JSON 宿主（mcpServers 容器）：同步指针：grape-kit.mjs detectJsonEntry */
+/** 纯 JSON 宿主（mcpServers 容器）：同步指针：grape-kit.mjs detectJsonEntry
+ *  BOM 口径**照抄 CLI 的非对称**（Spec §4.2 要防的就是这种分歧）：纯 JSON 通道 CLI 直接
+ *  `JSON.parse(readFileSync(file,'utf8'))`、不剥 BOM → BOM 配置报 damaged；jsonc 通道的
+ *  parseLoose 剥 BOM → BOM 的 jsonc 仍可解析。这里若「好心」剥 BOM，就会出现
+ *  lifecycle=installed / doctor=damaged 的两侧分歧（AGENTS 已点名 BOM 是本仓现实风险）。 */
 function detectJsonEntry(file, rootKey, name, { loose, host, skillsDir, entryLabel }) {
   if (!existsSync(file)) return row(host, HOST_STATE.MISSING, file, { skillsDir, entry: entryLabel })
   let cfg
   try {
-    cfg = loose ? parseJsonc(readFileSync(file, 'utf8')) : JSON.parse(readFileSync(file, 'utf8').replace(/^\uFEFF/, ''))
+    cfg = loose ? parseJsonc(readFileSync(file, 'utf8')) : JSON.parse(readFileSync(file, 'utf8'))
   } catch (e) {
     return row(host, HOST_STATE.DAMAGED, file, { skillsDir, entry: entryLabel, error: e.message })
   }
