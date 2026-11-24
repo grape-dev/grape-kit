@@ -921,25 +921,37 @@ function installCodex() {
   console.log('凭据走环境变量（GRAPE_BASE_URL / GRAPE_API_TOKEN），不要写进 config.toml')
 }
 
-function uninstallCodex() {
+/** 卸载决策：预览与执行同源（含「仅剩托管条目则删除整个文件」）。
+ *  action: missing | damaged | absent | remove | removeFile */
+function codexUninstallDecision() {
   const { config } = codexPaths()
-  if (!existsSync(config)) { console.log(`未找到 ${config}，无需卸载`); return }
+  if (!existsSync(config)) return { path: config, action: 'missing' }
   const text = readFileSync(config, 'utf8')
   const managed = stripCodexManaged(text)
-  if (managed.incomplete) {
+  if (managed.incomplete) return { path: config, action: 'damaged', text }
+  const next = stripCodexExistingTables(managed.text)
+  if (!text.includes('[mcp_servers.grape-kit]')) return { path: config, action: 'absent', text, next }
+  if (next.trim() === '') return { path: config, action: 'removeFile', text, next }
+  return { path: config, action: 'remove', text, next }
+}
+
+function uninstallCodex() {
+  const d = codexUninstallDecision()
+  const { path: config } = d
+  if (d.action === 'missing') { console.log(`未找到 ${config}，无需卸载`); return }
+  if (d.action === 'damaged') {
     console.error(`检测到不完整托管块（有起始标记、缺结束标记），已拒绝卸载：${config}`)
     process.exit(1)
   }
-  const next = stripCodexExistingTables(managed.text)
-  if (next.trim() === '') {
-    backupOf(config, text)
+  if (d.action === 'absent') { console.log('未发现 mcp_servers.grape-kit 条目，跳过'); return }
+  if (d.action === 'removeFile') {
+    backupOf(config, d.text)
     rmSync(config, { force: true })
     console.log(`已移除 grape-kit 条目，并删除仅剩该条目的文件：${config}`)
     return
   }
-  if (next === text) { console.log('未发现 mcp_servers.grape-kit 条目，跳过'); return }
-  const backup = backupOf(config, text)
-  writeFileSync(config, next)
+  const backup = backupOf(config, d.text)
+  writeFileSync(config, d.next)
   console.log(`已移除 mcp_servers.grape-kit 条目（备份: ${backup}）`)
 }
 
@@ -950,12 +962,13 @@ const CODEX_COPY = {
   preview: (s) => `将移除 mcp_servers.grape-kit 条目（${s.path}）`,
 }
 function planUninstallCodex() {
-  const { config } = codexPaths()
-  const exists = existsSync(config)
-  const has = exists && readFileSync(config, 'utf8').includes('[mcp_servers.grape-kit]')
-  return planUninstallSteps({
-    path: config, exists, status: has ? STEP.REMOVE : STEP.ABSENT, skills: null,
-  }, CODEX_COPY)
+  const d = codexUninstallDecision()
+  if (d.action === 'missing') return [CODEX_COPY.missing(d)]
+  if (d.action === 'damaged') return [`配置损坏（${d.path}）：跳过条目移除，请先修复`]
+  if (d.action === 'absent') return [CODEX_COPY.absent(d)]
+  const lines = [CODEX_COPY.preview(d)]
+  if (d.action === 'removeFile') lines.push(`将删除仅剩该条目的文件 ${d.path}（写前备份）`)
+  return lines
 }
 
 function detectCodex() {
@@ -1041,15 +1054,15 @@ function hermesPaths() {
   return { home, config: override || join(home, 'config.yaml'), skillsDir: join(home, 'skills') }
 }
 
-/** 托管条目（两空格缩进对齐 mcp_servers 下的现有条目）；args 用 YAML 单引号标量 */
-function hermesBlockLines() {
+/** 托管条目：缩进对齐 mcp_servers 下既有条目（默认两空格）；args 用 YAML 单引号标量 */
+function hermesBlockLines(indent = '  ') {
   return [
-    `  ${HERMES_BLOCK_START}`,
-    '  grape-kit:',
-    '    command: npx',
-    '    args:',
-    ...NPX_ARGS.map((a) => `      - ${yamlScalar(a)}`),
-    `  ${HERMES_BLOCK_END}`,
+    `${indent}${HERMES_BLOCK_START}`,
+    `${indent}grape-kit:`,
+    `${indent}  command: npx`,
+    `${indent}  args:`,
+    ...NPX_ARGS.map((a) => `${indent}    - ${yamlScalar(a)}`),
+    `${indent}${HERMES_BLOCK_END}`,
   ]
 }
 
@@ -1062,23 +1075,25 @@ function stripHermesManaged(lines) {
   return { lines: [...lines.slice(0, start), ...lines.slice(end + 1)], removed: true }
 }
 
-/** 摘除用户手工写入的 mcp_servers.grape-kit（只删该键及其缩进子行） */
+/** 摘除用户手工写入的 mcp_servers.grape-kit（只删该键及其缩进子行；缩进不限定 2 空格） */
 function stripHermesExistingEntry(lines) {
   const header = lines.findIndex((l) => /^mcp_servers:\s*(?:#.*)?$/.test(l))
   if (header < 0) return lines
   let start = -1
+  let indent = 0
   for (let i = header + 1; i < lines.length; i++) {
     const l = lines[i]
     if (l.trim() !== '' && !l.trimStart().startsWith('#') && !/^\s/.test(l)) break
-    if (/^ {2}grape-kit:\s*(?:#.*)?$/.test(l)) { start = i; break }
+    const m = l.match(/^(\s+)grape-kit:\s*(?:#.*)?$/)
+    if (m) { start = i; indent = m[1].length; break }
   }
   if (start < 0) return lines
   let end = start + 1
   while (end < lines.length) {
     const l = lines[end]
     if (l.trim() === '') { end++; continue }
-    const indent = l.match(/^ */)[0].length
-    if (indent <= 2 && !l.trimStart().startsWith('#')) break
+    const lead = l.match(/^ */)[0].length
+    if (lead <= indent && !l.trimStart().startsWith('#')) break
     end++
   }
   return [...lines.slice(0, start), ...lines.slice(end)]
@@ -1092,9 +1107,20 @@ function hermesHasEntry(text) {
   for (let i = header + 1; i < lines.length; i++) {
     const l = lines[i]
     if (l.trim() !== '' && !l.trimStart().startsWith('#') && !/^\s/.test(l)) break
-    if (/^ {2}grape-kit:\s*(?:#.*)?$/.test(l)) return true
+    if (/^\s+grape-kit:\s*(?:#.*)?$/.test(l)) return true
   }
   return false
+}
+
+/** mcp_servers 段内既有子条目的缩进（默认两空格），用于托管条目对齐 */
+function hermesSectionIndent(lines, header) {
+  for (let i = header + 1; i < lines.length; i++) {
+    const l = lines[i]
+    if (l.trim() === '' || l.trimStart().startsWith('#')) continue
+    const m = l.match(/^(\s+)\S/)
+    return m ? m[1] : '  '
+  }
+  return '  '
 }
 
 function installHermes() {
@@ -1105,6 +1131,11 @@ function installHermes() {
     process.exit(1)
   }
   let lines = originalText === null ? [] : originalText.split('\n')
+  const inlineMap = lines.findIndex((l) => /^mcp_servers:\s*\{(.*)\}\s*(?:#.*)?$/.test(l))
+  if (inlineMap >= 0 && !/^mcp_servers:\s*\{\s*\}\s*(?:#.*)?$/.test(lines[inlineMap])) {
+    console.error(`检测到非空 inline mcp_servers 映射，追加托管条目会生成重复顶级键；已拒绝安装，请先将其改为块格式：${p.config}`)
+    process.exit(1)
+  }
   lines = stripHermesManaged(lines).lines
   lines = stripHermesExistingEntry(lines)
   const header = lines.findIndex((l) => /^mcp_servers:\s*(?:#.*)?$/.test(l))
@@ -1112,7 +1143,7 @@ function installHermes() {
   if (inlineEmpty >= 0) lines[inlineEmpty] = 'mcp_servers:'
   const h = header >= 0 ? header : inlineEmpty
   if (h >= 0) {
-    lines.splice(h + 1, 0, ...hermesBlockLines())
+    lines.splice(h + 1, 0, ...hermesBlockLines(hermesSectionIndent(lines, h)))
   } else {
     if (lines.length && lines[lines.length - 1] === '') lines.pop()
     if (lines.length) lines.push('')
@@ -1228,17 +1259,13 @@ function doctorAtomcode(probe) {
   printChecks(checks)
 }
 
-/* ---------- trae：项目级 .trae/mcp.json（用户级 ~/.trae/mcp.json 兜底） ---------- */
+/* ---------- trae：项目级 .trae/mcp.json（Spec Out of Scope：不做用户级兜底） ---------- */
 
-/** 路径优先级：GRAPE_TRAE_CONFIG 覆盖 > 项目级 .trae/mcp.json（Trae 官方入口）> 用户级 ~/.trae/mcp.json */
+/** 路径优先级：GRAPE_TRAE_CONFIG 覆盖 > 当前项目 .trae/mcp.json（Trae 官方入口，项目级语义） */
 function traePaths() {
   const override = String(process.env.GRAPE_TRAE_CONFIG || '').trim()
   if (override) return { config: override }
-  const project = join(process.cwd(), '.trae', 'mcp.json')
-  if (existsSync(project)) return { config: project }
-  const home = join(homedir(), '.trae', 'mcp.json')
-  if (existsSync(home)) return { config: home }
-  return { config: project }
+  return { config: join(process.cwd(), '.trae', 'mcp.json') }
 }
 function traeContainer(cfg, create) {
   if (cfg.mcpServers && typeof cfg.mcpServers === 'object') return cfg.mcpServers
@@ -1903,7 +1930,7 @@ function detectHosts() {
   if (existsSync(join(home, '.openclaw'))) found.push('openclaw')
   if (existsSync(join(home, '.hermes'))) found.push('hermes')
   if (existsSync(atomcodePaths().root)) found.push('atomcode')
-  if (existsSync(dirname(traePaths().config))) found.push('trae')
+  if (existsSync(traePaths().config)) found.push('trae')
   return found
 }
 

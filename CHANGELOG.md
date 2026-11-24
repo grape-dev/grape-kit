@@ -8,7 +8,6 @@
 
 ### Added
 
-<<<<<<< HEAD
 - **场景三段式工具面**（修复宿主实测 P3/P4/P5 的静默失败）：`grape_apply_scene` 改为走 `POST /api/scenes/market/{id}/apply` 在仓库内**创建场景副本**（响应带 `scene_id=custom-xxxxxxxx`），应用后**回读** `GET /api/scenes?repo=` 确认副本存在；输入只认市场数字 id 或场景名，未命中即本地拒绝（不再让服务端静默回落 `default`），`custom-` 副本 id 直接引导到新工具。`set_default=true` 时再调 `POST …/default-scene` 完成「设为仓库默认」。
 - `grape_set_repo_scene`：写 `managed_repos.dev_scene`（或 `clear=true` 清空回落智能推荐），写后回读 `dev_scene`，不一致时报「未确认」而不是宣称已切换。此前 kit 没有任何工具能改仓库默认场景，「应用场景」与「切换场景」被混为一谈。
 - `grape_list_scenes` 支持仓库视角：传 `owner/repo` 列仓库场景副本（`custom-xxxxxxxx`，`set_repo_scene` 的唯一合法入参），不传则列市场模板。
@@ -19,7 +18,7 @@
 - openclaw：`~/.openclaw/openclaw.json` 的 `mcp.servers.grape-kit`，兼容旧 `mcpServers` 键；`GRAPE_OPENCLAW_CONFIG` 可覆盖路径。
 - hermes：`~/.hermes/config.yaml` 的 `mcp_servers.grape-kit`（保注释/保序）+ `grape-remote` skill 副本到 `~/.hermes/skills/`；`HERMES_HOME` / `GRAPE_HERMES_CONFIG` 可覆盖。
 - atomcode：`~/.atomcode/mcp.json` 的 `mcpServers.grape-kit`，`ATOMCODE_HOME` 可覆盖根路径。
-- trae：项目级 `.trae/mcp.json` 的 `mcpServers.grape-kit`（用户级 `~/.trae/mcp.json` 兜底），`GRAPE_TRAE_CONFIG` 可覆盖；路径对齐 Trae 官方 MCP 入口。
+- trae：项目级 `.trae/mcp.json` 的 `mcpServers.grape-kit`（仅项目级语义，不做用户级兜底），`GRAPE_TRAE_CONFIG` 可覆盖；路径对齐 Trae 官方 MCP 入口。
 - 每个新宿主补 fake HOME 单测（含 TOML 注释/他人表保留、YAML 保注释与条目隔离、JSON 容器兼容、dry-run 不动盘、幂等与备份），单测 270→280；README / README.zh 新增 10 宿主支持矩阵与 5 个宿主专段。
 
 ### Changed
@@ -35,6 +34,11 @@
 - 技能上传/升级失败时只显示第一条校验错误：现在按服务端 `detail.errors` 全量列出。
 - 测试脚手架可移植性：`scripts/fake-grape.mjs` 的 wait 轮询计数器原硬编码在共享临时目录，多用户机器上非属主跑 `npm test` 会 EACCES（表现为 287 pass / 1 fail 的假产品缺陷）；改为 `os.tmpdir()` 下按 uid 隔离，并支持 `GRAPE_FAKE_TMPDIR` 覆盖。
 - 技能上传后的「下一步」提示不再暗示平台已有节点级绑定能力：写明目前只能整场景 PUT（节点级写端点属 P1 计划）。
+- `test/setup-targets.test.mjs` 子进程补 `cwd` 隔离：工作树含 `.trae/` 时不再误命中 trae 探测，也不会改写真实 `.trae/mcp.json`。
+- trae 探测收窄为 `.trae/mcp.json` 文件存在，避免仅有空目录时误判。
+- hermes 手写条目缩进泛化（不再只认 2 空格）：4 空格等合法 YAML 条目安装时去重、doctor 可检出；托管条目缩进对齐既有段落。
+- hermes 遇非空 inline `mcp_servers` 映射时中止安装并保持文件原样，避免生成重复顶级键。
+- codex `uninstall --dry-run` 在文件仅剩托管条目时明确披露「将删除整个文件」，预览与执行同源。
 
 ## 0.4.0 (2026-11-23)
 

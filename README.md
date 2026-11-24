@@ -59,7 +59,7 @@ agent (MCP stdio: opencode / CodeArts / WorkBuddy / dsh…; other MCP-capable ag
 | `openclaw` | `~/.openclaw/openclaw.json` | JSON `mcp.servers` (legacy `mcpServers` compatible) |
 | `hermes` | `~/.hermes/config.yaml` | YAML `mcp_servers` + skill copy |
 | `atomcode` | `~/.atomcode/mcp.json` (`ATOMCODE_HOME` override) | JSON `mcpServers` |
-| `trae` | `<project>/.trae/mcp.json` (user `~/.trae/mcp.json` fallback; `GRAPE_TRAE_CONFIG` override) | JSON `mcpServers`; path aligned with the official Trae MCP entry |
+| `trae` | `<project>/.trae/mcp.json` (`GRAPE_TRAE_CONFIG` override) | JSON `mcpServers`; project-level only, aligned with the official Trae MCP entry |
 
 Prerequisites: **Node >= 20** (no Python needed — native HTTP since v0.3.0). Credentials go through environment variables:
 
@@ -202,7 +202,7 @@ npx -y @grape-dev/grape-kit uninstall --target atomcode
 npx -y @grape-dev/grape-kit install --target trae
 ```
 
-Writes `mcpServers.grape-kit` into the project-level `.trae/mcp.json` (Trae's official MCP entry), falling back to the user-level `~/.trae/mcp.json` when no project file exists; `GRAPE_TRAE_CONFIG` overrides either path. Other servers are preserved and every write is backed up.
+Writes `mcpServers.grape-kit` into the project-level `.trae/mcp.json` (Trae's official MCP entry, run from the project root); `GRAPE_TRAE_CONFIG` overrides the path. User-level `~/.trae/mcp.json` is intentionally not touched. Other servers are preserved and every write is backed up.
 
 ```bash
 npx -y @grape-dev/grape-kit doctor --target trae --probe

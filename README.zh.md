@@ -59,7 +59,7 @@ agent 宿主（MCP stdio：opencode / CodeArts / WorkBuddy / dsh…；其他 MCP
 | `openclaw` | `~/.openclaw/openclaw.json` | JSON `mcp.servers`（兼容旧 `mcpServers`） |
 | `hermes` | `~/.hermes/config.yaml` | YAML `mcp_servers` + skill 副本 |
 | `atomcode` | `~/.atomcode/mcp.json`（`ATOMCODE_HOME` 可覆盖） | JSON `mcpServers` |
-| `trae` | `<项目>/.trae/mcp.json`（用户级 `~/.trae/mcp.json` 兜底；`GRAPE_TRAE_CONFIG` 覆盖） | JSON `mcpServers`；路径对齐 Trae 官方 MCP 入口 |
+| `trae` | `<项目>/.trae/mcp.json`（`GRAPE_TRAE_CONFIG` 覆盖） | JSON `mcpServers`；仅项目级，路径对齐 Trae 官方 MCP 入口 |
 
 前提：**Node ≥ 20**（无需 Python——v0.3.0 起原生 HTTP 直连）。凭据走环境变量：
 
@@ -202,7 +202,7 @@ npx -y @grape-dev/grape-kit uninstall --target atomcode
 npx -y @grape-dev/grape-kit install --target trae
 ```
 
-写入项目级 `.trae/mcp.json` 的 `mcpServers.grape-kit`（Trae 官方 MCP 入口）；无项目级文件时回退到用户级 `~/.trae/mcp.json`；两种路径均可用 `GRAPE_TRAE_CONFIG` 覆盖。其它 MCP server 保留，每次写入先备份。
+写入项目级 `.trae/mcp.json` 的 `mcpServers.grape-kit`（Trae 官方 MCP 入口，需在项目根目录执行）；`GRAPE_TRAE_CONFIG` 可覆盖路径。按设计不触碰用户级 `~/.trae/mcp.json`。其它 MCP server 保留，每次写入先备份。
 
 ```bash
 npx -y @grape-dev/grape-kit doctor --target trae --probe
