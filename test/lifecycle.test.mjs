@@ -348,7 +348,7 @@ test('S3 dismissVersion 显式指定优先于 npm latest（用户点名的版本
 /* ── S4：版本全景 aggregateVersion（fetch / spawn / api 全注入，Spec §3.1） ── */
 
 /** 注入用桩：npm registry latest + 服务端 openapi.json 两条 fetch 分流 */
-function stubFetch({ latest = '0.5.0', openapi = { status: 200, body: { info: { version: '2.1.0' } } }, npmThrows = false, seen = [] } = {}) {
+function stubFetch({ latest = '0.5.0', openapi = { status: 200, body: { info: { version: '2.1.0' } } }, npmThrows = false, openapiThrows = false, seen = [] } = {}) {
   return async (url, opts = {}) => {
     seen.push({ url: String(url), signal: opts.signal })
     if (String(url).includes('registry.npmjs.org')) {
@@ -356,6 +356,7 @@ function stubFetch({ latest = '0.5.0', openapi = { status: 200, body: { info: { 
       return { ok: true, status: 200, json: async () => ({ version: latest }) }
     }
     if (String(url).includes('/static/openapi.json')) {
+      if (openapiThrows) throw new Error('connect ECONNREFUSED')
       return { ok: openapi.status === 200, status: openapi.status, json: async () => openapi.body }
     }
     return { ok: false, status: 404, json: async () => ({}) }
@@ -418,7 +419,7 @@ test('S4 服务端不可达 / 契约端点 404：不阻塞其余字段，不伪�
   const down = await aggregateVersion({
     pkgVersion: '0.4.0',
     env: { GRAPE_BASE_URL: 'https://grape.test', GRAPE_API_TOKEN: 'grape_fake', GRAPE_AUTH_FILE: '/nonexistent/x.json' },
-    fetchImpl: stubFetch(), spawnImpl: okSpawn, apiModule: downApi,
+    fetchImpl: stubFetch({ openapiThrows: true }), spawnImpl: okSpawn, apiModule: downApi,
   })
   assert.equal(down.server.reachable, false)
   assert.ok(down.server.error)

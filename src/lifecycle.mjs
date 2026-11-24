@@ -13,7 +13,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { grapeHome, npxCacheRoot } from './api.mjs'
+import { spawnSync as nodeSpawnSync } from 'node:child_process'
+import { api as defaultApi, grapeHome, getBaseUrl, npxCacheRoot, resolveCredentials } from './api.mjs'
 import { isNewerVersion } from './update-check.mjs'
 
 /** 五宿主标识：与 `grape-kit.mjs` 的 `SUPPORTED_TARGETS`（opencode/workbuddy/codearts/officeace/dsh）逐一对应 */
@@ -373,4 +374,134 @@ export function updateDecision({
     }
   }
   return { ...base, state: 'newer', updateAvailable: true, dismissed: false }
+}
+
+/* ── S4：版本全景（Spec §3.1） ──
+ * 一次返回 kit 本地版本 / npm latest / 更新可用性 / grape CLI / 服务端连通性与契约版本 / 凭据来源。
+ * 每个外部通道都 best-effort：单一通道失败只把该字段降级为 unavailable，不阻塞其余字段。
+ * 幂等只读：本函数不写任何缓存（被动提醒的 24h 缓存归 update-check.mjs，语义解耦）。 */
+
+const NPM_REGISTRY = 'https://registry.npmjs.org'
+const REGISTRY_TIMEOUT_MS = 5000
+const CLI_HINT = '未安装（可选：pip install git+https://gitcode.com/grape-dev/grape-cli.git）'
+
+/** 本地 kit 版本：与 src/server.mjs 同源（包根 package.json） */
+export function readKitVersion() {
+  try {
+    return JSON.parse(readFileSync(join(KIT_ROOT, 'package.json'), 'utf8')).version || ''
+  } catch {
+    return ''
+  }
+}
+
+/**
+ * npm registry latest（5s 有界超时；任何失败返回 ''，调用方自行降级为 unavailable）。
+ * @param {{fetchImpl?: Function, timeoutMs?: number}} [opts]
+ */
+export async function fetchLatestVersion({ fetchImpl = fetch, timeoutMs = REGISTRY_TIMEOUT_MS } = {}) {
+  try {
+    const r = await fetchImpl(`${NPM_REGISTRY}/@grape-dev/grape-kit/latest`, { signal: AbortSignal.timeout(timeoutMs) })
+    if (!r || !r.ok) return ''
+    const d = await r.json()
+    return d && typeof d.version === 'string' ? d.version.trim() : ''
+  } catch {
+    return ''
+  }
+}
+
+/** 凭据来源摘要：只给来源与档位，绝不含 token 明文（AGENTS 红线） */
+export function credentialSummary(env = process.env) {
+  const c = resolveCredentials(env)
+  const configured = !!c.token
+  const source = c.sourceKind === 'runtime'
+    ? '一次性 env GRAPE_API_TOKEN_ONCE'
+    : c.sourceKind === 'env'
+      ? '环境变量 GRAPE_API_TOKEN'
+      : c.sourceKind === 'file'
+        ? `文件 ${String(c.source).slice('file:'.length)}`
+        : ''
+  return {
+    configured,
+    sourceKind: c.sourceKind || '',
+    source,
+    hint: configured ? '' : '未配置凭据：export GRAPE_API_TOKEN=grape_你的Key（或写入 ~/.grape/config.json，或用 npx -y @grape-dev/grape-kit auth init 写文件通道）',
+  }
+}
+
+/** grape CLI 探测：v0.3.0 起原生 HTTP 直连，CLI 仅 401 回退通道——缺失是提示，不是失败 */
+function probeGrapeCli({ env = process.env, spawnImpl = nodeSpawnSync } = {}) {
+  const bin = String(env.GRAPE_CLI_BIN || '').trim() || 'grape'
+  try {
+    const r = spawnImpl(bin, ['--version'], { encoding: 'utf8', timeout: 10_000 })
+    const version = String(r?.stdout ?? '').trim()
+    if (r && r.status === 0) return { status: 'ok', bin, version }
+  } catch { /* 未装/不可执行 → 走 missing */ }
+  return { status: 'missing', bin, version: '', hint: CLI_HINT }
+}
+
+/** 服务端：连通性（api 既有只读调用）+ 契约版本（openapi.json 的 info.version，404/不可达则省略） */
+async function probeServer({ env = process.env, fetchImpl = fetch, apiModule, timeoutMs = REGISTRY_TIMEOUT_MS } = {}) {
+  const baseUrl = getBaseUrl(env)
+  const out = { baseUrl, reachable: false }
+  const A = apiModule || defaultApi
+  try {
+    await A.scenesMarket()
+    out.reachable = true
+  } catch (e) {
+    out.error = String(e?.message || e)
+    if (e?.hint) out.hint = String(e.hint)
+  }
+  try {
+    const r = await fetchImpl(`${baseUrl.replace(/\/$/, '')}/static/openapi.json`, { signal: AbortSignal.timeout(timeoutMs) })
+    if (r && r.ok) {
+      const d = await r.json()
+      const v = d?.info?.version
+      if (v) out.contractVersion = String(v)
+    }
+  } catch { /* 契约版本是加分项：拿不到就省略，不报错误值 */ }
+  return out
+}
+
+/** 更新提示文案（按判定分行；dismiss 冷却期内不再说「有新版本」） */
+export function updateNoticeFor(decision) {
+  switch (decision.state) {
+    case 'newer':
+      return `有新版本 ${decision.currentVersion} → ${decision.latestVersion}（npm i -g @grape-dev/grape-kit 更新；npx 用户下次拉取即最新）`
+    case 'dismissed':
+      return `${decision.latestVersion} 已被用户忽略，冷却至 ${new Date(decision.cooldownUntil).toISOString()}（新版本出现会重新提醒）`
+    case 'latest':
+      return `已是最新（${decision.currentVersion}）`
+    default:
+      return '检测不可用（npm registry 不可达或响应异常），不影响工具可用性'
+  }
+}
+
+/**
+ * 版本全景聚合（只读）。
+ * @param {{
+ *   pkgVersion?: string, env?: object, fetchImpl?: Function, spawnImpl?: Function,
+ *   apiModule?: object, now?: number, timeoutMs?: number
+ * }} [opts]
+ */
+export async function aggregateVersion({
+  pkgVersion, env = process.env, fetchImpl = fetch, spawnImpl = nodeSpawnSync,
+  apiModule, now = Date.now(), timeoutMs = REGISTRY_TIMEOUT_MS,
+} = {}) {
+  const kitVersion = pkgVersion || readKitVersion()
+  const [latestVersion, server] = await Promise.all([
+    fetchLatestVersion({ fetchImpl, timeoutMs }),
+    probeServer({ env, fetchImpl, apiModule, timeoutMs }),
+  ])
+  const decision = updateDecision({ currentVersion: kitVersion, latestVersion, now })
+  return {
+    kitVersion,
+    latestVersion,
+    updateAvailable: decision.updateAvailable,
+    updateState: decision.state,
+    updateNotice: updateNoticeFor(decision),
+    grapeCli: probeGrapeCli({ env, spawnImpl }),
+    server,
+    credentials: credentialSummary(env),
+    checkedAt: new Date(now).toISOString(),
+  }
 }
