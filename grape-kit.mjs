@@ -826,7 +826,9 @@ function readJsonHostForWrite(file) {
   return { originalText, cfg: parsed.cfg }
 }
 
-/** JSON 容器条目卸载判定（dry-run 与真实卸载同源） */
+/** JSON 容器条目卸载判定（dry-run 与真实卸载同源）。
+ *  摘除后若文件只剩空容器（`{"mcpServers": {}}` / `{"mcp": {"servers": {}}}`）→ removeFile：
+ *  与 codex「仅剩托管条目则删文件」同口径（QA#PR22 P2：各宿主卸载残留空容器）。 */
 function inspectJsonContainerUninstall(file, getContainer) {
   const steps = { path: file, exists: existsSync(file), status: STEP.ABSENT, beforeText: null, nextText: null }
   if (!steps.exists) return steps
@@ -836,11 +838,20 @@ function inspectJsonContainerUninstall(file, getContainer) {
   const container = getContainer(parsed.cfg, false)
   if (container && container['grape-kit']) {
     delete container['grape-kit']
-    steps.status = STEP.REMOVE
     steps.beforeText = text
     steps.nextText = JSON.stringify(parsed.cfg, null, 2) + '\n'
+    steps.status = isEmptyJsonShell(parsed.cfg) ? STEP.REMOVE_FILE : STEP.REMOVE
   }
   return steps
+}
+
+/** 只剩空壳（顶层键全是空对象，如 {"mcp":{"servers":{}}}）：文件已无用户内容，删除优于留空容器 */
+function isEmptyJsonShell(value) {
+  if (value === null || typeof value !== 'object') return false
+  if (Array.isArray(value)) return value.length === 0
+  const keys = Object.keys(value)
+  if (keys.length === 0) return true
+  return keys.every((k) => isEmptyJsonShell(value[k]))
 }
 
 /** JSON 容器条目检出：解析失败带 error，doctor 可区分「未装配」与「配置损坏」 */
@@ -1182,6 +1193,20 @@ function stripHermesExistingEntry(lines) {
   return [...lines.slice(0, start), ...lines.slice(end)]
 }
 
+/** 摘除条目后 mcp_servers 段已无子键 → 连带删段头，避免留下解析为 null 的空容器。
+ *  段内还有子键（或缩进注释）则原样保留。 */
+function hermesDropEmptySection(lines) {
+  const header = lines.findIndex((l) => HERMES_HEADER_RE.test(l))
+  if (header < 0) return { lines, dropped: false }
+  for (let i = header + 1; i < lines.length; i++) {
+    const l = lines[i]
+    if (l.trim() === '' || l.trimStart().startsWith('#')) continue
+    if (/^\s/.test(l)) return { lines, dropped: false }   // 仍缩进 → 段内还有子行
+    break                                                  // 下一个顶级键 → 段已空
+  }
+  return { lines: lines.filter((_, i) => i !== header), dropped: true }
+}
+
 /** 段内同层是否已有 grape-kit 条目（其它 server 下的嵌套同名键不算） */
 function hermesHasEntry(text) {
   const lines = text.split('\n')
@@ -1250,8 +1275,11 @@ function hermesUninstallDecision() {
   const text = readFileSync(p.config, 'utf8')
   const stripped = stripHermesManaged(text.split('\n'))
   if (stripped.incomplete) return { path: p.config, skillsDir: p.skillsDir, action: 'damaged', text }
-  const next = stripHermesExistingEntry(stripped.lines).join('\n').replace(/\n*$/, '\n')
+  const dropped = hermesDropEmptySection(stripHermesExistingEntry(stripped.lines))
+  const next = dropped.lines.join('\n').replace(/\n*$/, '\n')
   if (!hermesHasEntry(text) || next === text) return { path: p.config, skillsDir: p.skillsDir, action: 'absent', text, next }
+  // 只剩空 mcp_servers 段 → 文件已无用户内容：删文件（写前备份），不残留解析为 null 的空容器
+  if (next.trim() === '') return { path: p.config, skillsDir: p.skillsDir, action: 'removeFile', text, next }
   return { path: p.config, skillsDir: p.skillsDir, action: 'remove', text, next }
 }
 
@@ -1260,11 +1288,17 @@ const HERMES_COPY = {
   absent: () => '未发现 mcp_servers.grape-kit 条目，跳过',
   removed: (s, backup) => `已移除 mcp_servers.grape-kit 条目（备份: ${backup}）`,
   preview: (s) => `将移除 mcp_servers.grape-kit 条目（${s.path}）`,
+  removedFile: (s, backup) => `已移除 mcp_servers.grape-kit 条目，并删除仅剩空容器的文件 ${s.path}（备份: ${backup}）`,
+  previewFile: (s) => `将删除仅剩空容器的文件 ${s.path}（写前备份）`,
 }
 
 /** 决策 → 共享卸载步骤：plan 与 apply 都从这里取，判定与动作单源 */
 function hermesUninstallSteps(d) {
   const steps = { path: d.path, exists: d.action !== 'missing', status: STEP.ABSENT, beforeText: null, nextText: null, ...skillUninstallSteps(d.skillsDir) }
+  if (d.action === 'removeFile') {
+    steps.status = STEP.REMOVE_FILE
+    steps.beforeText = d.text
+  }
   if (d.action === 'remove') {
     steps.status = STEP.REMOVE
     steps.beforeText = d.text
@@ -1755,7 +1789,7 @@ function copySkillWorkbuddy() {
 }
 
 /** 卸载步骤状态：具名单源，避免各宿主各写一份字符串字面量后再漂移（QA#PR13 判断项 7） */
-const STEP = Object.freeze({ REMOVE: 'remove', ABSENT: 'absent', DAMAGED: 'damaged' })
+const STEP = Object.freeze({ REMOVE: 'remove', REMOVE_FILE: 'removeFile', ABSENT: 'absent', DAMAGED: 'damaged' })
 
 /** 宿主 skill 卸载的共享步骤判定：dry-run 预览与真实执行同源，防预览/执行漂移。
  *  无 receipt 时沿用历史默认 `grape-remote`（无文件删除为 no-op）。 */
@@ -1790,7 +1824,12 @@ function damagedEntryLine(steps) {
  *  对 YAML/TOML 不适用。钩子返回备份路径；缺省走 writeValidated（JSON 宿主）。 */
 function applyUninstallSteps(steps, copy) {
   if (!steps.exists) console.log(copy.missing(steps))
-  else if (steps.status === STEP.REMOVE) {
+  else if (steps.status === STEP.REMOVE_FILE) {
+    // 仅剩空容器：写前备份 + 删文件（与 codex removeFile 同口径）
+    const backup = backupOf(steps.path, steps.beforeText)
+    rmSync(steps.path, { force: true })
+    console.log(copy.removedFile ? copy.removedFile(steps, backup) : `已移除 grape 条目，并删除仅剩空容器的文件 ${steps.path}（备份: ${backup}）`)
+  } else if (steps.status === STEP.REMOVE) {
     const backup = steps.writeNext ? steps.writeNext() : writeValidated(steps.path, steps.nextText, steps.beforeText)
     console.log(copy.removed(steps, backup))
   } else if (steps.status === STEP.DAMAGED) console.log(damagedEntryLine(steps))
@@ -1802,10 +1841,13 @@ function applyUninstallSteps(steps, copy) {
 /** --dry-run 预览渲染层：与 applyUninstallSteps 同一 steps / 同一判定，只列不删 */
 function planUninstallSteps(steps, copy) {
   const lines = []
-  const onRemove = steps.status === STEP.REMOVE
+  const onRemove = steps.status === STEP.REMOVE || steps.status === STEP.REMOVE_FILE
   if (!steps.exists) lines.push(copy.missing(steps))
   else if (onRemove) lines.push(copy.preview(steps))
   else if (steps.status === STEP.DAMAGED) lines.push(damagedEntryLine(steps))
+  if (steps.status === STEP.REMOVE_FILE) {
+    lines.push(copy.previewFile ? copy.previewFile(steps) : `将删除仅剩空容器的文件 ${steps.path}（写前备份）`)
+  }
   if (onRemove && copy.extra) lines.push(...copy.extra(steps))
   for (const s of steps.skills || []) {
     const dir = join(steps.skillsDir, s)
