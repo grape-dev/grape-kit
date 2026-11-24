@@ -46,6 +46,21 @@ agent (MCP stdio: opencode / CodeArts / WorkBuddy / dsh…; other MCP-capable ag
 > - **One detected**: installs directly to it.
 > - **Multiple detected**: installs to all detected agents (`--target all` equivalent); pass `--target <agent>` to pick one.
 
+### Supported hosts (10 targets)
+
+| `--target` | Config path | Format / notes |
+|---|---|---|
+| `opencode` | `~/.config/opencode/opencode.json(c)` | JSONC `mcp.grape` + skill copy |
+| `workbuddy` | `~/.workbuddy/mcp.json` | JSON `mcpServers.grape-kit` + skill copy |
+| `codearts` | `~/.codeartsdoer/codearts_cli.jsonc` | JSONC `mcp.grape-kit`, restart the entry in the IDE |
+| `officeace` | `~/.officeace/mcp.json` | import-only manifest (`mcpServers.grape-kit`) |
+| `dsh` | `$DSH_HOME/profiles/web/cordis.patch.yml` | YAML managed block + skill copy |
+| `codex` | `~/.codex/config.toml` | TOML `[mcp_servers.grape-kit]` + `[mcp_servers.grape-kit.env]` |
+| `openclaw` | `~/.openclaw/openclaw.json` | JSON `mcp.servers` (legacy `mcpServers` compatible) |
+| `hermes` | `~/.hermes/config.yaml` | YAML `mcp_servers` + skill copy |
+| `atomcode` | `~/.atomcode/mcp.json` (`ATOMCODE_HOME` override) | JSON `mcpServers` |
+| `trae` | `<project>/.trae/mcp.json` (user `~/.trae/mcp.json` fallback; `GRAPE_TRAE_CONFIG` override) | JSON `mcpServers`; path aligned with the official Trae MCP entry |
+
 Prerequisites: **Node >= 20** (no Python needed — native HTTP since v0.3.0). Credentials go through environment variables:
 
 ```bash
@@ -142,6 +157,58 @@ npx -y @grape-dev/grape-kit uninstall --target dsh        # removes the managed 
 
 > dsh uses the **MCP minimal path** (all 43 tools reused unchanged). The full native Cordis plugin lives in [grape-dsh](https://gitcode.com/grape-dev/grape-dsh); the two coexist.
 
+### Codex CLI
+
+```bash
+npx -y @grape-dev/grape-kit install --target codex
+```
+
+Writes a marker-delimited block into `~/.codex/config.toml`: `[mcp_servers.grape-kit]` (`command` / `args`, npx) plus the `[mcp_servers.grape-kit.env]` sub-table. Only the managed block and the `grape-kit` tables are touched — other tables and comments stay intact, every write is backed up first, and re-installing is byte-for-byte idempotent. **Restart the session** afterwards.
+
+```bash
+npx -y @grape-dev/grape-kit doctor --target codex --probe
+npx -y @grape-dev/grape-kit uninstall --target codex   # removes the managed block / grape-kit tables only
+```
+
+### Hermes
+
+```bash
+npx -y @grape-dev/grape-kit install --target hermes
+```
+
+Writes `mcp_servers.grape-kit` into `~/.hermes/config.yaml` (YAML, comments and other entries preserved) and copies the `grape-remote` skill to `~/.hermes/skills/`. Hermes ships an MCP client, so the entry loads directly after a session restart.
+
+```bash
+npx -y @grape-dev/grape-kit doctor --target hermes --probe
+npx -y @grape-dev/grape-kit uninstall --target hermes   # removes the entry + skill copy
+```
+
+### Atomcode
+
+```bash
+npx -y @grape-dev/grape-kit install --target atomcode
+```
+
+Writes `mcpServers.grape-kit` into `~/.atomcode/mcp.json`; the root can be overridden with `ATOMCODE_HOME`. Other connectors are preserved and every write is backed up.
+
+```bash
+npx -y @grape-dev/grape-kit doctor --target atomcode --probe
+npx -y @grape-dev/grape-kit uninstall --target atomcode
+```
+
+### Trae
+
+```bash
+npx -y @grape-dev/grape-kit install --target trae
+```
+
+Writes `mcpServers.grape-kit` into the project-level `.trae/mcp.json` (Trae's official MCP entry), falling back to the user-level `~/.trae/mcp.json` when no project file exists; `GRAPE_TRAE_CONFIG` overrides either path. Other servers are preserved and every write is backed up.
+
+```bash
+npx -y @grape-dev/grape-kit doctor --target trae --probe
+npx -y @grape-dev/grape-kit uninstall --target trae
+```
+
 ### openclaw (ClawHub marketplace)
 
 ```bash
@@ -149,6 +216,13 @@ openclaw plugins install clawhub:grape-kit@latest
 ```
 
 The `clawhub:` prefix is the source (matching devkit's listing form). Verify with the plugin's MCP tools list (43 tools). Marketplace page: https://clawhub.ai/grape-dev/plugins/grape-kit
+
+Alternatively, register the MCP server directly with the file-based installer (no marketplace needed):
+
+```bash
+npx -y @grape-dev/grape-kit install --target openclaw   # ~/.openclaw/openclaw.json: mcp.servers.grape-kit (legacy mcpServers compatible)
+npx -y @grape-dev/grape-kit uninstall --target openclaw # dry-run with --dry-run
+```
 
 ### Version check & update (all targets)
 
@@ -218,7 +292,7 @@ Full release notes: [CHANGELOG.md](CHANGELOG.md) — 21 条发布记录（含 0.
 ```bash
 npm install
 
-npm test        # 270 unit tests (fake-grape stand-in, no real server needed)
+npm test        # 280 unit tests (fake-grape stand-in, no real server needed)
 
 npm run smoke   # real stdio JSON-RPC round-trip: initialize → tools/list → tools/call
 ```

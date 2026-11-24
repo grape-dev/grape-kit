@@ -46,6 +46,21 @@ agent 宿主（MCP stdio：opencode / CodeArts / WorkBuddy / dsh…；其他 MCP
 > - **检测到一个**：直接装它。
 > - **检测到多个**：全部安装（等价 `--target all`）；要装单个用 `--target <宿主>`。
 
+### 受支持宿主（10 个 --target）
+
+| `--target` | 配置路径 | 格式 / 说明 |
+|---|---|---|
+| `opencode` | `~/.config/opencode/opencode.json(c)` | JSONC `mcp.grape` + skill 副本 |
+| `workbuddy` | `~/.workbuddy/mcp.json` | JSON `mcpServers.grape-kit` + skill 副本 |
+| `codearts` | `~/.codeartsdoer/codearts_cli.jsonc` | JSONC `mcp.grape-kit`，需在 IDE 内重启条目 |
+| `officeace` | `~/.officeace/mcp.json` | 仅导入用清单（`mcpServers.grape-kit`） |
+| `dsh` | `$DSH_HOME/profiles/web/cordis.patch.yml` | YAML 托管块 + skill 副本 |
+| `codex` | `~/.codex/config.toml` | TOML `[mcp_servers.grape-kit]` + `[mcp_servers.grape-kit.env]` |
+| `openclaw` | `~/.openclaw/openclaw.json` | JSON `mcp.servers`（兼容旧 `mcpServers`） |
+| `hermes` | `~/.hermes/config.yaml` | YAML `mcp_servers` + skill 副本 |
+| `atomcode` | `~/.atomcode/mcp.json`（`ATOMCODE_HOME` 可覆盖） | JSON `mcpServers` |
+| `trae` | `<项目>/.trae/mcp.json`（用户级 `~/.trae/mcp.json` 兜底；`GRAPE_TRAE_CONFIG` 覆盖） | JSON `mcpServers`；路径对齐 Trae 官方 MCP 入口 |
+
 前提：**Node ≥ 20**（无需 Python——v0.3.0 起原生 HTTP 直连）。凭据走环境变量：
 
 ```bash
@@ -142,6 +157,58 @@ npx -y @grape-dev/grape-kit uninstall --target dsh        # 只删托管块 + sk
 
 > dsh 走 **MCP 最小路径**（43 工具零改动复用）；完整形态的原生 Cordis 插件由 [grape-dsh](https://gitcode.com/grape-dev/grape-dsh) 承载，二者并存。
 
+### Codex CLI
+
+```bash
+npx -y @grape-dev/grape-kit install --target codex
+```
+
+写入 `~/.codex/config.toml` 的带标记托管块：`[mcp_servers.grape-kit]`（`command` / `args`，走 npx）加 `[mcp_servers.grape-kit.env]` 子表。只动托管块与 `grape-kit` 相关表，其它表与注释原样保留，每次写入先备份，重复安装逐字节幂等。装完**重启会话**。
+
+```bash
+npx -y @grape-dev/grape-kit doctor --target codex --probe
+npx -y @grape-dev/grape-kit uninstall --target codex   # 只删托管块 / grape-kit 表
+```
+
+### Hermes
+
+```bash
+npx -y @grape-dev/grape-kit install --target hermes
+```
+
+写入 `~/.hermes/config.yaml` 的 `mcp_servers.grape-kit`（YAML，保注释与其它条目），并把 `grape-remote` skill 复制到 `~/.hermes/skills/`。Hermes 自带 MCP client，重启会话后条目即加载（旧「hermes 无 MCP client」说明已修正）。
+
+```bash
+npx -y @grape-dev/grape-kit doctor --target hermes --probe
+npx -y @grape-dev/grape-kit uninstall --target hermes   # 删条目 + skill 副本
+```
+
+### Atomcode
+
+```bash
+npx -y @grape-dev/grape-kit install --target atomcode
+```
+
+写入 `~/.atomcode/mcp.json` 的 `mcpServers.grape-kit`；根路径可用 `ATOMCODE_HOME` 覆盖。其它连接器保留，每次写入先备份。
+
+```bash
+npx -y @grape-dev/grape-kit doctor --target atomcode --probe
+npx -y @grape-dev/grape-kit uninstall --target atomcode
+```
+
+### Trae
+
+```bash
+npx -y @grape-dev/grape-kit install --target trae
+```
+
+写入项目级 `.trae/mcp.json` 的 `mcpServers.grape-kit`（Trae 官方 MCP 入口）；无项目级文件时回退到用户级 `~/.trae/mcp.json`；两种路径均可用 `GRAPE_TRAE_CONFIG` 覆盖。其它 MCP server 保留，每次写入先备份。
+
+```bash
+npx -y @grape-dev/grape-kit doctor --target trae --probe
+npx -y @grape-dev/grape-kit uninstall --target trae
+```
+
 ### openclaw（ClawHub 市场）
 
 ```bash
@@ -149,6 +216,13 @@ openclaw plugins install clawhub:grape-kit@latest
 ```
 
 `clawhub:` 为来源前缀（与 devkit 上架同款）。装后用插件 MCP 工具列表验证（43 工具）。市场页：https://clawhub.ai/grape-dev/plugins/grape-kit
+
+也可不经市场，直接用文件注册（与其它宿主同一套四件套）：
+
+```bash
+npx -y @grape-dev/grape-kit install --target openclaw   # ~/.openclaw/openclaw.json：mcp.servers.grape-kit（兼容旧 mcpServers）
+npx -y @grape-dev/grape-kit uninstall --target openclaw # 加 --dry-run 预览
+```
 
 ### 版本查询与更新（全宿主通用）
 
@@ -218,7 +292,7 @@ npx -y @grape-dev/grape-kit intro     # 随时重看能力地图
 ```bash
 npm install
 
-npm test        # 270 个单测（fake-grape 替身，不依赖真实服务端）
+npm test        # 280 个单测（fake-grape 替身，不依赖真实服务端）
 
 npm run smoke   # 真实 stdio JSON-RPC 往返：initialize → tools/list → tools/call
 ```

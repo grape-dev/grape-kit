@@ -8,16 +8,27 @@
 
 ### Added
 
+<<<<<<< HEAD
 - **场景三段式工具面**（修复宿主实测 P3/P4/P5 的静默失败）：`grape_apply_scene` 改为走 `POST /api/scenes/market/{id}/apply` 在仓库内**创建场景副本**（响应带 `scene_id=custom-xxxxxxxx`），应用后**回读** `GET /api/scenes?repo=` 确认副本存在；输入只认市场数字 id 或场景名，未命中即本地拒绝（不再让服务端静默回落 `default`），`custom-` 副本 id 直接引导到新工具。`set_default=true` 时再调 `POST …/default-scene` 完成「设为仓库默认」。
 - `grape_set_repo_scene`：写 `managed_repos.dev_scene`（或 `clear=true` 清空回落智能推荐），写后回读 `dev_scene`，不一致时报「未确认」而不是宣称已切换。此前 kit 没有任何工具能改仓库默认场景，「应用场景」与「切换场景」被混为一谈。
 - `grape_list_scenes` 支持仓库视角：传 `owner/repo` 列仓库场景副本（`custom-xxxxxxxx`，`set_repo_scene` 的唯一合法入参），不传则列市场模板。
 - **技能上传/升级/跨 scope**（此前只能手搓 HTTP）：`grape_upload_skill` / `grape_update_skill` / `grape_convert_skill`。上传前做与服务端 `validate_skill` 同口径的本地预检（`SKILL.md`、frontmatter `name`/`version`/`description`、name 必须等于目录名、标签不得与 Agent 类型重名），一次列全部问题、**预检不过不发请求**；ZIP 由内置 `src/zip.mjs` 现场打包（顶层目录 = 技能目录名，UTF-8 文件名，零依赖），服务端 `detail.errors` 全量透出。
 - `grape_create_issue` 把 `description` 标为必填（服务端缺正文 400「任务描述必填」）。
+- 新增 5 个安装目标，`--target` 全量达到 10 个（`SUPPORTED_TARGETS` 由 5 扩到 10）：`codex` / `openclaw` / `hermes` / `atomcode` / `trae`。每个新宿主均提供 `install` / `uninstall`（含 `--dry-run`）/ `doctor`（含 `--probe`）/ `detect` 四件套，并纳入宿主自动检测与 `--target all` 汇总。
+- codex：`~/.codex/config.toml` TOML 托管块 `[mcp_servers.grape-kit]` + `[mcp_servers.grape-kit.env]`，只增删托管块与 grape-kit 表，保留其它表与注释；`GRAPE_CODEX_CONFIG` 可覆盖路径。
+- openclaw：`~/.openclaw/openclaw.json` 的 `mcp.servers.grape-kit`，兼容旧 `mcpServers` 键；`GRAPE_OPENCLAW_CONFIG` 可覆盖路径。
+- hermes：`~/.hermes/config.yaml` 的 `mcp_servers.grape-kit`（保注释/保序）+ `grape-remote` skill 副本到 `~/.hermes/skills/`；`HERMES_HOME` / `GRAPE_HERMES_CONFIG` 可覆盖。
+- atomcode：`~/.atomcode/mcp.json` 的 `mcpServers.grape-kit`，`ATOMCODE_HOME` 可覆盖根路径。
+- trae：项目级 `.trae/mcp.json` 的 `mcpServers.grape-kit`（用户级 `~/.trae/mcp.json` 兜底），`GRAPE_TRAE_CONFIG` 可覆盖；路径对齐 Trae 官方 MCP 入口。
+- 每个新宿主补 fake HOME 单测（含 TOML 注释/他人表保留、YAML 保注释与条目隔离、JSON 容器兼容、dry-run 不动盘、幂等与备份），单测 270→280；README / README.zh 新增 10 宿主支持矩阵与 5 个宿主专段。
 
 ### Changed
 
 - MCP `initialize` instructions 重写为可执行契约：角色边界（禁止 `force` 越门禁、卡点交还用户）、场景/技能/接管三条易错语义、写动作一律回读、403 两类分流。
 - `grape_takeover_finish` 派发前先查 issue 事件：平台已派发下一节点（`handoff_seq` 之后已有该节点 `a2a_event`）时只报事实、**不再客户端补发**——消除「pending_dispatch 假警报」，同时避免同一节点被重复派发跑两遍；交回响应缺 `repo_key`/`issue_number` 时回读会话补齐，不再误报「缺少仓库/issue 标识」。
+- 修正 `grape-kit.mjs` 中「hermes 无 MCP client」的过时注释：hermes 已支持 MCP client（`config.yaml` 的 `mcp_servers` 段），安装器写入条目并附带 skill 副本。
+- 裸 `doctor` 汇总自检由 5 宿主扩到全部 10 宿主；`uninstall` 零痕迹提示与 `help` 用法统一随 `SUPPORTED_TARGETS` 自动列出全部宿主。
+- dsh 补充 `--dry-run` 预览实现（托管块 / skill / receipt 只列不删），与其它宿主预览口径一致。
 
 ### Fixed
 

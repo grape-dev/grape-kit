@@ -24,6 +24,7 @@ after(() => {
 function run(args, h, extraEnv = {}) {
   return spawnSync(process.execPath, [SETUP, ...args], {
     encoding: 'utf8',
+    cwd: h,
     env: {
       ...process.env,
       HOME: h,
@@ -177,7 +178,8 @@ test('未知 target 报错列出 dsh；help 用法与宿主清单含 dsh；--tar
   assert.match(`${bad.stderr}${bad.stdout}`, /dsh/, '未知 target 报错应列出 dsh')
 
   const help = run(['help'], h)
-  assert.match(help.stdout, /用法: node setup\.mjs install\|uninstall\|doctor \[--target opencode\|workbuddy\|codearts\|officeace\|dsh\] \[--probe\]/)
+  assert.match(help.stdout, /用法: node setup\.mjs install\|uninstall\|doctor \[--target [^\]]+\] \[--probe\]/)
+  for (const t of ['opencode', 'workbuddy', 'codearts', 'officeace', 'dsh', 'codex', 'openclaw', 'hermes', 'atomcode', 'trae']) assert.match(help.stdout, new RegExp(`--target ${t}`), `help 宿主清单应含 ${t}`)
 
   const all = run(['install', '--target', 'all'], h)
   assert.equal(all.status, 0, all.stderr)
