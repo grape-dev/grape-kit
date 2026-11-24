@@ -374,3 +374,50 @@ test('S5 grape_kit_uninstall：强决策门 + 影响预览（只列不删）+ --
   assert.match(md, /卸载会移除|逐条确认/, '强决策门文案')
   assert.match(md, /```bash/)
 })
+
+/* ── QA 复审（PR #21）Q3：damaged 宿主不得照给命令（表内写「先修复」、命令块却照给，实跑必被 CLI 拒） ──
+ * CLI 侧 install 对解析失败的配置 `exit 1`（`请先修复或移走该文件后重试`），
+ * 所以生成的命令是「用户照抄必失败」的假动作——计划必须把 damaged 单列成「先修复」而不是可执行命令。 */
+
+const DAMAGED_ROW = {
+  host: 'workbuddy', label: 'workbuddy', state: 'damaged', installed: false,
+  path: '/h/.workbuddy/mcp.json', entry: 'mcpServers.grape-kit', skillsDir: '/h/.workbuddy/skills',
+  error: 'Unexpected token } in JSON at position 12',
+}
+
+test('Q3 grape_kit_install：damaged 宿主不生成命令，单列「先修复」并带出解析错误', async () => {
+  const L = fakeLifecycle({
+    detectHostStatus: () => ([
+      { host: 'opencode', label: 'opencode', state: 'installed', installed: true, path: '/h/.config/opencode/opencode.jsonc', entry: 'mcp.grape', skillsDir: '/h/.config/opencode/skills' },
+      DAMAGED_ROW,
+      { host: 'dsh', label: 'dsh', state: 'missing', installed: false, path: '/h/.dsh/profiles/web/cordis.patch.yml', entry: '托管块 id: grape-kit', skillsDir: '/h/.dsh/skills' },
+    ]),
+  })
+  const t = findTool('grape_kit_install')
+  const json = await t.run({ target: 'all' }, { lifecycle: L })
+  assert.ok(!json.commands.some((c) => /--target workbuddy$/.test(c)), 'damaged 宿主不得出现在可执行命令里（实跑必被 CLI 拒）')
+  assert.deepEqual(json.commands, ['npx -y @grape-dev/grape-kit install --target dsh'], '只给真正可装配的宿主生成命令')
+  assert.deepEqual((json.blocked || []).map((b) => b.host), ['workbuddy'], 'damaged 宿主单列 blocked')
+  assert.ok(!json.skipped.includes('workbuddy'), 'damaged 不算「已装配跳过」，否则用户以为无需动作')
+  assert.match(json.blocked[0].error, /Unexpected token/, 'blocked 要带出解析错误，用户才知道修什么')
+  const md = t.render(json)
+  assert.match(md, /先修复/, '渲染要给出先修复的动作')
+  assert.match(md, /Unexpected token/, '渲染要透出解析错误')
+  assert.doesNotMatch(md, /install --target workbuddy/, '命令块不得出现被 CLI 拒绝的命令')
+})
+
+test('Q3 grape_kit_uninstall：damaged 宿主同样不生成命令（无从判定条目，先修复）', async () => {
+  const L = fakeLifecycle({
+    detectHostStatus: () => ([
+      { host: 'opencode', label: 'opencode', state: 'installed', installed: true, path: '/h/.config/opencode/opencode.jsonc', entry: 'mcp.grape', skillsDir: '/h/.config/opencode/skills' },
+      DAMAGED_ROW,
+    ]),
+  })
+  const t = findTool('grape_kit_uninstall')
+  const json = await t.run({ target: 'all' }, { lifecycle: L })
+  assert.deepEqual(json.commands, ['npx -y @grape-dev/grape-kit uninstall --target opencode'])
+  assert.deepEqual((json.blocked || []).map((b) => b.host), ['workbuddy'])
+  const md = t.render(json)
+  assert.match(md, /先修复/)
+  assert.doesNotMatch(md, /uninstall --target workbuddy/)
+})
