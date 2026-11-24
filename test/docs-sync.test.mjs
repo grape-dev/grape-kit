@@ -176,3 +176,23 @@ test('CONTRIBUTING 工具面口径与 TOOL_NAMES 实际数量一致（漏改即�
   // 同步清单必须把本文件自身算进去，否则「漏改 CONTRIBUTING」永远落在规范文字之外
   assert.match(md, /工具数变化[\s\S]{0,200}CONTRIBUTING\.md/, 'CONTRIBUTING §6 同步清单应包含本文件自身')
 })
+
+/* ── QA 第 3 轮（PR #21）S2：贡献流程模板也是工具面口径载体 ──
+ * 贡献者照着 PR/Bug 模板跑验证，模板写「期望 39 tools / 136 单测」会让他们把成功运行误判为失败；
+ * 单测数不写死（会随每个 PR 漂移），工具数按 TOOL_NAMES 实际数量断言。 */
+test('S2 贡献流程模板工具面口径与 TOOL_NAMES 同源（PR 模板 / Bug 模板）', () => {
+  const n = String(TOOL_NAMES.size)
+  const files = ['.github/PULL_REQUEST_TEMPLATE.md', '.github/ISSUE_TEMPLATE/bug_report.md']
+  for (const f of files) {
+    const md = read(f)
+    assert.match(md, new RegExp(`${n} tools`), `${f} 应写「${n} tools」`)
+    assert.doesNotMatch(md, /\b39 tools\b/, `${f} 不得残留旧口径 39 tools`)
+  }
+  const pr = read('.github/PULL_REQUEST_TEMPLATE.md')
+  assert.match(pr, /npm ci && npm test/, 'PR 模板仍应给出验证命令')
+  assert.doesNotMatch(pr, /期望\s*\d+\s*\/\s*\d+/, 'PR 模板不得写死单测数（按错误期望跑验证会误判失败）')
+  const contributing = read('CONTRIBUTING.md')
+  for (const f of files) {
+    assert.ok(contributing.includes(f), `CONTRIBUTING §6 同步清单应列出 ${f}（否则下次照样漏改）`)
+  }
+})
