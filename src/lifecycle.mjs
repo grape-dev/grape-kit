@@ -13,6 +13,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { npxCacheRoot } from './api.mjs'
 
 /** 五宿主标识：与 `grape-kit.mjs` 的 `SUPPORTED_TARGETS`（opencode/workbuddy/codearts/officeace/dsh）逐一对应 */
 export const HOST_NAMES = ['opencode', 'workbuddy', 'codearts', 'officeace', 'dsh']
@@ -234,5 +235,81 @@ export function detectHostStatus({ home = homedir(), env = process.env } = {}) {
   ]
 }
 
-/** kit 包根目录（本文件在 <pkg>/src/ 下）——安装形态与版本读取同源 */
-export const KIT_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
+/** kit 包根目录（本文件在 <pkg>/src/ 下）——安装形态判定与版本读取同源 */
+export const KIT_ROOT = fileURLToPath(new URL('..', import.meta.url)).replace(/[\\/]+$/, '')
+
+/* ── S2：安装形态判定（Spec §3.3） ──
+ * 只读推断「这个 kit 是怎么装进来的」，据此给升级命令；形态未知/本地依赖时不给命令，只给手动指引——
+ * 自动挑包管理器或版本范围属于替用户做决定。 */
+
+export const INSTALL_FORM = { GLOBAL: 'global', NPX: 'npx', CLAWHUB: 'clawhub', LOCAL: 'local', UNKNOWN: 'unknown' }
+
+const RESTART_HINT = '升级/安装完成后需重启宿主会话（opencode / CodeArts / WorkBuddy / dsh 等）才加载新版本'
+
+const formOf = (form, extra) => {
+  const base = { form, restartHint: RESTART_HINT, ...extra }
+  switch (form) {
+    case INSTALL_FORM.GLOBAL:
+      return { ...base, upgradeCommand: 'npm i -g @grape-dev/grape-kit',
+        guidance: '全局安装形态：执行上面的 npm i -g 升级；升级后重启宿主会话。' }
+    case INSTALL_FORM.NPX:
+      return { ...base, upgradeCommand: 'npx -y -p @grape-dev/grape-kit@latest grape-kit-mcp',
+        guidance: 'npx 缓存运行形态：上面的命令强制拉 @latest；也可转全局安装（npm i -g @grape-dev/grape-kit）后改用本地脚本入口。' }
+    case INSTALL_FORM.CLAWHUB:
+      return { ...base, upgradeCommand: null,
+        guidance: 'ClawHub 市场安装形态：在 ClawHub 上重装/更新 grape-kit 插件（clawhub.ai/grape-dev/plugins/grape-kit），升级后重启宿主会话。' }
+    case INSTALL_FORM.LOCAL:
+      return { ...base, upgradeCommand: null,
+        guidance: '项目本地依赖形态：用项目自身的包管理器升级（npm i @grape-dev/grape-kit@latest，pnpm/yarn 同理），或改 package.json 版本后重装——版本范围由你的项目决定。' }
+    default:
+      return { ...base, upgradeCommand: null,
+        guidance: '未识别安装形态：可执行 npm i -g @grape-dev/grape-kit 全局升级，或 npx -y @grape-dev/grape-kit@latest 直接运行最新版；两者都不改变现状，需你确认。' }
+  }
+}
+
+/**
+ * 安装形态判定（纯函数）。
+ * @param {{pkgPath?: string, env?: object, platform?: string}} [opts]
+ *   pkgPath 缺省为本包目录（import.meta 同源）；env/platform 可注入以便跨平台单测
+ */
+export function detectInstallForm({ pkgPath = KIT_ROOT, env = process.env, platform = process.platform } = {}) {
+  const norm = (p) => String(p ?? '').replace(/\\/g, '/').replace(/\/+$/, '')
+  const lower = (p) => (platform === 'win32' ? norm(p).toLowerCase() : norm(p))
+  const path = norm(pkgPath)
+  const pathL = lower(pkgPath)
+
+  const explicit = String(env.GRAPE_KIT_INSTALL_FORM || '').trim().toLowerCase()
+  if (Object.values(INSTALL_FORM).includes(explicit)) {
+    return formOf(explicit, { pkgPath: path, evidence: `env:GRAPE_KIT_INSTALL_FORM=${explicit}` })
+  }
+
+  // npx 缓存运行：根目录与 api.mjs 的 npxCacheRoot() 单源（Windows 在 %LocalAppData%\npm-cache\_npx）；
+  // 另认 `_npx` 路径形状——npx 缓存根由 homedir() 推导，宿主 env 被清洗（HOME 不生效）时形状匹配仍成立
+  const npxRoot = norm(npxCacheRoot(env, platform))
+  const npxRootHit = npxRoot && pathL.startsWith(`${lower(npxRoot)}/`)
+  if (npxRootHit || pathL.includes('/_npx/')) {
+    return formOf(INSTALL_FORM.NPX, { pkgPath: path, evidence: `包路径位于 npx 缓存 ${npxRootHit ? npxRoot : '_npx'} 下（npx 临时安装，非全局）` })
+  }
+
+  const clawhub = String(env.CLAWHUB_HOME || '').trim()
+  if (/clawhub/i.test(path) || (clawhub && pathL.startsWith(`${lower(clawhub)}/`))) {
+    return formOf(INSTALL_FORM.CLAWHUB, { pkgPath: path, evidence: '包路径位于 ClawHub 安装目录下' })
+  }
+
+  // 全局前缀：npm 的 prefix 覆盖点优先，其次按平台已知前缀形状匹配
+  const prefix = String(env.npm_config_global_prefix || env.npm_config_prefix || '').trim()
+  const globalMarkers = ['/lib/node_modules/', '/appdata/roaming/npm/node_modules/', '/npm-global/', '/.bun/install/global/node_modules/']
+  const isNpmPrefix = prefix && pathL.startsWith(`${lower(prefix)}/node_modules/`)
+  if (isNpmPrefix || globalMarkers.some((m) => pathL.includes(m))) {
+    return formOf(INSTALL_FORM.GLOBAL, {
+      pkgPath: path,
+      evidence: isNpmPrefix ? `包路径位于 npm 全局前缀 ${prefix} 下` : '包路径位于 npm/node 全局前缀（lib/node_modules 或 %APPDATA%\\npm）下',
+    })
+  }
+
+  if (pathL.includes('/node_modules/')) {
+    return formOf(INSTALL_FORM.LOCAL, { pkgPath: path, evidence: '包路径位于项目 node_modules 下（非 npx 缓存、非全局前缀）' })
+  }
+
+  return formOf(INSTALL_FORM.UNKNOWN, { pkgPath: path, evidence: '包路径不符合已知安装形态（全局 / npx / ClawHub / 项目依赖）' })
+}
