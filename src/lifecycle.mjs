@@ -3,8 +3,9 @@
  *
  * 设计约束（Spec §2 §4）：
  * - **不 import `grape-kit.mjs`**（CLI 红线）：宿主路径与检出判定在本模块独立实现，
- *   与 CLI 侧函数**成对维护**（每处路径常量带同步指针注释），并由
- *   test/lifecycle.test.mjs 的一致性断言（Spec §4.2）兜住漂移。
+ *   与 CLI 侧函数**成对维护**。同步指针只写**函数名/常量名**（见 SYNC_POINTERS），不写行号——
+ *   行号随 CLI 侧任何无关改动立刻漂移；名字的漂移风险（重命名/删除）由
+ *   test/lifecycle.test.mjs 的 SYNC_POINTERS 校验 + 同夹具一致性断言（Spec §4.2）兜住。
  * - **纯函数 + 可注入依赖**：home / env / fetchImpl / spawnImpl / apiModule / now 全部可选注入，
  *   单测因此不读进程真实 HOME、不联网、不写真实 ~/.grape。
  * - **只读**：检出与版本聚合绝不落盘；唯一写路径是 `recordDismiss()`（Spec §3.2 的 dismiss 状态文件）。
@@ -23,12 +24,38 @@ export const HOST_NAMES = ['opencode', 'workbuddy', 'codearts', 'officeace', 'ds
 /** 检出状态四态：missing=没有配置文件；absent=文件在但无 grape 条目；installed=已装配；damaged=配置损坏 */
 export const HOST_STATE = { MISSING: 'missing', ABSENT: 'absent', INSTALLED: 'installed', DAMAGED: 'damaged' }
 
+/**
+ * 成对维护清单（Spec §4.2）：本模块在 CLI 侧对应的源头符号。
+ * 指针只登记**名字**——行号会随 grape-kit.mjs 的任何无关改动漂移（实测一次性 7/14 失准）；
+ * 名字锚则能让 test/lifecycle.test.mjs 直接断言「CLI 侧这个函数/常量还在」，
+ * 重命名或删除时立刻变红，逼着两侧同改。
+ */
+export const SYNC_POINTERS = [
+  { symbol: 'SUPPORTED_TARGETS', kind: 'const', what: '五宿主标识（HOST_NAMES）' },
+  { symbol: 'skipString', kind: 'function', what: 'jsonc 字符串跳过' },
+  { symbol: 'stripComments', kind: 'function', what: 'jsonc 去注释' },
+  { symbol: 'stripTrailingCommas', kind: 'function', what: 'jsonc 去尾随逗号' },
+  { symbol: 'parseLoose', kind: 'function', what: 'jsonc 解析（含 BOM 处理口径）' },
+  { symbol: 'opencodePaths', kind: 'function', what: 'opencode 配置/技能路径' },
+  { symbol: 'workbuddyPaths', kind: 'function', what: 'workbuddy 配置/技能路径' },
+  { symbol: 'codeartsPaths', kind: 'function', what: 'codearts 配置路径（含覆盖点）' },
+  { symbol: 'codeartsConfigPath', kind: 'function', what: 'codearts 生效配置文件选取' },
+  { symbol: 'officeacePaths', kind: 'function', what: 'officeace manifest 路径（含覆盖点）' },
+  { symbol: 'dshPaths', kind: 'function', what: 'dsh patch/技能路径（含覆盖点）' },
+  { symbol: 'DSH_BLOCK_START', kind: 'const', what: '托管块起始标记' },
+  { symbol: 'DSH_BLOCK_END', kind: 'const', what: '托管块结束标记' },
+  { symbol: 'findDshBlock', kind: 'function', what: '托管块定位（完整性判定）' },
+  { symbol: 'isTopLevelSequence', kind: 'function', what: 'patch 顶层 YAML 序列自检' },
+  { symbol: 'detectJsonEntry', kind: 'function', what: '纯 JSON 宿主条目检出（BOM 口径同源）' },
+  { symbol: 'detectOpencode', kind: 'function', what: 'opencode 条目检出' },
+  { symbol: 'detectDsh', kind: 'function', what: 'dsh 托管块检出' },
+]
+
 /* ── jsonc 解析（字符串感知去注释/尾随逗号） ──
- * 同步指针：与 `grape-kit.mjs` 的 parseLoose / stripComments / stripTrailingCommas 同语义
- * （CLI 侧 grape-kit.mjs:945 parseLoose → :918 stripComments → :933 stripTrailingCommas）。
+ * 同步指针：与 `grape-kit.mjs` 的 skipString → stripComments → stripTrailingCommas → parseLoose 同语义、同顺序。
  * 检出只需「能否解析 + 有无条目」，故这里不复制 mcp 块的位置手术逻辑。 */
 
-/** 跳过一个字符串字面量（i 指向开引号），返回闭引号下标；未闭合返回 -1 */
+/** 跳过一个字符串字面量（i 指向开引号），返回闭引号下标；未闭合返回 -1（同步指针：grape-kit.mjs skipString） */
 function skipString(text, i) {
   let j = i + 1
   while (j < text.length) {
@@ -90,7 +117,7 @@ export function parseJsonc(text) {
 
 /* ── 宿主路径单源（与 grape-kit.mjs 成对维护；路径变更必须两侧同改） ── */
 
-/** 同步指针：grape-kit.mjs:245 opencodePaths() */
+/** 同步指针：grape-kit.mjs opencodePaths() */
 function opencodePaths(home) {
   return {
     config: join(home, '.config', 'opencode', 'opencode.jsonc'),
@@ -99,7 +126,7 @@ function opencodePaths(home) {
   }
 }
 
-/** 同步指针：grape-kit.mjs:258 workbuddyPaths() */
+/** 同步指针：grape-kit.mjs workbuddyPaths() */
 function workbuddyPaths(home) {
   return {
     mcpJson: join(home, '.workbuddy', 'mcp.json'),
@@ -107,7 +134,7 @@ function workbuddyPaths(home) {
   }
 }
 
-/** 同步指针：grape-kit.mjs:348 codeartsPaths() / codeartsConfigPath()（GRAPE_CODEARTS_CONFIG 覆盖点同源） */
+/** 同步指针：grape-kit.mjs codeartsPaths() / codeartsConfigPath()（GRAPE_CODEARTS_CONFIG 覆盖点同源） */
 function codeartsPaths(home, env) {
   const override = String(env.GRAPE_CODEARTS_CONFIG || '').trim()
   const config = join(home, '.codeartsdoer', 'codearts_cli.jsonc')
@@ -116,13 +143,13 @@ function codeartsPaths(home, env) {
   return { override, config, configAlt, path: picked }
 }
 
-/** 同步指针：grape-kit.mjs:451 officeacePaths()（GRAPE_OFFICEACE_MANIFEST 覆盖点同源） */
+/** 同步指针：grape-kit.mjs officeacePaths()（GRAPE_OFFICEACE_MANIFEST 覆盖点同源） */
 function officeacePaths(home, env) {
   const override = String(env.GRAPE_OFFICEACE_MANIFEST || '').trim()
   return { manifest: override || join(home, '.officeace', 'mcp.json') }
 }
 
-/** 同步指针：grape-kit.mjs:538 dshPaths()（DSH_HOME / GRAPE_DSH_PATCH 覆盖点同源） */
+/** 同步指针：grape-kit.mjs dshPaths()（DSH_HOME / GRAPE_DSH_PATCH 覆盖点同源） */
 function dshPaths(home, env) {
   const dshHome = String(env.DSH_HOME || '').trim() || join(home, '.dsh')
   const override = String(env.GRAPE_DSH_PATCH || '').trim()
@@ -133,13 +160,13 @@ function dshPaths(home, env) {
   }
 }
 
-/* ── 托管块标记（同步指针：grape-kit.mjs:548-550 DSH_BLOCK_START/END） ── */
+/* ── 托管块标记（同步指针：grape-kit.mjs DSH_BLOCK_START / DSH_BLOCK_END） ── */
 const DSH_BLOCK_START = '# Grape Kit DSH integration start'
 const DSH_BLOCK_END = '# Grape Kit DSH integration end'
 
 const markerRe = (marker) => new RegExp(`^[ \\t]*${marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[^\\n]*(?:\\r?\\n|$)`, 'm')
 
-/** 托管块定位：{ start, end, complete }；无起始标记返回 null（同步指针：grape-kit.mjs:560 findDshBlock） */
+/** 托管块定位：{ start, end, complete }；无起始标记返回 null（同步指针：grape-kit.mjs findDshBlock） */
 function findDshBlock(text) {
   const m = markerRe(DSH_BLOCK_START).exec(text)
   if (!m) return null
@@ -149,7 +176,7 @@ function findDshBlock(text) {
   return { start: m.index, end: afterStart + em.index + em[0].length, complete: true }
 }
 
-/** 顶层 YAML 序列自检（同步指针：grape-kit.mjs:652 isTopLevelSequence） */
+/** 顶层 YAML 序列自检（同步指针：grape-kit.mjs isTopLevelSequence） */
 function isTopLevelSequence(text) {
   const first = text.split('\n')
     .map((l) => l.trim())
@@ -161,7 +188,7 @@ const row = (host, state, path, extra = {}) => ({
   host, label: host, state, path, installed: state === HOST_STATE.INSTALLED, ...extra,
 })
 
-/** 纯 JSON 宿主（mcpServers 容器）：同步指针：grape-kit.mjs:200 detectJsonEntry */
+/** 纯 JSON 宿主（mcpServers 容器）：同步指针：grape-kit.mjs detectJsonEntry */
 function detectJsonEntry(file, rootKey, name, { loose, host, skillsDir, entryLabel }) {
   if (!existsSync(file)) return row(host, HOST_STATE.MISSING, file, { skillsDir, entry: entryLabel })
   let cfg
@@ -177,7 +204,7 @@ function detectJsonEntry(file, rootKey, name, { loose, host, skillsDir, entryLab
   })
 }
 
-/** opencode：候选 .jsonc 优先、.json 回落；两者可同时存在，任一含 grape 条即装配（同步指针：grape-kit.mjs:1203 detectOpencode） */
+/** opencode：候选 .jsonc 优先、.json 回落；两者可同时存在，任一含 grape 条即装配（同步指针：grape-kit.mjs detectOpencode） */
 function detectOpencode({ home }) {
   const p = opencodePaths(home)
   const first = existsSync(p.config) ? p.config : p.configAlt
@@ -197,7 +224,7 @@ function detectOpencode({ home }) {
   return row('opencode', HOST_STATE.ABSENT, first, { skillsDir: p.skillsDir, entry: 'mcp.grape', evidence: '未发现 mcp.grape 条目' })
 }
 
-/** dsh：托管块 + `- id: grape-kit`（同步指针：grape-kit.mjs:759 detectDsh） */
+/** dsh：托管块 + `- id: grape-kit`（同步指针：grape-kit.mjs detectDsh） */
 function detectDsh({ home, env }) {
   const p = dshPaths(home, env)
   const base = { skillsDir: p.skillsDir, entry: '托管块 id: grape-kit' }
