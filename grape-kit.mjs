@@ -1174,8 +1174,9 @@ function stripHermesExistingEntry(lines) {
   while (end < lines.length) {
     const l = lines[end]
     if (l.trim() === '') { end++; continue }
-    const lead = l.match(/^ */)[0].length
-    if (lead <= indent && !l.trimStart().startsWith('#')) break
+    // 同层（含列 0）一律结束区间：同层注释属于用户内容（README 承诺 comments preserved），
+    // 只有缩进更深的注释才是被替换条目的内部注释。
+    if (l.match(/^ */)[0].length <= indent) break
     end++
   }
   return [...lines.slice(0, start), ...lines.slice(end)]
