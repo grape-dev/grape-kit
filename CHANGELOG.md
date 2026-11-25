@@ -6,6 +6,10 @@
 
 ## Unreleased
 
+### Fixed
+
+- 接管技能物化不再把 OBS 引用形态写成 0 字节空文件（#39）：`assets.skill.files` 条目只持 `__obs_key__`（无 `content`/`text`/`data`/`body`）时，此前 `pickContent` 的 `?? ''` 兜底产出空串，落盘 0 字节 `.grape-takeover-skills/<skill>/<file>` 而接管 prompt 仍声称「技能已物化」，agent 读到空 SKILL.md。现在：① 条目无正文且持引用键 → 整包走引用解析（资产内短签 `zip_url`/`download_url`，或按 `skill_id` 调契约端点 `GET /api/skills/by-id/{id}/download` 取 `{url, expires_in}` 后拉 zip）→ 复用既有零依赖 ZIP 解压物化；② 两路都解析不出 → `failed()` 拒绝物化，reason 明示「引用形态技能需服务端转 inline/zip_url 下发，客户端不解析 OBS 引用」，盘上零副作用、接管会话不受影响；③ 条目既无正文也无引用键、或资产混入引用条目（不能只落半份技能）同样显式 `failed`，`?? ''` 空文件兜底全线移除。渲染行新增来源标注（`inline`/`zip`/`reference` 经引用形态拉取），成功给实际落盘条数、失败给 reason。新增 `api.skillDownload`（下载端点封装，`scope=user_only`）与 7 个单测（成功拉取/端点失败/无解析标识/资产带短签 URL/混合形态/无正文条目/渲染如实）。
+
 ## 0.5.1 (2026-11-25)
 
 > **0.5.1-next.0 转正版**。next 通道回归（Linux @next 装机 + 474/474 单测 + stdio 冒烟 50 工具 + 真实调用）与 #23 Windows 11 实机回填均已完成（#23 实测记录见其评论；其中 win32 rc 文件清理分叉已登记转 fix 流程，不阻塞本版）。

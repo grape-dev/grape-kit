@@ -9,9 +9,14 @@
  *   （worker 会 rmtree 该目录）。
  *
  * 三态：
- *   inline  `assets.skill.files`（数组或「路径→内容」映射）
- *   zip     `assets.skill.zip_url`（下载后解压，可带 `<skill>/` 顶层前缀）
- *   legacy  无 `assets.skill`（旧版平台）→ 显式提示本次未物化
+ *   inline     `assets.skill.files`（数组或「路径→内容」映射）
+ *   zip        `assets.skill.zip_url`（下载后解压，可带 `<skill>/` 顶层前缀）
+ *   legacy     无 `assets.skill`（旧版平台）→ 显式提示本次未物化
+ *
+ * Issue #39 · 引用形态（`files` 条目只持 `__obs_key__` 等引用键，无 content/text/data/body）：
+ * 平台可能把技能包下发成 OBS 引用而非正文。客户端不解析 OBS（无凭据、不耦合桶策略）——能解析就拉 zip 物化
+ * （资产内短签 URL，或契约端点 `GET /api/skills/by-id/{id}/download` 的 `{url, expires_in}`），解析不出就
+ * `failed()` 明示「需服务端转 inline/zip_url 下发」，绝不落 0 字节文件（旧实现 `?? ''` 兜底造成的静默误导）。
  */
 import { mkdirSync, lstatSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { isAbsolute, join, resolve, sep } from 'node:path'
@@ -62,12 +67,42 @@ const emptyResult = (status, patch = {}) => ({
   path: '',
   fileCount: 0,
   hasReferences: false,
+  source: '',
   reason: '',
   ...patch,
 })
 
 const failed = (reason, skill = '') => emptyResult('failed', { skill, reason: String(reason) })
 const toReason = (e) => (e && e.message ? e.message : String(e))
+
+/**
+ * Issue #39 · 引用形态降级话术（稳定文案，渲染行直接展示给用户）。
+ * 语义：不是客户端的兼容 bug，而是下发格式需要服务端转换——用户据此去改平台侧，而不是重试客户端。
+ */
+export const REFERENCE_FORM_HINT = '引用形态技能需服务端转 inline/zip_url 下发，客户端不解析 OBS 引用'
+/** 引用键白名单：只认明确的存储引用字段；没有 inline 内容字段时才认（有正文即正文优先） */
+const REFERENCE_KEYS = ['__obs_key__', 'obs_key', 'object_key', 'ref']
+/** inline 正文四字段（缺一不可判定为「无正文」） */
+const INLINE_CONTENT_KEYS = ['content', 'text', 'data', 'body']
+/** 引用拉取超时：接管不能被下载拖死，超时即降级 failed（Spec 风险项） */
+const DEFAULT_FETCH_TIMEOUT_MS = 15_000
+
+const hasInlineContent = (holder) => INLINE_CONTENT_KEYS.some((k) => holder[k] !== undefined && holder[k] !== null)
+const isHttpUrl = (v) => /^https?:\/\//i.test(String(v ?? '').trim())
+
+/**
+ * 引用键取值：条目不得有 inline 正文，且持白名单内的非空引用键。
+ * 有正文时一律按 inline 处理（正文优先），避免 `{content:'x', __obs_key__:...}` 被误判成引用。
+ */
+function refKeyOf(holder) {
+  if (!holder || typeof holder !== 'object' || Array.isArray(holder) || Buffer.isBuffer(holder)) return ''
+  if (hasInlineContent(holder)) return ''
+  for (const k of REFERENCE_KEYS) {
+    const v = holder[k]
+    if (typeof v === 'string' && v.trim()) return v.trim()
+  }
+  return ''
+}
 
 /**
  * 技能名校验：**拒绝而不归一化**——归一化会掩盖攻击面，显式失败可审计（plan.md 决策 4）。
@@ -167,23 +202,37 @@ function writeEntry(baseReal, rel, content) {
   writeFileSync(target, content)
 }
 
-const pickContent = (holder) => holder.content ?? holder.text ?? holder.data ?? holder.body ?? ''
+/**
+ * 取条目正文：四字段都没有时返回 `undefined`。
+ * Issue #39：这里**不允许** `?? ''` 兜底——无正文的条目曾经被物化成 0 字节空文件，
+ * 而接管 prompt 仍声称「技能已物化」，agent 读到空 SKILL.md 却无从察觉。缺正文由调用方显式拒绝。
+ */
+const pickContent = (holder) => holder.content ?? holder.text ?? holder.data ?? holder.body
 
-/** inline 条目归一：数组形态 `{path, content}` 或「路径→内容」映射 */
+const entryBase64 = (holder) => holder.base64 === true || holder.encoding === 'base64' || holder.encoding === 'b64'
+
+/**
+ * inline 条目归一：数组形态 `{path, content}` 或「路径→内容」映射。
+ * Issue #39：引用形态条目单列成 `{path, ref}`（无正文），由 `collectReferenceEntries` 整包解析，
+ * 不再产出 `content: ''` 的空条目；既无正文也无引用键的条目带 `missing` 标记，交由调用方拒绝。
+ */
 function collectInlineEntries(files) {
   const out = []
   if (Array.isArray(files)) {
     for (const raw of files) {
       if (raw == null) continue
-      if (typeof raw !== 'object') {
+      if (typeof raw !== 'object' || Buffer.isBuffer(raw)) {
         out.push({ path: '', content: raw })
         continue
       }
-      out.push({
-        path: String(raw.path ?? raw.rel_path ?? raw.filename ?? raw.name ?? ''),
-        content: pickContent(raw),
-        base64: raw.base64 === true || raw.encoding === 'base64' || raw.encoding === 'b64',
-      })
+      const path = String(raw.path ?? raw.rel_path ?? raw.filename ?? raw.name ?? '')
+      const ref = refKeyOf(raw)
+      if (ref) {
+        out.push({ path, ref })
+        continue
+      }
+      const content = pickContent(raw)
+      out.push({ path, content, base64: entryBase64(raw), missing: content === undefined })
     }
     return out
   }
@@ -191,7 +240,13 @@ function collectInlineEntries(files) {
     for (const [p, v] of Object.entries(files)) {
       if (v == null) continue
       if (typeof v === 'object' && !Buffer.isBuffer(v)) {
-        out.push({ path: p, content: pickContent(v), base64: v.base64 === true || v.encoding === 'base64' || v.encoding === 'b64' })
+        const ref = refKeyOf(v)
+        if (ref) {
+          out.push({ path: p, ref })
+          continue
+        }
+        const content = pickContent(v)
+        out.push({ path: p, content, base64: entryBase64(v), missing: content === undefined })
       } else {
         out.push({ path: p, content: v })
       }
@@ -288,23 +343,88 @@ function parseZip(buf) {
   return entries
 }
 
-async function collectZipEntries(asset, opts, name) {
-  const url = String(asset.zip_url ?? asset.zipUrl ?? '').trim()
-  if (!url) return null
-  const fetchImpl = opts.fetchImpl || globalThis.fetch
-  if (typeof fetchImpl !== 'function') throw new MaterializeError('当前运行环境无 fetch 实现，无法下载 zip_url')
-  const res = await fetchImpl(url)
-  if (!res || typeof res !== 'object') throw new MaterializeError('zip 下载返回不可识别')
+/** 下载超时信号：`AbortSignal.timeout` 不可用时退回无信号（不因缺能力就拒绝物化） */
+function fetchTimeoutSignal(opts) {
+  const ms = Number(opts.fetchTimeoutMs) > 0 ? Number(opts.fetchTimeoutMs) : DEFAULT_FETCH_TIMEOUT_MS
+  try {
+    return typeof AbortSignal?.timeout === 'function' ? AbortSignal.timeout(ms) : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/** 拉取 zip 字节：HTTP/空包/体积上限三处前置拒绝，错误信息带状态码供渲染透出 */
+async function fetchZipBytes(url, fetchImpl, opts = {}) {
+  if (typeof fetchImpl !== 'function') throw new MaterializeError('当前运行环境无 fetch 实现，无法下载技能 zip')
+  const signal = fetchTimeoutSignal(opts)
+  let res
+  try {
+    res = await fetchImpl(url, signal ? { signal } : undefined)
+  } catch (e) {
+    throw new MaterializeError(`技能 zip 下载失败：${toReason(e)}`)
+  }
+  if (!res || typeof res !== 'object') throw new MaterializeError('技能 zip 下载返回不可识别')
   if (res.ok === false || (typeof res.status === 'number' && (res.status < 200 || res.status >= 300))) {
     throw new MaterializeError(`技能 zip 下载失败：HTTP ${res.status ?? '未知'}`)
   }
   const buf = Buffer.from(await res.arrayBuffer())
   if (!buf.length) throw new MaterializeError('技能 zip 为空（0 字节）')
   if (buf.length > MAX_ZIP_BYTES) throw new MaterializeError(`技能 zip 超过 ${MAX_ZIP_BYTES} 字节上限`)
+  return buf
+}
+
+/** 解包 → 条目：体积/结构校验走 `parseZip`，平台 `<skill>/` 顶层前缀全条目同前缀才剥离 */
+function parseZipBuffer(buf, name) {
   const entries = parseZip(buf)
-  // 平台 zip 常带 `<skill>/` 顶层前缀：全条目同前缀才剥离（混合结构保持原样）
   const prefix = `${name}/`
   return entries.every((e) => e.path.startsWith(prefix)) ? entries.map((e) => ({ ...e, path: e.path.slice(prefix.length) })) : entries
+}
+
+async function collectZipEntries(asset, opts, name) {
+  const url = String(asset.zip_url ?? asset.zipUrl ?? '').trim()
+  if (!url) return null
+  const fetchImpl = opts.fetchImpl || globalThis.fetch
+  return parseZipBuffer(await fetchZipBytes(url, fetchImpl, opts), name)
+}
+
+/** 默认下载通道：契约端点 `GET /api/skills/by-id/{skill_id}/download`（懒加载 api.mjs，单测可整体注入替换） */
+const defaultSkillDownload = async (skillId, repoKey, env) => {
+  const mod = await import('./api.mjs')
+  return mod.api.skillDownload(skillId, repoKey, env)
+}
+
+/** 下载端点响应归一：短签 URL（`{url}`/`{download_url}`/裸字符串）或直接二进制 zip */
+function zipSourceOf(payload) {
+  if (Buffer.isBuffer(payload)) return { buf: payload }
+  if (payload instanceof Uint8Array) return { buf: Buffer.from(payload) }
+  const url = typeof payload === 'string' ? payload : (payload && typeof payload === 'object' ? (payload.url ?? payload.download_url ?? payload.downloadUrl) : '')
+  return isHttpUrl(url) ? { url: String(url).trim() } : {}
+}
+
+/**
+ * Issue #39 · 引用形态解析（方案 B）：把 `__obs_key__` 换成可拉取的 zip，再走统一解包路径。
+ * 解析顺序（都不命中即抛错，由调用方降级 failed）：
+ *   ① 资产内显式 URL：引用键本身是 http(s)，或 `zip_url`/`download_url`（平台已把引用转成短签 URL 的下发形态）
+ *   ② 契约下载端点：`skill_id` → `GET /api/skills/by-id/{id}/download`（OBS 形态返回 `{url, expires_in}`）
+ * 客户端始终不直接解析 OBS 对象（不持 OBS 凭据，也不耦合桶策略）。
+ */
+async function collectReferenceEntries(asset, refs, opts, name) {
+  const fetchImpl = opts.fetchImpl || globalThis.fetch
+  const directUrl = refs.map((r) => r.ref).find(isHttpUrl)
+    || ['zip_url', 'zipUrl', 'download_url', 'downloadUrl'].map((k) => asset[k]).map((v) => (typeof v === 'string' ? v.trim() : '')).find(isHttpUrl)
+  if (directUrl) return parseZipBuffer(await fetchZipBytes(directUrl, fetchImpl, opts), name)
+
+  const rawId = asset.skill_id ?? asset.skillId ?? asset.id
+  const skillId = rawId === undefined || rawId === null ? '' : String(rawId).trim()
+  if (!skillId) {
+    throw new MaterializeError('资产未给出可解析标识（无 skill_id、无 zip_url/download_url，引用键仅为 OBS key）')
+  }
+  const download = opts.skillDownload || defaultSkillDownload
+  const payload = await download(skillId, opts.repo, opts.env)
+  const from = zipSourceOf(payload)
+  if (from.buf) return parseZipBuffer(from.buf, name)
+  if (from.url) return parseZipBuffer(await fetchZipBytes(from.url, fetchImpl, opts), name)
+  throw new MaterializeError('技能下载端点未返回可用的 zip（既无 url 也非二进制流）')
 }
 
 /**
@@ -312,8 +432,10 @@ async function collectZipEntries(asset, opts, name) {
  *
  * @param {object|null|undefined} skill 平台下发的 `bundle.assets.skill`（`skill`/`name` + `files` 或 `zip_url`）
  * @param {string} cwd 工作目录（`bundle.workspace.cwd_hint || process.cwd()`）
- * @param {{fetchImpl?: Function, env?: object}} [options] 可注入 fetch（单测）与 env（技能名回退 GRAPE_BOUND_SKILL）
- * @returns {Promise<{status: 'ok'|'legacy'|'failed', skill: string, path: string, fileCount: number, hasReferences: boolean, reason: string}>}
+ * @param {{fetchImpl?: Function, skillDownload?: Function, repo?: string, env?: object, fetchTimeoutMs?: number}} [options]
+ *   可注入 fetch（单测与超时）、技能下载通道（单测替换 `GET /api/skills/by-id/{id}/download`）、
+ *   仓库上下文（下载端点的 repo 过滤）与 env（技能名回退 GRAPE_BOUND_SKILL）
+ * @returns {Promise<{status: 'ok'|'legacy'|'failed', skill: string, path: string, fileCount: number, hasReferences: boolean, source: 'inline'|'zip'|'reference'|'', reason: string}>}
  */
 export async function materializeSkillAssets(skill, cwd, options = {}) {
   const opts = options || {}
@@ -332,12 +454,34 @@ export async function materializeSkillAssets(skill, cwd, options = {}) {
   if (!nameCheck.ok) return failed(nameCheck.reason)
   const name = nameCheck.name
 
-  let entries
-  try {
-    entries = collectInlineEntries(asset.files ?? null)
-    if (!entries.length) entries = await collectZipEntries(asset, opts, name)
-  } catch (e) {
-    return failed(`技能包解析失败：${toReason(e)}`, name)
+  const collected = collectInlineEntries(asset.files ?? null)
+  const refs = collected.filter((e) => e.ref)
+  let entries = []
+  let source = ''
+  if (refs.length) {
+    // Issue #39：只要有引用条目，整包都走引用解析——同批 inline 条目只是占位，落盘即半份技能
+    try {
+      entries = await collectReferenceEntries(asset, refs, opts, name)
+    } catch (e) {
+      return failed(`${REFERENCE_FORM_HINT}（引用键 ${refs[0].ref || '(未命名)'}；${toReason(e)}）`, name)
+    }
+    source = 'reference'
+  } else {
+    const missing = collected.find((e) => e.missing)
+    if (missing) {
+      return failed(`条目 "${missing.path || '(未命名)'}" 既无内容（content/text/data/body）也无引用键，拒绝物化成空文件`, name)
+    }
+    entries = collected
+    if (entries.length) source = 'inline'
+  }
+
+  if (!entries.length) {
+    try {
+      entries = await collectZipEntries(asset, opts, name)
+    } catch (e) {
+      return failed(`技能包解析失败：${toReason(e)}`, name)
+    }
+    if (entries && entries.length) source = 'zip'
   }
   if (!entries || !entries.length) {
     return failed(
@@ -384,7 +528,10 @@ export async function materializeSkillAssets(skill, cwd, options = {}) {
         ensureDirPath(targetDir, entry.rel)
         continue
       }
-      const content = entry.base64 ? Buffer.from(String(entry.content ?? ''), 'base64') : entry.content ?? ''
+      const raw = entry.content
+      // Issue #39：正文缺失在这里也必须炸——`?? ''` 会静默写 0 字节文件，正是本缺陷的根因行为
+      if (raw === undefined || raw === null) throw new MaterializeError(`条目 "${entry.rel}" 无内容，拒绝物化成空文件`)
+      const content = entry.base64 ? Buffer.from(String(raw), 'base64') : raw
       writeEntry(targetDir, entry.rel, content)
       fileCount += 1
       if (/(^|\/)references\//.test(entry.rel)) hasReferences = true
@@ -408,5 +555,5 @@ export async function materializeSkillAssets(skill, cwd, options = {}) {
     return failed(toReason(e), name)
   }
 
-  return { status: 'ok', skill: name, path: targetDir, fileCount, hasReferences, reason: '' }
+  return { status: 'ok', skill: name, path: targetDir, fileCount, hasReferences, source, reason: '' }
 }

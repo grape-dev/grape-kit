@@ -136,11 +136,13 @@ sequenceDiagram
 |----|------|------|
 | inline | `assets.skill.files`（数组或「路径→内容」映射） | 逐条目落盘到 `<cwd>/.grape-takeover-skills/<skill>/` |
 | zip | `assets.skill.zip_url` | 零依赖解压（`zlib.inflateRawSync` + 最小 ZIP 解析，仅 store/deflate），剥离 `<skill>/` 顶层前缀 |
+| reference（#39） | `files` 条目只持 `__obs_key__` / `obs_key` / `object_key` / `ref`，无 content/text/data/body | 先按资产内短签 URL（`zip_url`/`download_url`，或引用键本身是 http(s)）拉 zip；否则按 `skill_id` 调契约端点 `GET /api/skills/by-id/{id}/download`（OBS 形态返回 `{url, expires_in}`）→ 复用同一 ZIP 解压物化。**两路都解析不出即 `failed` +「引用形态技能需服务端转 inline/zip_url 下发」，盘上零副作用**——不再用 `?? ''` 兜底落 0 字节文件 |
 | legacy | 无 `assets.skill`（旧平台） | 不落盘，渲染显式提示「本次未物化技能」 |
 
 - **时机**：物化在 `native()` 后置执行，结果挂 `json.skillMaterialization`；`render()` 保持同步纯函数，只读该字段（`test/takeover-hardening.test.mjs` 的同步直调 seam 不受影响）。
 - **目录口径**：`cwd = bundle.workspace.cwd_hint || process.cwd()`，与接管脚本 `{{CWD}}` 同源。
 - **失败语义**：会话已建立即保留——物化失败不外抛、不回滚，`status:'failed'` + reason 进渲染 warning；仅当目标目录由本次调用新建时才清理半成品。
+- **空文件禁令（#39）**：条目无正文且非引用键 → 直接 `failed`（「既无内容也无引用键，拒绝物化成空文件」）；混入引用条目的资产不再落同批 inline 占位内容（半份技能 = 静默误导）。`source` 字段（`inline`/`zip`/`reference`）让渲染行标注来源，成功条数取实际落盘文件数。
 - **安全**：技能名白名单 `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`（拒 `.`/`..`/`.skills`/分隔符与盘符，不归一化）；条目拒 `..`、绝对路径、反斜杠盘符、`.skills` 段（大小写/尾点归一后比较）；逐级 `lstat` 拒符号链接（含 zip `S_IFLNK` 条目）；落盘前缀校验；恒不写 `.skills/`；zip 解压 inflate 前按 `usize` 预检 + `maxOutputLength` 兜底（64MB 封顶），解压后校验长度与 CRC-32。
 
 ## 4. 验证矩阵（全部真机）

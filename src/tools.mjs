@@ -79,12 +79,13 @@ function renderBundleScripts(scripts, cwd) {
  * 语义：物化失败 **不作废已建立的接管会话** —— 结果作为普通字段挂在返回体上，
  * 由 render 显式告警（legacy / failed）；这里只兜底“任何异常都不许外抛”。
  */
-async function attachSkillMaterialization(json) {
+async function attachSkillMaterialization(json, ctx = {}) {
   if (!json || typeof json !== 'object' || json.detail) return json
   const bundle = json.bundle || {}
   const cwd = String((bundle.workspace || {}).cwd_hint || process.cwd())
   try {
-    json.skillMaterialization = await materializeSkillAssets(bundle.assets?.skill, cwd, { env: bundle.env || process.env })
+    // Issue #39：repo 上下文只喂引用形态的下载端点（repo scope 技能过滤；官方/个人技能自动忽略）
+    json.skillMaterialization = await materializeSkillAssets(bundle.assets?.skill, cwd, { env: bundle.env || process.env, repo: ctx.repo })
   } catch (e) {
     json.skillMaterialization = {
       status: 'failed',
@@ -92,6 +93,7 @@ async function attachSkillMaterialization(json) {
       path: '',
       fileCount: 0,
       hasReferences: false,
+      source: '',
       reason: e && e.message ? e.message : String(e),
     }
   }
@@ -1928,6 +1930,7 @@ export const TOOLS = [
       '或用 grape_takeover_abort 让渡回流水线（当前节点重新派发，链不断）。' +
       '⚠️ push 能力边界：tko_ 仅 repo_session 能力，**不含 git 凭据注入**；洁净机器用 `grape_git_credential` 以 tko_ 换一次性本仓券（600s → GIT_ASKPASS 0600）后 push，PR 用 `grape_create_pull`。' +
       `接管同时把平台下发的 bundle.assets.skill 物化到本地工作区 <cwd>/${SKILL_ROOT_DIRNAME}/<skill>/（SKILL.md + references/），渲染给出落盘路径；旧平台未下发技能包时显式提示未物化。` +
+      '⚠️ 引用形态（Issue #39）：`files` 条目只持 `__obs_key__`（无 content/text/data/body）时，客户端先按资产内短签 URL / 契约端点 `GET /api/skills/by-id/{id}/download` 拉 zip 物化；拉不到即 `failed` 并在渲染行明示「需服务端转 inline/zip_url 下发」，盘上零副作用——不再静默落 0 字节空文件（复现该失败时去改平台下发格式，重试客户端无用）。' +
 
       '⚠️ 能力依赖（Issue #32）：接管前握手 `GET /api/health` 的 version/capabilities；节点 required 技能数 > 1 且服务端未声明 `skills.multi` 时拒绝接管，返回稳定错误码 `E_CAP_UNSUPPORTED_MULTI_SKILL` 与升级指引（升级服务端/kit 或改为单技能节点）。`takeover_bundle.v2` 不隐含多技能支持，客户端唯一判据是 `skills.multi`。' +
       '⚠️ 需要平台支持 takeover API（404/无该工具能力时回退 grape_takeover_context + cancel 老路径）。',
@@ -1966,7 +1969,7 @@ export const TOOLS = [
       const gate = evaluateTakeoverGate(skills, caps)
       if (!gate.allowed) return gate.payload
       const r = await api.takeoverStart(a.owner, a.repo, a.number, a.agent_type)
-      const out = await attachSkillMaterialization(r && typeof r === 'object' ? r : { result: r })
+      const out = await attachSkillMaterialization(r && typeof r === 'object' ? r : { result: r }, { repo: `${a.owner}/${a.repo}` })
       // 判据可追溯：render 需要 version + capabilities + source + handshake_at
       return {
         ...out,
@@ -2014,7 +2017,8 @@ export const TOOLS = [
       if (sm && typeof sm === 'object') {
         lines.push('', '**技能物化（本地工作区）**', '')
         if (sm.status === 'ok') {
-          lines.push(`- 技能: ${sm.skill} · 文件 ${sm.fileCount} 个 · references: ${sm.hasReferences ? '有' : '无'}`)
+          const via = sm.source === 'reference' ? '（经引用形态拉取）' : (sm.source === 'zip' ? '（zip 下发）' : '')
+          lines.push(`- 技能: ${sm.skill} · 文件 ${sm.fileCount} 个${via} · references: ${sm.hasReferences ? '有' : '无'}`)
           lines.push(`技能已物化：${sm.path}`)
         } else if (sm.status === 'legacy') {
           lines.push(`- ⚠️ 本次未物化技能：${sm.reason || '平台未下发 assets.skill'}。技能名见 env.GRAPE_BOUND_SKILL，SKILL.md 需自行获取后再动手。`)

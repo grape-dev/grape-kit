@@ -370,6 +370,16 @@ export const api = {
   skillsSearch: (q) => apiRequest('GET', '/api/skills/search', { query: { q } }),
   skillDetail: (skillId) => apiRequest('GET', `/api/skills/by-id/${skillId}`),
   /**
+   * 技能包下载（Issue #39 引用形态解析的唯一契约端点）：OBS 形态返回 `{url, expires_in}` 短签 URL
+   * （拉 zip 的第二步不带凭据，直接 GET 该 URL），其余形态直出 zip 二进制。
+   * `repo` 只对 repo scope 技能有意义（官方 / 个人技能留空）。该端点 scope=user_only，tko_ 会话凭据不可用。
+   */
+  skillDownload: (skillId, repo, env) =>
+    apiRequest('GET', `/api/skills/by-id/${encodeURIComponent(String(skillId ?? '').trim())}/download`, {
+      query: repo ? { repo: String(repo) } : {},
+      env,
+    }),
+  /**
    * 上传技能 ZIP。scope=user 个人技能；scope=repo 需 repo + agent_type（必填）。
    * 服务端校验失败返回 detail.errors 列表（apiUpload 会保留全部错误）。
    */
