@@ -23,11 +23,11 @@
 
 ```
 agent 宿主（MCP stdio：opencode / CodeArts / WorkBuddy / dsh…；其他 MCP 能力宿主可手动接线）
-  → grape-kit（43 工具 · 原生 HTTP 直连 · Markdown 渲染 · initialize instructions 自举）
+  → grape-kit（48 工具 · 原生 HTTP 直连 · Markdown 渲染 · initialize instructions 自举）
     → grape 服务端（流水线 / events / takeover 会话 API；CLI 仅 401 回退用）
 ```
 
-## 能力总览（43 工具）
+## 能力总览（48 工具）
 
 - **流水线遥控**：触发（唯一 A2A 入口）· 等待任务 · 任务状态 · 取消/恢复（带决策门）
 - **需求与事件**：列表/详情/事件流/我的需求 · 建单 · 结构化交回模板
@@ -37,6 +37,7 @@ agent 宿主（MCP stdio：opencode / CodeArts / WorkBuddy / dsh…；其他 MCP
 - **场景与仓库**：场景列表（市场 / 仓库副本）· 应用场景（建仓库副本，可选设默认）· 设仓库默认场景（决定新建需求走哪条流水线）· 托管仓库 · 同步仓库 · 项目模板 · 项目信息
 - **搜索、知识与技能**：全局搜索（all/event/repo/agent）· 技能 ×6（列表/搜索/详情 + **上传/升级/跨 scope 复制**：本地预检、自动打 ZIP 带顶层目录、服务端 errors 全量透出）· 知识 ×2 · 仪表盘
 - **Worker 接入**：把本机注册为 grape 执行引擎（`grape_worker_onboard`）
+- **自管理**（v0.4.1+）：`grape_kit_version`（版本全景：本地 kit 版本 / npm 最新版 / grape CLI / 服务端连通性与契约版本 / 凭据来源）与 `grape_kit_check_update`（更新检查，支持 `dismiss` 3 天冷却）进程内只读直执行；`grape_kit_upgrade` / `grape_kit_install` / `grape_kit_uninstall` **只生成可复制命令**（自动识别安装形态：全局 npm / npx 缓存 / ClawHub / 项目本地依赖）——工具本身不执行任何变更，由用户确认后手动执行。只生成命令，无静默执行。
 
 ## 快速开始
 
@@ -158,7 +159,7 @@ npx -y @grape-dev/grape-kit install --target dsh          # 升级后重新装�
 npx -y @grape-dev/grape-kit uninstall --target dsh        # 只删托管块 + skill 副本
 ```
 
-> dsh 走 **MCP 最小路径**（43 工具零改动复用）；完整形态的原生 Cordis 插件由 [grape-dsh](https://gitcode.com/grape-dev/grape-dsh) 承载，二者并存。
+> dsh 走 **MCP 最小路径**（48 工具）*零改动复用）；完整形态的原生 Cordis 插件由 [grape-dsh](https://gitcode.com/grape-dev/grape-dsh) 承载，二者并存。
 
 ### Codex CLI
 
@@ -218,7 +219,7 @@ npx -y @grape-dev/grape-kit uninstall --target trae
 openclaw plugins install clawhub:grape-kit@latest
 ```
 
-`clawhub:` 为来源前缀（与 devkit 上架同款）。装后用插件 MCP 工具列表验证（43 工具）。市场页：https://clawhub.ai/grape-dev/plugins/grape-kit
+`clawhub:` 为来源前缀（与 devkit 上架同款）。装后用插件 MCP 工具列表验证（48 工具）*。市场页：https://clawhub.ai/grape-dev/plugins/grape-kit
 
 也可不经市场，直接用文件注册（与其它宿主同一套四件套）：
 
@@ -295,7 +296,7 @@ npx -y @grape-dev/grape-kit intro     # 随时重看能力地图
 ```bash
 npm install
 
-npm test        # 296 个单测（fake-grape 替身，不依赖真实服务端）
+npm test        # 347 个单测（fake-grape 替身，不依赖真实服务端）
 
 npm run smoke   # 真实 stdio JSON-RPC 往返：initialize → tools/list → tools/call
 ```

@@ -20,6 +20,8 @@
 - atomcode：`~/.atomcode/mcp.json` 的 `mcpServers.grape-kit`，`ATOMCODE_HOME` 可覆盖根路径。
 - trae：项目级 `.trae/mcp.json` 的 `mcpServers.grape-kit`（仅项目级语义，不做用户级兜底），`GRAPE_TRAE_CONFIG` 可覆盖；路径对齐 Trae 官方 MCP 入口。
 - 每个新宿主补 fake HOME 单测（含 TOML 注释/他人表保留、YAML 保注释与条目隔离、JSON 容器兼容、dry-run 不动盘、幂等与备份），单测 270→296；README / README.zh 新增 10 宿主支持矩阵与 5 个宿主专段。
+- 自管理五工具（Issue #27，工具面 39 → 48）：`grape_kit_version` 版本全景（本地 kit 版本 / npm latest 与更新可用性 / grape CLI 回退通道 / 服务端连通性与契约版本 / 凭据来源档位，各通道 best-effort 降级不阻塞其余字段）、`grape_kit_check_update` 主动更新检查（`dismiss` 拒绝版本落 `~/.grape/grape-kit-dismiss.json`，**3 天冷却**内同版本不再提醒、新版本立即重新提醒，与启动期 24h 缓存语义解耦）、`grape_kit_upgrade` / `grape_kit_install` / `grape_kit_uninstall` 只生成可复制命令（安装形态自动识别：全局 npm / npx 缓存 / ClawHub / 项目本地依赖 / 未知，未知形态只给手动指引不给命令）。
+- 新增 `src/lifecycle.mjs` 自管理核心：纯函数 + 可注入依赖（home/env/fetch/spawn/now），五宿主只读检出（opencode / workbuddy / codearts / officeace / dsh，含配置损坏与托管块不完整的显式区分），与 `grape-kit.mjs` 的检测逻辑成对维护并有同夹具一致性断言（防两份逻辑漂移）。
 
 ### Changed
 
@@ -29,21 +31,18 @@
 - 裸 `doctor` 汇总自检由 5 宿主扩到全部 10 宿主；`uninstall` 零痕迹提示与 `help` 用法统一随 `SUPPORTED_TARGETS` 自动列出全部宿主。
 - dsh 补充 `--dry-run` 预览实现（托管块 / skill / receipt 只列不删），与其它宿主预览口径一致。
 - `trae` 收窄为严格项目级：当前目录与 `$HOME` 相同时 `install` / `uninstall` 直接拒绝并提示到目标项目目录执行（此时项目级路径等同用户级 `~/.trae/mcp.json`）；`--target all` 与全量卸载枚举不再包含项目级宿主，跳过时显式披露原因，任意目录下 `--target all` 不再静默创建 `.trae/`。
+- `src/server.mjs` INSTRUCTIONS 补第 8 条纪律：自管理工具属用户决策层——`grape_kit_version` / `grape_kit_check_update` 只读直执行，`grape_kit_upgrade` / `grape_kit_install` / `grape_kit_uninstall` **只生成命令、不执行任何变更**，执行前必须获得用户确认。
+- README 双语能力总览与工具面口径同步为 48 工具（新增「自管理」条目）；`scripts/smoke.mjs` / `scripts/sweep-0.2.mjs` 工具数断言 39 → 48，冒烟新增 `grape_kit_version` / `grape_kit_check_update` 只读调用。`grape-kit.mjs`（CLI）与 `src/update-check.mjs`（启动期提醒红线）**均零行为改动**：`src/lifecycle.mjs` 自持 registry URL / 有界超时 / 取数，只复用 `update-check.mjs` 的纯 semver 函数（同值由 `test/lifecycle.test.mjs` 断言兜住漂移）。
+- `CONTRIBUTING.md` 自身纳入「工具数变化必须同步」清单（§1 冒烟注释与 §6 数字），并由 `test/docs-sync.test.mjs` 按 `TOOL_NAMES` 实际数量断言，避免规范文字外的漏改。
 
 ### Fixed
 
-- 技能上传/升级失败时只显示第一条校验错误：现在按服务端 `detail.errors` 全量列出。
-- 测试脚手架可移植性：`scripts/fake-grape.mjs` 的 wait 轮询计数器原硬编码在共享临时目录，多用户机器上非属主跑 `npm test` 会 EACCES（表现为 287 pass / 1 fail 的假产品缺陷）；改为 `os.tmpdir()` 下按 uid 隔离，并支持 `GRAPE_FAKE_TMPDIR` 覆盖。
-- 技能上传后的「下一步」提示不再暗示平台已有节点级绑定能力：写明目前只能整场景 PUT（节点级写端点属 P1 计划）。
-- `test/setup-targets.test.mjs` 子进程补 `cwd` 隔离：工作树含 `.trae/` 时不再误命中 trae 探测，也不会改写真实 `.trae/mcp.json`。
-- trae 探测收窄为 `.trae/mcp.json` 文件存在，避免仅有空目录时误判。
-- hermes 手写条目缩进泛化（不再只认 2 空格）：4 空格等合法 YAML 条目安装时去重、doctor 可检出；托管条目缩进对齐既有段落。
-- hermes 遇非空 inline `mcp_servers` 映射时中止安装并保持文件原样，避免生成重复顶级键。
-- hermes 卸载判定收敛为单一 `hermesUninstallDecision()`：`--dry-run` 预览与执行共用同一决策，不完整托管块下预览不再承诺「将移除」而执行 exit 1；同一决策下不再二次读盘。
-- hermes 手写条目按 `mcp_servers` 段内缩进精确匹配：`mcp_servers.other.grape-kit` 这类其它 server 下的同名嵌套键不再被误删、不再被误判为已安装。
-- hermes 对无法安全追加的 `mcp_servers` 取值（inline 非空映射、多行 flow map、序列/标量）一律中止并保持文件原样，写入前另做「顶级键唯一」兜底校验，杜绝 YAML last-wins 丢弃用户映射。
-- JSON 宿主（openclaw / atomcode / trae）改用宽松解析判据：含注释/尾随逗号的配置不再直接 exit 1，写入前备份原文并在 stderr 披露规范化。
-- `test/setup-dsh.test.mjs` 的 `run()` 补齐 `HERMES_HOME` / `GRAPE_*_CONFIG` / `ATOMCODE_HOME` / `GRAPE_HOME` 置空：`--target all` 不再因继承变量写进真实用户目录。
+- QA 复审（PR #21）BOM 口径对齐：`src/lifecycle.mjs` 对纯 JSON 宿主（workbuddy / officeace）的检出不再私自剥 BOM——与 CLI `detectJsonEntry` 同口径（BOM 配置报 `damaged`），jsonc 通道仍按 `parseLoose` 剥 BOM；两侧判定分歧（lifecycle=installed / doctor=damaged）消除，并有 BOM 夹具（纯 JSON damaged、jsonc installed）与同夹具一致性断言兜住。
+- QA 复审（PR #21）损坏宿主不给假动作：`grape_kit_install` / `grape_kit_uninstall` 遇 `damaged` 宿主不再生成命令（CLI 对解析失败的配置 `exit 1`），改为单列 `blocked` 并带出解析错误与「先修复或移走该文件」指引；「已装配跳过」与「配置损坏待修复」不再混为一谈。
+- QA 复审（PR #21）同步指针去行号：`src/lifecycle.mjs` 对 `grape-kit.mjs` 的 14 处同步指针由「文件:行号」改为函数名/常量名锚，并新增 `SYNC_POINTERS` 清单 + 校验测试（CLI 侧改名/删除即变红），消除行号随无关改动 7/14 失准的漂移面。
+- QA 复审第 3 轮 dismiss 三处口径（Q4/Q5/Q6）：`recordDismiss` 写盘失败不再被吞——如实返回 `ok:false` + 原因，`checkForUpdate` 不再把失败当「已忽略」，工具渲染「记录失败（路径不可写）」并说明下次仍会提示；registry 不可达且未传 `dismissVersion` 时**不再兜底记当前版本**（该版本永不触发冷却），改为返回 `dismissSkipped` 说明原因并提示显式指定版本；`grape_kit_version` 的版本全景改为读 dismiss 状态，「已忽略（冷却中）」不再被说成「有可用更新 / 已是最新」。
+- QA 复审第 3 轮判断项：空命令文案区分「目标宿主配置均损坏（先修复）」与「均为相反状态」（SJ5）；`HOST_STATE` / 新增 `UPDATE_STATE` 常量单源，判定与两端渲染不再散落字面量（SJ6/SJ7）；`credentialSummary` 三层嵌套三元拆成档位映射表、检出结果去掉与 `host` 重复的 `label`（SJ7）；三个写工具的「用户决策层」描述纳入 `test/tools.test.mjs` 决策门断言表（SJ8）。
+- QA 复审第 3 轮贡献流程模板口径（S2）：`.github/PULL_REQUEST_TEMPLATE.md` / `.github/ISSUE_TEMPLATE/bug_report.md` 工具数 39 → 44、单测数不再写死（以 `npm test` 实际输出为准），两个模板纳入 `CONTRIBUTING.md` §6 同步清单并由 `test/docs-sync.test.mjs` 断言。
 - `detectHosts` 的 hermes 探测改用 `hermesPaths().home`，`HERMES_HOME` 覆盖时可被自动命中。
 - codex `uninstall --dry-run` 在文件仅剩托管条目时明确披露「将删除整个文件」，预览与执行同源。
 - hermes 裸 `mcp_servers:` 头按首个内容行判定形态：序列（`  - a`）与标量（`  foo`）取值一律中止安装并保持文件原样——此前会追加托管条目，产出 mapping+sequence 混层（`yaml.safe_load` 直接 ParserError）。

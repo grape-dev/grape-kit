@@ -12,6 +12,7 @@
  *   render(json)    -> string     Markdown（无 UI 补偿层）
  */
 import * as R from './render.mjs'
+import * as lifecycleModule from './lifecycle.mjs'
 import { hostname } from 'node:os'
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { basename, resolve as resolvePath } from 'node:path'
@@ -500,6 +501,148 @@ const OWNER_REPO_NUM = {
   owner: str('仓库归属（owner）'),
   repo: str('仓库名（repo）'),
   number: num('issue 编号'),
+}
+
+/* ── Issue #27 写工具公共层：只读检出 → 生成命令 → 决策门渲染（零执行） ── */
+
+const HOST_TARGETS = lifecycleModule.HOST_NAMES
+/** 状态词表与更新状态词表的唯一来源（lifecycle 导出）：判定与渲染共用常量，改名不会静默失效 */
+const { HOST_STATE, UPDATE_STATE } = lifecycleModule
+
+/** 检出状态的人类可读标签（damaged 必须显式「先修复」，否则用户会照装一遍再踩同样的坑） */
+const STATE_LABEL = {
+  [HOST_STATE.INSTALLED]: '已装配',
+  [HOST_STATE.ABSENT]: '未装配（文件在、无条目）',
+  [HOST_STATE.MISSING]: '未装配（无配置文件）',
+  [HOST_STATE.DAMAGED]: '配置损坏（先修复）',
+}
+
+const WRITE_GATE = '⚠️ 决策门：以上命令只生成、未执行。请先把命令块与影响范围交给用户确认，确认后再执行（可随时 Ctrl-C 打断）。'
+const NO_TERMINAL_HINT = '无终端工具的宿主：把命令与需要编辑的文件路径原样给用户，由用户手动执行/编辑。'
+
+/**
+ * install / uninstall 共用的计划构建：逐宿主只读检出 → 需要动作的宿主才生成命令。
+ * damaged 宿主（配置解析失败）**一律不生成命令**：CLI 侧的 install/uninstall 对解析失败的
+ * 配置直接 `exit 1`（「请先修复或移走该文件后重试」），照给命令等于给一条必失败的动作；
+ * 它们单列进 `blocked`，带出解析错误，让用户先修配置。
+ * @param {'install'|'uninstall'} action
+ * @param {string} targetArg 宿主名或 all（缺省 all）
+ */
+function buildHostPlan(action, targetArg, L) {
+  const target = String(targetArg || 'all').trim()
+  if (target !== 'all' && !HOST_TARGETS.includes(target)) {
+    return { action, target, error: `不支持的宿主：${target}（可用：${HOST_TARGETS.join(' / ')} / all）` }
+  }
+  const rows = L.detectHostStatus({})
+  const targets = target === 'all' ? HOST_TARGETS : [target]
+  const hosts = targets.map((host) => {
+    const r = rows.find((x) => x.host === host) || { host, state: HOST_STATE.MISSING, installed: false, path: '', skillsDir: '', entry: '' }
+    const blocked = r.state === HOST_STATE.DAMAGED
+    const needsAction = blocked ? false : action === 'install' ? !r.installed : !!r.installed
+    return {
+      host,
+      state: r.state || HOST_STATE.MISSING,
+      path: r.path || '',
+      entry: r.entry || '',
+      skillsDir: r.skillsDir || '',
+      installed: !!r.installed,
+      blocked,
+      evidence: r.evidence || r.error || '',
+      error: r.error || '',
+      // 修复指引不给可执行命令：配置坏着跑 install/uninstall 必被 CLI 拒，只说明「改什么、改完怎么办」
+      repair: blocked ? `先修复或移走 ${r.path}（${r.error || '配置解析失败'}），修好后重跑本工具即可生成${action === 'install' ? '装配' : '卸载'}命令` : '',
+      command: needsAction ? `npx -y @grape-dev/grape-kit ${action} --target ${host}` : '',
+    }
+  })
+  const active = hosts.filter((h) => h.command)
+  const blocked = hosts.filter((h) => h.blocked)
+  const plan = {
+    action,
+    target,
+    hosts,
+    commands: active.map((h) => h.command),
+    skipped: hosts.filter((h) => !h.command && !h.blocked).map((h) => h.host),
+    blocked: blocked.map((h) => ({ host: h.host, path: h.path, error: h.error, repair: h.repair })),
+  }
+  if (action === 'uninstall') {
+    // 影响预览：只列不删。条目 + skill 副本 + （officeace）客户端侧手动删除提示
+    plan.effects = active.flatMap((h) => {
+      const out = [`移除 ${h.entry || 'grape-kit'} 条目（${h.path}）`]
+      if (h.skillsDir) out.push(`删除 skill 副本（${h.skillsDir}/grape-remote/）`)
+      if (h.host === 'officeace') out.push('果办OfficeAce 侧还需在「扩展 → 连接器 → 我的连接器」手动删除该连接器')
+      return out
+    })
+    plan.dryRun = active.map((h) => `npx -y @grape-dev/grape-kit uninstall --target ${h.host} --dry-run`).join('\n')
+  }
+  return plan
+}
+
+/** 写工具渲染：状态表格 + 待执行命令 + 决策门（uninstall 追加影响预览与 --dry-run） */
+function renderHostPlan(json) {
+  if (!json || typeof json !== 'object') return R.fallbackJson(json)
+  if (json.error) return `### ${json.action === 'uninstall' ? '卸载' : '装配'} grape-kit\n\n${json.error}`
+  const isUninstall = json.action === 'uninstall'
+  const lines = [
+    `### ${isUninstall ? '卸载' : '装配'} grape-kit（命令生成，未执行）`, '',
+    R.mdTable(json.hosts || [], [
+      { h: '宿主', v: 'host' },
+      { h: '状态', v: (r) => STATE_LABEL[r.state] || r.state || '-' },
+      { h: '依据文件', v: (r) => `${r.path || '-'}${r.entry ? `（${r.entry}）` : ''}` },
+    ]),
+  ]
+  if (json.skipped?.length) {
+    lines.push('', `已${isUninstall ? '跳过' : '装配'}的宿主本次不生成命令：${json.skipped.join(' / ')}`)
+  }
+  // damaged 宿主单列：表内既已写「配置损坏（先修复）」，命令块就不能照给（CLI 会 exit 1）
+  if (json.blocked?.length) {
+    lines.push('', '**⚠️ 配置损坏的宿主本次不生成命令（照着执行必被 CLI 拒绝，先修复）：**')
+    for (const b of json.blocked) {
+      lines.push(`- ${b.host} — ${b.repair || `${b.path}（${b.error || '配置解析失败'}）`}`)
+    }
+  }
+  if (isUninstall && json.effects?.length) {
+    lines.push('', '**将移除的内容（只列不删，执行前请逐条确认）**', '')
+    for (const e of json.effects) lines.push(`- ${e}`)
+  }
+  if (json.commands?.length) {
+    lines.push('', `**待执行命令（逐宿主复制执行）**`, '', '```bash', ...json.commands, '```')
+    if (isUninstall && json.dryRun) {
+      lines.push('', '**先预览（--dry-run 只列不删，推荐先跑一遍）**', '', '```bash', json.dryRun, '```')
+    }
+  } else {
+    // 空命令有两种真实原因：全 blocked（配置损坏待修）vs 全为相反状态——混说会让用户去查错方向（QA SJ5）
+    lines.push('', json.blocked?.length
+      ? '_本次没有可生成的命令：目标宿主配置均损坏（先按上方「先修复」逐条处理，修好后重跑本工具）。_'
+      : '_本次没有需要生成的命令（目标宿主均为相反状态）。_')
+  }
+  lines.push('', isUninstall
+    ? '⚠️ 强决策门：卸载会移除宿主配置条目与 skill 副本（不可自动回滚），以上命令只生成、未执行——执行前必须向用户逐条确认影响范围。'
+    : '⚠️ 决策门：安装会改写宿主 MCP 配置（installer 自带备份），以上命令只生成、未执行——执行前必须向用户确认目标宿主。',
+  NO_TERMINAL_HINT)
+  return lines.join('\n')
+}
+
+/**
+ * 版本全景「服务端」一行：值列与备注列由同一组分支决定（三分支：未探测 / 不可达 / 可达）。
+ * 抽成函数的原因：原先内联四层三元链，改一个分支要看穿整行才能确认其余分支没被带歪。
+ * @returns {{v: string, note: string}}
+ */
+function serverRow(srv = {}) {
+  const url = srv.baseUrl || ''
+  const contract = srv.contractVersion ? `契约版本 ${srv.contractVersion}` : ''
+  if (srv.probe === 'skipped') {
+    return {
+      v: `未探测（缺凭据）${url}`,
+      note: `${srv.reason || '未配置凭据'}${contract ? `；${contract}` : ''}`,
+    }
+  }
+  if (srv.reachable) {
+    return { v: `可达 ${url}`, note: contract || '契约版本未取到（404/不可达时省略）' }
+  }
+  return {
+    v: `不可达 ${url}`,
+    note: `${srv.error || ''}${srv.hint ? `（${srv.hint}）` : ''}${contract ? `；${contract}` : ''}`,
+  }
 }
 
 export const TOOLS = [
@@ -1709,6 +1852,187 @@ curl -sSL ${base}/api/runtime/install | bash -s -- --token <TOKEN> --server ${ba
       }
       return R.fallbackJson(json)
     },
+  },
+
+  
+/* ── Issue #27：自管理五工具（读直执行 / 写只生成命令） ──
+   * 公共红线（Spec §3.6）：三个写工具**绝不**执行任何变更，只返回可复制命令块 + 决策门文案；
+   * run() 不触碰 runGrape / api 通道（无静默执行路径），服务端契约与 CLI 红线都不受影响。 */
+
+  {
+    name: 'grape_kit_version',
+    description:
+      '查询 grape-kit 自身的版本全景（只读直执行）：本地 kit 版本 / npm 最新版与是否可升级 / grape CLI 回退通道是否可用 / ' +
+      '服务端连通性与契约版本 / 当前生效的凭据来源。各通道均为 best-effort：单一通道失败只降级该字段，不阻塞其余字段。' +
+      '只输出诊断信息，不做任何变更。',
+    schema: { type: 'object', properties: {} },
+    async run(a, { lifecycle: L = lifecycleModule } = {}) {
+      return L.aggregateVersion({})
+    },
+    render(json) {
+      if (!json || typeof json !== 'object') return R.fallbackJson(json)
+      const cli = json.grapeCli || {}
+      const srv = json.server || {}
+      const cred = json.credentials || {}
+      const rows = [
+        { k: '本地 kit 版本', v: json.kitVersion || '-', note: '包根 package.json（与 server.mjs 同源）' },
+        { k: 'npm 最新版', v: json.latestVersion || 'unavailable', note: 'registry.npmjs.org 直查，5s 超时' },
+        {
+          k: '更新',
+          // 四态各有独立结论（dismissed ≠ latest ≠ newer），映射而非三元链，避免把「已忽略」说成「已是最新」（QA Q6）
+          v: {
+            [UPDATE_STATE.NEWER]: '⬆️ 有可用更新',
+            [UPDATE_STATE.LATEST]: '✅ 已是最新',
+            [UPDATE_STATE.DISMISSED]: '🙈 已忽略（冷却中）',
+            [UPDATE_STATE.UNAVAILABLE]: '检测不可用',
+          }[json.updateState] || (json.updateState || '-'),
+          note: json.updateNotice || '',
+        },
+        {
+          k: 'grape CLI',
+          v: cli.status === 'ok' ? `ok（${cli.version || cli.bin || ''}）` : '未安装',
+          note: cli.status === 'ok' ? '可选回退通道（v0.3.0 起原生 HTTP 直连，CLI 仅 401 回退用）' : (cli.hint || ''),
+        },
+        {
+          k: '服务端',
+          ...serverRow(srv),
+        },
+        {
+          k: '凭据来源',
+          v: cred.configured ? (cred.source || '已配置') : '未配置',
+          note: cred.configured ? '按优先级链判定，不回显 token 明文' : (cred.hint || ''),
+        },
+      ]
+      return [
+        '### grape-kit 版本全景（只读）', '',
+        R.mdTable(rows, [{ h: '项', v: 'k' }, { h: '值', v: 'v' }, { h: '备注', v: 'note' }]), '',
+        '_只读诊断：不改任何配置、不执行任何命令。升级请用 grape_kit_upgrade（只生成命令）。_',
+      ].join('\n')
+    },
+  },
+
+  {
+    name: 'grape_kit_check_update',
+    description:
+      '主动检查 grape-kit 是否有新版本（只读）：npm 直查 latest 并与本地版本做 semver 比较。' +
+      'dismiss=true 时把该版本记为「已忽略」（写本地 ~/.grape/grape-kit-dismiss.json），3 天内同版本不再提示，新版本出现会重新提醒。' +
+      '与启动期被动提醒（24h 缓存）语义解耦；除 dismiss 状态外不产生任何变更。',
+    schema: {
+      type: 'object',
+      properties: {
+        dismiss: bool('true = 把该版本记为已忽略（3 天冷却）；缺省 false 只查询'),
+        dismissVersion: str('要忽略的版本号（缺省取 npm latest；dismiss=false 时忽略该参数）'),
+      },
+    },
+    async run(a, { lifecycle: L = lifecycleModule } = {}) {
+      return L.checkForUpdate({ dismiss: a?.dismiss === true, dismissVersion: a?.dismissVersion })
+    },
+    render(json) {
+      if (!json || typeof json !== 'object') return R.fallbackJson(json)
+      const conclusion = {
+        [UPDATE_STATE.NEWER]: '⬆️ 有新版本',
+        [UPDATE_STATE.LATEST]: '✅ 已是最新',
+        [UPDATE_STATE.DISMISSED]: '🙈 已按用户要求忽略（冷却中）',
+        [UPDATE_STATE.UNAVAILABLE]: '❔ 检测不可用（npm registry 不可达或响应异常）',
+      }[json.state] || (json.state || '-')
+      const lines = [
+        '### grape-kit 更新检查', '',
+        R.mdTable([
+          { k: '当前版本', v: json.currentVersion || '-' },
+          { k: 'npm 最新', v: json.latestVersion || 'unavailable' },
+          { k: '结论', v: conclusion },
+        ], [{ h: '项', v: 'k' }, { h: '值', v: 'v' }]),
+      ]
+      if (json.updateNotice) lines.push('', json.updateNotice)
+      // 三项互斥且必须如实：落盘成功才说「已记录」，失败说失败，没版本可记说没记（QA Q4/Q5）
+      if (json.dismiss && json.dismiss.ok === false) {
+        lines.push('', `**⚠️ 记录失败（路径不可写）**：未能写入 \`${json.dismiss.file || '~/.grape/grape-kit-dismiss.json'}\`（${json.dismiss.error || '落盘失败'}）。`
+          + `该版本**未被忽略**，下次检查仍会提示——请修好该路径权限（或 \`GRAPE_HOME\`）后重试。`)
+      } else if (json.dismiss) {
+        lines.push('', `已记录忽略版本 \`${json.dismiss.version}\`：3 天内不再提示，出现新版本会重新提醒。`)
+      } else if (json.dismissSkipped) {
+        lines.push('', `**未记录忽略版本**：${json.dismissSkipped}——本次查询结论不受影响。`)
+      }
+      return lines.join('\n')
+    },
+  },
+
+  {
+    name: 'grape_kit_upgrade',
+    description:
+      '升级 grape-kit 自身：只读检出安装形态（全局 npm / npx 缓存 / ClawHub / 项目本地依赖 / 未知）并生成对应升级命令。' +
+      '⚠️ 用户决策层：执行前必须向用户确认（征得同意后方可执行）；本工具只生成命令、不执行。升级完成后需重启宿主会话才加载新版本。',
+    schema: { type: 'object', properties: {} },
+    async run(a, { lifecycle: L = lifecycleModule } = {}) {
+      const plan = L.detectInstallForm({})
+      return { action: 'upgrade', kitVersion: L.readKitVersion(), ...plan }
+    },
+    render(json) {
+      if (!json || typeof json !== 'object') return R.fallbackJson(json)
+      const FORM_LABEL = {
+        global: '全局 npm 安装', npx: 'npx 缓存运行', clawhub: 'ClawHub 市场安装', local: '项目本地依赖', unknown: '未知形态',
+      }
+      const lines = [
+        '### 升级 grape-kit（命令生成，未执行）', '',
+        R.mdTable([
+          { k: '当前版本', v: json.kitVersion || '-' },
+          { k: '安装形态', v: FORM_LABEL[json.form] || json.form || '-' },
+          { k: '检出依据', v: json.evidence || '-' },
+        ], [{ h: '项', v: 'k' }, { h: '值', v: 'v' }]),
+      ]
+      if (json.upgradeCommand) {
+        lines.push('', '**升级命令（复制到终端执行）**', '', '```bash', json.upgradeCommand, '```')
+      }
+      if (json.guidance) lines.push('', json.guidance)
+      if (json.restartHint) lines.push('', `- ${json.restartHint}`)
+      lines.push('', WRITE_GATE, NO_TERMINAL_HINT)
+      return lines.join('\n')
+    },
+  },
+
+  {
+    name: 'grape_kit_install',
+    description:
+      '装配 grape-kit 到本机宿主（opencode / workbuddy / codearts / officeace / dsh）：先只读检出各宿主当前装配状态，' +
+      '已装配的跳过，只为未装配的生成 npx 安装命令。⚠️ 用户决策层：执行前必须向用户确认；本工具只生成命令、不执行。' +
+      '实际装配命令形如 npx -y @grape-dev/grape-kit install --target <宿主>。',
+    schema: {
+      type: 'object',
+      properties: {
+        target: {
+          type: 'string',
+          enum: [...HOST_TARGETS, 'all'],
+          description: '目标宿主（缺省 all = 五宿主逐个处理）',
+          default: 'all',
+        },
+      },
+    },
+    async run(a, { lifecycle: L = lifecycleModule } = {}) {
+      return buildHostPlan('install', a?.target, L)
+    },
+    render: renderHostPlan,
+  },
+
+  {
+    name: 'grape_kit_uninstall',
+    description:
+      '卸载本机宿主上的 grape-kit 装配：先只读检出，列出将被移除的配置条目与 skill 副本（只列不删），再生成卸载命令并附 --dry-run 预览指引。' +
+      '⚠️ 用户决策层（强决策门）：卸载会移除宿主配置条目与 skill 副本，执行前必须向用户逐条确认影响范围；本工具只生成命令、不执行。',
+    schema: {
+      type: 'object',
+      properties: {
+        target: {
+          type: 'string',
+          enum: [...HOST_TARGETS, 'all'],
+          description: '目标宿主（缺省 all = 五宿主逐个处理）',
+          default: 'all',
+        },
+      },
+    },
+    async run(a, { lifecycle: L = lifecycleModule } = {}) {
+      return buildHostPlan('uninstall', a?.target, L)
+    },
+    render: renderHostPlan,
   },
 ]
 
