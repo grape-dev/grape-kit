@@ -18,6 +18,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { api, apiRequest, getBaseUrl, AGENT_TYPES, normalizeTriggerAgent, GrapeApiError } from './api.mjs'
 import { getServerCapabilities, normalizeSkills, evaluateTakeoverGate } from './capabilities.mjs'
+import { materializeSkillAssets, SKILL_ROOT_DIRNAME } from './skill-materialize.mjs'
 
 /** kit 安装根（发布包含 skills/，Node 版接管脚本随 skill 副本分发） */
 const KIT_ROOT = fileURLToPath(new URL('..', import.meta.url)).replace(/[\\/]+$/, '')
@@ -63,6 +64,32 @@ function renderBundleScripts(scripts, cwd) {
     }
   }
   return out.length ? out : null
+}
+
+/**
+ * Issue #28：接管会话建立后，把平台下发的 `bundle.assets.skill` 物化到本地工作区
+ * `<cwd>/.grape-takeover-skills/<skill>/`（cwd 与接管脚本 `{{CWD}}` 同源：cwd_hint 优先）。
+ *
+ * 语义：物化失败 **不作废已建立的接管会话** —— 结果作为普通字段挂在返回体上，
+ * 由 render 显式告警（legacy / failed）；这里只兜底“任何异常都不许外抛”。
+ */
+async function attachSkillMaterialization(json) {
+  if (!json || typeof json !== 'object' || json.detail) return json
+  const bundle = json.bundle || {}
+  const cwd = String((bundle.workspace || {}).cwd_hint || process.cwd())
+  try {
+    json.skillMaterialization = await materializeSkillAssets(bundle.assets?.skill, cwd, { env: bundle.env || process.env })
+  } catch (e) {
+    json.skillMaterialization = {
+      status: 'failed',
+      skill: '',
+      path: '',
+      fileCount: 0,
+      hasReferences: false,
+      reason: e && e.message ? e.message : String(e),
+    }
+  }
+  return json
 }
 
 const str = (desc) => ({ type: 'string', description: desc })
@@ -1137,7 +1164,8 @@ export const TOOLS = [
       '之后本地继续该节点工作，用 grape_takeover_progress 回报进度，完成用 grape_takeover_finish 携结构化产物交回，' +
       '或用 grape_takeover_abort 让渡回流水线（当前节点重新派发，链不断）。' +
       '⚠️ push 能力边界：tko_ 仅 repo_session 能力，**不含 git 凭据注入**；洁净机器的回推路径见返回体。' +
-      '⚠️ 能力依赖（Issue #32）：接管前握手 `GET /api/health` 的 version/capabilities；节点 required 技能数 > 1 且服务端未声明 `skills.multi` 时拒绝接管，返回稳定错误码 `E_CAP_UNSUPPORTED_MULTI_SKILL` 与升级指引（升级服务端/kit 或改为单技能节点）。`takeover_bundle.v2` 不隐含多技能支持，客户端唯一判据是 `skills.multi`。' +
+'⚠️ 能力依赖（Issue #32）：接管前握手 `GET /api/health` 的 version/capabilities；节点 required 技能数 > 1 且服务端未声明 `skills.multi` 时拒绝接管，返回稳定错误码 `E_CAP_UNSUPPORTED_MULTI_SKILL` 与升级指引（升级服务端/kit 或改为单技能节点）。`takeover_bundle.v2` 不隐含多技能支持，客户端唯一判据是 `skills.multi`。' +
+      `接管同时把平台下发的 bundle.assets.skill 物化到本地工作区 <cwd>/${SKILL_ROOT_DIRNAME}/<skill>/（SKILL.md + references/），渲染给出落盘路径；旧平台未下发技能包时显式提示未物化。` +
       '⚠️ 需要平台支持 takeover API（404/无该工具能力时回退 grape_takeover_context + cancel 老路径）。',
     schema: {
       type: 'object',
@@ -1158,7 +1186,7 @@ export const TOOLS = [
       },
       required: ['owner', 'repo', 'number'],
     },
-    async native(a) {
+async native(a) {
       const caps = await getServerCapabilities()
       const supplied = a.bundle ?? (a.skills ? { skills: a.skills } : null)
       let skills = normalizeSkills(supplied)
@@ -1176,7 +1204,7 @@ export const TOOLS = [
       const r = await api.takeoverStart(a.owner, a.repo, a.number, a.agent_type)
       const out = r && typeof r === 'object' ? r : { result: r }
       // 判据可追溯：render 需要 version + capabilities + source + handshake_at
-      return {
+      return attachSkillMaterialization({
         ...out,
         client_capabilities: {
           version: caps.version,
@@ -1187,7 +1215,7 @@ export const TOOLS = [
           required_skills: gate.required_skills,
           verdict: 'passed',
         },
-      }
+      })
     },
     render(json) {
       if (!json || typeof json !== 'object') return R.fallbackJson(json)
@@ -1216,6 +1244,19 @@ export const TOOLS = [
       const bundleScripts = renderBundleScripts(b.assets?.scripts ?? b.scripts, cwd)
       if (bundleScripts) {
         lines.push('', '**接管脚本（平台渲染，路径占位符已本地替换为实际路径）**', '', '```bash', ...bundleScripts, '```')
+      }
+      // Issue #28：技能物化结果（native 后置写入；无该字段时不受影响，保持既有渲染不变）
+      const sm = json.skillMaterialization
+      if (sm && typeof sm === 'object') {
+        lines.push('', '**技能物化（本地工作区）**', '')
+        if (sm.status === 'ok') {
+          lines.push(`- 技能: ${sm.skill} · 文件 ${sm.fileCount} 个 · references: ${sm.hasReferences ? '有' : '无'}`)
+          lines.push(`技能已物化：${sm.path}`)
+        } else if (sm.status === 'legacy') {
+          lines.push(`- ⚠️ 本次未物化技能：${sm.reason || '平台未下发 assets.skill'}。技能名见 env.GRAPE_BOUND_SKILL，SKILL.md 需自行获取后再动手。`)
+        } else {
+          lines.push(`- ⚠️ 技能未能物化：${sm.reason || '未知原因'}（接管会话不受影响；核对技能包后可重试）`)
+        }
       }
       if (sid) {
         const scriptDir = `${KIT_ROOT}/skills/grape-remote/scripts/takeover`
