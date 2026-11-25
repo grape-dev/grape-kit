@@ -303,7 +303,7 @@ Full release notes: [CHANGELOG.md](CHANGELOG.md) — 23 条发布记录（含 0.
 ```bash
 npm install
 
-npm test        # 483 unit tests (fake-grape stub, no live server)
+npm test        # 491 unit tests (fake-grape stub, no live server)
 
 npm run smoke   # real stdio JSON-RPC round-trip: initialize → tools/list → tools/call
 ```

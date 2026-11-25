@@ -16,7 +16,7 @@
  *   win32 双通道行为，且用例不会真的 `spawnSync(reg)` 造出 ENOENT 噪声。CLI 入口（grape-kit.mjs）
  *   因此不需要导出内部函数、也不需要「入口 vs import.meta.url」守卫——对外 CLI 行为与改动前一致。
  */
-import { readFileSync, writeFileSync, readdirSync, existsSync, rmSync } from 'node:fs'
+import { readFileSync, writeFileSync, readdirSync, existsSync, rmSync, statSync, chmodSync, renameSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, dirname, basename } from 'node:path'
 import { spawnSync } from 'node:child_process'
@@ -131,20 +131,57 @@ function keepBom(originalText, lines) {
 }
 
 /**
- * 清理 rc 通道：删除凭据行（保留原 CRLF/BOM）、留掩码备份、删除旧版含凭据备份。
- * 不返回「是否改动」——调用方不需要该值，需要的是逐条可读输出（QA 判断项 5）。
- * backupOf 由宿主注入（备份命名/去重属 CLI 侧关注点）。
+ * 原子写回 rc：同目录临时文件 → rename 覆盖。
+ *
+ * 为什么要覆盖式原子替换（PR #36 QA 复审判断项 5）：`writeFileSync` 是「截断再写」，进程被杀、
+ * 磁盘满、SMB/杀软拦截会留下**半写的 rc**——用户下一次开 shell 就是一个语法残缺的配置文件，
+ * 而这是每个新 shell 都会读的文件。rename 是原子操作（Windows 走 MoveFileEx REPLACE_EXISTING），
+ * 失败时旧文件完好无损。
+ * 顺带保住权限位：rename 换 inode，不显式恢复会让 0600 的 rc 退回 umask 默认（0644）。
  */
-function cleanRcResidues(residues, { backupOf, log = console.log } = {}) {
+export function writeRcAtomic(path, text) {
+  const tmp = `${path}.grapemk-tmp-${process.pid}-${Date.now()}`
+  let mode
+  try { mode = statSync(path).mode } catch { mode = null }
+  try {
+    writeFileSync(tmp, text, mode ? { mode: mode & 0o777 } : undefined)
+    if (mode) { try { chmodSync(tmp, mode & 0o777) } catch { /* 权限位不适用（win32 ACL / 只读盘） */ } }
+    renameSync(tmp, path)
+  } catch (err) {
+    try { rmSync(tmp, { force: true }) } catch { /* 临时文件清理失败不掩盖原始错误 */ }
+    throw err
+  }
+}
+
+/**
+ * 清理 rc 通道：删除凭据行（保留原编码风格）、留掩码备份、删除旧版含凭据备份。
+ * 不返回「是否改动」——调用方不需要该值，需要的是逐条可读输出（QA 判断项 5）。
+ * backupOf / writeRc 均由宿主注入：备份命名去重属 CLI 侧关注点；writeRc 让「写失败」这条路可测。
+ *
+ * 单个文件失败不得中断整段清理（win32 上 rc 被编辑器/杀软占用的 EBUSY 很常见）：备份先行，
+ * 失败的文件保持原文，告警点名文件 + 备份 + 下一步，其余 rc 继续清理。
+ */
+function cleanRcResidues(residues, { backupOf, writeRc = writeRcAtomic, log = console.log, warn = console.warn } = {}) {
   for (const hit of residues.rcHits) {
-    const { hits, cleaned, masked } = planRcCleanup(readFileSync(hit.path, 'utf8'), hit.kind)
-    const backup = backupOf(hit.path, masked)
-    writeFileSync(hit.path, cleaned)
-    log(`  已从 ${hit.path} 删除 ${hits} 行 GRAPE_* 导出（备份保留非凭据原文+凭据行掩码: ${backup}）`)
+    let backup = null
+    try {
+      const { hits, cleaned, masked } = planRcCleanup(readFileSync(hit.path, 'utf8'), hit.kind)
+      backup = backupOf(hit.path, masked)
+      writeRc(hit.path, cleaned)
+      log(`  已从 ${hit.path} 删除 ${hits} 行 GRAPE_* 导出（备份保留非凭据原文+凭据行掩码: ${backup}）`)
+    } catch (err) {
+      const why = err && err.code ? err.code : (err && err.message) || String(err)
+      warn(`  清理 ${hit.path} 失败（${why}），该文件保持原样${backup ? `；掩码备份可回滚: ${backup}` : ''}`)
+      warn(`    请关闭占用该文件的编辑器/杀毒软件后重跑 uninstall --clean-global`)
+    }
   }
   for (const b of residues.rcCredentialBackups) {
-    rmSync(b, { force: true })
-    log(`  已删除含凭据的旧备份: ${b}`)
+    try {
+      rmSync(b, { force: true })
+      log(`  已删除含凭据的旧备份: ${b}`)
+    } catch (err) {
+      warn(`  删除含凭据的旧备份失败（${(err && err.code) || err}）: ${b}——请人工删除，凭据明文仍在盘上`)
+    }
   }
   if (!residues.rcHits.length && !residues.rcCredentialBackups.length) {
     log('  未在 shell 配置文件发现 GRAPE_API_TOKEN/GRAPE_BASE_URL 导出行（跳过）')
@@ -180,9 +217,9 @@ function cleanWindowsUserEnvVars(residues, { reg = regOf, log = console.log, war
  * ——Windows 上 Git Bash 读的是 USERPROFILE 下的 rc，只清注册表等于留盘。
  * scan 为宿主注入的单一扫描源（grape-kit.mjs 的 scanResidues：含 grapeHome / authFile / npx）。
  */
-export function cleanCredentialChannels({ scan, backupOf, platform = process.platform, reg, log, warn } = {}) {
+export function cleanCredentialChannels({ scan, backupOf, writeRc, platform = process.platform, reg, log, warn } = {}) {
   if (typeof scan !== 'function') throw new TypeError('cleanCredentialChannels 需要 scan()：清理必须读单一扫描源的同一份结果')
   const residues = scan()
   if (platform === 'win32') cleanWindowsUserEnvVars(residues, { reg, log, warn })
-  cleanRcResidues(residues, { backupOf, log })
+  cleanRcResidues(residues, { backupOf, writeRc, log, warn })
 }
