@@ -6,6 +6,10 @@
 
 ## Unreleased
 
+暂无待发布变更。下一开发周期的用户可见变更先落本段（按 Added / Changed / Fixed 归类，见 CONTRIBUTING §7），发版时并入对应版本节。
+
+## 0.5.0 (2026-11-25)
+
 ### Added
 
 - **场景三段式工具面**（修复宿主实测 P3/P4/P5 的静默失败）：`grape_apply_scene` 改为走 `POST /api/scenes/market/{id}/apply` 在仓库内**创建场景副本**（响应带 `scene_id=custom-xxxxxxxx`），应用后**回读** `GET /api/scenes?repo=` 确认副本存在；输入只认市场数字 id 或场景名，未命中即本地拒绝（不再让服务端静默回落 `default`），`custom-` 副本 id 直接引导到新工具。`set_default=true` 时再调 `POST …/default-scene` 完成「设为仓库默认」。
