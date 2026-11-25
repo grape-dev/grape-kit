@@ -337,6 +337,27 @@ test('裸 doctor 汇总检出全部宿主：装了 codearts/officeace 均报 ok'
   assert.match(d.stdout, /\[!!\][^\n]*workbuddy[^\n]*未安装/i)
 })
 
+/* ---------- Issue #38：doctor 无凭据文案不再 (FAIL) 误导读法 ---------- */
+
+test('Issue #38 doctor 无凭据：信息行不以 (FAIL) 误导，仍为 [!!] 且 exit=0', () => {
+  const h = home()
+  const d = run(['doctor'], h, { GRAPE_API_TOKEN: '', GRAPE_BASE_URL: '', GRAPE_AUTH_FILE: '' })
+  assert.equal(d.status, 0, d.stderr)
+  assert.doesNotMatch(d.stdout, /\(FAIL\)|（FAIL）/, '无凭据信息行不得再出现 (FAIL) 字样')
+  assert.match(d.stdout, /\[!!\][^\n]*GRAPE_API_TOKEN/, '无凭据仍须是 [!!] 缺失档（否则「没有 [!!] 即就绪」会误判）')
+  assert.match(d.stdout, /\[!!\][^\n]*当前生效凭据来源/, '凭据来源行同样保持 [!!] 分类')
+})
+
+test('Issue #38 doctor 配置解析失败档仍可辨识为异常且不带 (FAIL)', () => {
+  const h = home()
+  mkdirSync(join(h, '.grape'), { recursive: true })
+  writeFileSync(join(h, '.grape', 'config.json'), '{ broken json')
+  const d = run(['doctor'], h, { GRAPE_API_TOKEN: '', GRAPE_BASE_URL: '', GRAPE_AUTH_FILE: '' })
+  assert.equal(d.status, 0, d.stderr)
+  assert.doesNotMatch(d.stdout, /\(FAIL\)|（FAIL）/)
+  assert.match(d.stdout, /\[!!\][^\n]*解析失败/, '解析失败档必须仍以 [!!] + 解析失败可辨识')
+})
+
 /* ---------- 备份时间戳 ---------- */
 
 test('同一秒多次写入不覆盖备份，且各份备份内容对应当次改动前原文', () => {
