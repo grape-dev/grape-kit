@@ -8,7 +8,7 @@
 
 ### Added
 
-- git 写回闭环（#31）：新增 `grape_git_credential`（tko_ 换一次性本仓券，写 GIT_ASKPASS 0600，过期自检、无静默回退，写盘前拒绝 symlink 并做 `.git/info/exclude` 复核）与 `grape_create_pull`（只建 PR，不评审不合并）；`grape_takeover_finish` 增加 coding 交回 branch/commit/PR 校验（缺项拒绝，`allow_incomplete=true` 可覆写留痕），finish/abort 清理 askpass。工具面 48→50。
+- git 写回闭环（#31）：`grape_git_credential`（tko_ 换一次性本仓券，GIT_ASKPASS 0600，过期自检、无静默回退、symlink 与 exclude 复核）与 `grape_create_pull`（只建 PR）；`takeover_finish` coding 交回 branch/commit/PR 校验与 askpass 清理。工具面 48→50。
 
 ### Added
 

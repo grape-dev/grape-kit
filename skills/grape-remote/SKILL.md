@@ -31,7 +31,7 @@ description: |
 
 1. `grape_takeover_start(owner, repo, number[, agent_type])` —— 原子让渡：云端任务停、本地接手、签发 tko_ 凭据（12h）、返回完整上下文与服务端渲染脚本。**不要**再调用 `grape_cancel_issue`。
    - tko_ 只有 repo_session 能力：可继续节点工作、回报进度，**不含 git 凭据注入**；洁净机器的写回链路见下方「git 写回」。
-   - **git 写回（Issue #31）**：`grape_git_credential(session_id, owner, repo, workspace)` 用 tko_ 换一次性本仓券（600s）并落 `GIT_ASKPASS`（0600，内嵌到期 epoch）；**push 前重新换券**（不缓存），券过期脚本非零退出并提示「重新换券」，不存在静默回退本机 git/CLI 凭据的分支。PR 用 `grape_create_pull(title/head/base)`；两工具只服务本仓 + 会话工作区，非本仓/越界拒绝且不落盘。
+   - **git 写回（Issue #31）**：`grape_git_credential(session_id, owner, repo, workspace)` 用 tko_ 换一次性本仓券（600s）并落 `GIT_ASKPASS`（0600，内嵌到期 epoch）；**push 前重新换券**（不缓存），券过期脚本非零退出并提示「重新换券」，不存在静默回退本机 git/CLI 凭据的分支。PR 用 `grape_create_pull(title/head/base)`；两工具只服务本仓 + 会话工作区，非本仓/越界拒绝且不落盘；`.grape` 目录/askpass 文件 symlink 拒绝；写盘前把 `/.grape/` 写入 `.git/info/exclude` 并以 `git check-ignore` 复核（无法确认已排除即拒绝），**提交前确认 `.grape/` 不在待提交列表**。
 2. 本地继续该节点工作；关键动作后 `grape_takeover_progress(session_id, summary)` 回报（云端面板可见）。
 3. 完成后两阶段交回（**第二阶段 finish 必须用用户级凭据**）：
    - **① request-finish**：`grape_takeover_finish(request_only=true, …)` 只报告完成与结构化产物，用 tko_ 接管凭据即可。
