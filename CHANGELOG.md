@@ -6,9 +6,18 @@
 
 ## Unreleased
 
+## 0.5.1 (2026-11-25)
+
+> **0.5.1-next.0 转正版**。next 通道回归（Linux @next 装机 + 474/474 单测 + stdio 冒烟 50 工具 + 真实调用）与 #23 Windows 11 实机回填均已完成（#23 实测记录见其评论；其中 win32 rc 文件清理分叉已登记转 fix 流程，不阻塞本版）。
+
+### Changed
+
+- package.json 新增 `mcpName` 字段：Official MCP Registry 归属验证要求（声明本包对应 Registry 条目 `io.github.grape-dev/grape-kit`），无功能影响。
+- 0.5.1-next.0 候选节所载全部载荷（#28 技能物化、#30 派发判据、#31 git 写回、#32 capabilities 握手）随本版转正进入 latest。
+
 ## 0.5.1-next.0 (2026-11-25)
 
-> **npm next 通道候选版**：以 `npm publish --tag next` 发布——latest 仍指 0.5.0，`npm i -g @grape-dev/grape-kit` 默认不落本版。转正 0.5.1 stable 的条件：真机 `@next` 回归通过 + #23 Windows 11 回填后另行批准。
+> **npm next 通道候选版**：以 `npm publish --tag next` 发布——latest 仍指 0.5.0，`npm i -g @grape-dev/grape-kit` 默认不落本版。转正 0.5.1 stable 的条件：真机 `@next` 回归通过 + #23 Windows 11 回填后另行批准。（两项条件已于同日完成，转正见 0.5.1 节。）
 
 ### Added
 
