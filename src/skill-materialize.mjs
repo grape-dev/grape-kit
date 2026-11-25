@@ -21,8 +21,14 @@ import { inflateRawSync } from 'node:zlib'
 export const SKILL_ROOT_DIRNAME = '.grape-takeover-skills'
 /** 技能名白名单：首字符必须字母数字，其余限字母数字与 `._-`，长度 ≤ 64 */
 export const SKILL_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/
-/** 保留名：归一化前的 `.`/`..`、worker 清理用的 `.skills`、物化根本身 */
-const RESERVED_SKILL_NAMES = new Set(['.', '..', '.skills', SKILL_ROOT_DIRNAME])
+/** 保留名：归一化前的 `.`/`..`、worker 清理用的 `.skills`、物化根本身（大小写不敏感，兼容 Windows/macOS） */
+const RESERVED_SKILL_NAMES = new Set(['.', '..', '.skills', SKILL_ROOT_DIRNAME.toLowerCase()])
+/** 保留名比较前的规范化：小写 + 去尾部 `.`/空格（Windows 会忽略这两类后缀） */
+const normalizeReserved = (value) => {
+  const name = String(value ?? '').toLowerCase()
+  return name === '.' || name === '..' ? name : name.replace(/[. ]+$/, '')
+}
+const isReservedName = (value) => RESERVED_SKILL_NAMES.has(normalizeReserved(value))
 /** 防护上限（防 zip 炸弹 / 异常大包） */
 const MAX_ZIP_BYTES = 32 * 1024 * 1024
 const MAX_UNPACKED_BYTES = 64 * 1024 * 1024
@@ -33,6 +39,22 @@ const ZIP_CD_SIG = 0x02014b50
 const ZIP_LOCAL_SIG = 0x04034b50
 
 class MaterializeError extends Error {}
+
+/** CRC-32（IEEE 802.3，ZIP 条目校验用）查表实现——零依赖，避免损坏/截断条目被静默落盘 */
+const CRC_TABLE = (() => {
+  const table = new Uint32Array(256)
+  for (let n = 0; n < 256; n++) {
+    let c = n
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1
+    table[n] = c >>> 0
+  }
+  return table
+})()
+function crc32(buf) {
+  let crc = 0xffffffff
+  for (let i = 0; i < buf.length; i++) crc = CRC_TABLE[(crc ^ buf[i]) & 0xff] ^ (crc >>> 8)
+  return (crc ^ 0xffffffff) >>> 0
+}
 
 const emptyResult = (status, patch = {}) => ({
   status,
@@ -54,7 +76,7 @@ const toReason = (e) => (e && e.message ? e.message : String(e))
 export function validateSkillName(raw) {
   const name = String(raw ?? '').trim()
   if (!name) return { ok: false, reason: '技能名为空（assets.skill.skill / env.GRAPE_BOUND_SKILL 均未给出）' }
-  if (RESERVED_SKILL_NAMES.has(name)) return { ok: false, reason: `技能名 "${name}" 属保留目录，拒绝物化` }
+  if (isReservedName(name)) return { ok: false, reason: `技能名 "${name}" 属保留目录（大小写/尾点不敏感），拒绝物化` }
   if (/[\\/:]/.test(name) || name.includes('\u0000')) {
     return { ok: false, reason: `技能名 "${name}" 含路径分隔符/盘符/控制字符，拒绝物化` }
   }
@@ -83,7 +105,9 @@ export function checkEntryPath(raw) {
   for (const seg of segments) {
     if (!seg) return { ok: false, reason: `条目路径 "${text}" 含空段` }
     if (seg === '.' || seg === '..') return { ok: false, reason: `条目路径 "${text}" 含上跳/当前目录段` }
-    if (seg === '.skills') return { ok: false, reason: `条目路径 "${text}" 落在 .skills/ 内（worker 会清理该目录，禁止写入）` }
+    if (normalizeReserved(seg) === '.skills') {
+      return { ok: false, reason: `条目路径 "${text}" 落在 .skills/ 内（大小写/尾点不敏感；worker 会清理该目录，禁止写入）` }
+    }
     if (seg.includes(':')) return { ok: false, reason: `条目路径 "${text}" 含盘符/备用数据流标记` }
   }
   return { ok: true, rel: segments.join('/'), isDir }
@@ -204,6 +228,7 @@ function parseZip(buf) {
     }
     const flags = buf.readUInt16LE(off + 8)
     const method = buf.readUInt16LE(off + 10)
+    const crcExpected = buf.readUInt32LE(off + 16)
     const csize = buf.readUInt32LE(off + 20)
     const usize = buf.readUInt32LE(off + 24)
     const nameLen = buf.readUInt16LE(off + 28)
@@ -230,18 +255,31 @@ function parseZip(buf) {
     const dataEnd = dataStart + csize
     if (dataEnd > buf.length) throw new MaterializeError(`条目 "${name}" 数据越界（文件被截断）`)
 
+    // 解压前预检：声明体积超出剩余额度直接拒绝，避免先分配再判超限（防 zip 炸弹）
+    const remaining = MAX_UNPACKED_BYTES - unpacked
+    if (usize > remaining) {
+      throw new MaterializeError(`条目 "${name}" 声明解压后 ${usize} 字节，超出剩余额度（上限 ${MAX_UNPACKED_BYTES} 字节），拒绝物化`)
+    }
+
     const raw = buf.subarray(dataStart, dataEnd)
     let data
-    if (method === 0) data = Buffer.from(raw)
-    else if (method === 8) {
+    if (method === 0) {
+      if (csize !== usize) throw new MaterializeError(`条目 "${name}" store 长度不一致（压缩 ${csize} / 声明 ${usize}），包已损坏`)
+      data = Buffer.from(raw)
+    } else if (method === 8) {
       try {
-        data = inflateRawSync(raw)
+        // maxOutputLength 硬顶剩余额度：即使 usize 谎报，inflate 也不会突破全局上限
+        data = inflateRawSync(raw, { maxOutputLength: Math.max(1, remaining) })
       } catch (e) {
         throw new MaterializeError(`条目 "${name}" deflate 解压失败：${toReason(e)}`)
       }
     } else {
       throw new MaterializeError(`条目 "${name}" 使用不支持的压缩方式 ${method}（仅 store/deflate）`)
     }
+    if (data.length !== usize) {
+      throw new MaterializeError(`条目 "${name}" 解压长度 ${data.length} 与声明 ${usize} 不一致（包损坏/截断），拒绝物化`)
+    }
+    if (crc32(data) !== crcExpected) throw new MaterializeError(`条目 "${name}" CRC 校验失败（包损坏/截断），拒绝物化`)
     unpacked += data.length
     if (unpacked > MAX_UNPACKED_BYTES) throw new MaterializeError('解压后体积超限，拒绝物化')
     entries.push({ path: name, content: data })

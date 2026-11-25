@@ -30,11 +30,11 @@ materializeSkillAssets(skill, cwd, { fetchImpl, env }) -> {
 ## 3. 安全实现（逐层）
 
 1. **技能名**：`validateSkillName` —— 先黑名单（`.` / `..` / `.skills` / `<物化根名>`），再拒分隔符与盘符，最后过 `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`。**拒绝而不归一化**（归一化会掩盖攻击面）。
-2. **条目路径**：`checkEntryPath` —— 拒 NUL、反斜杠（Windows 分隔符/盘符不可信）、绝对路径与盘符、空段、`.`/`..` 段、任一 `.skills` 段；`references/x.md` 这类正常相对路径原样保留。
+2. **条目路径**：`checkEntryPath` —— 拒 NUL、反斜杠（Windows 分隔符/盘符不可信）、绝对路径与盘符、空段、`.`/`..` 段、任一 `.skills` 段（大小写与尾部 `.`/空格归一后比较，覆盖 Windows/macOS 不敏感文件系统）；`references/x.md` 这类正常相对路径原样保留。
 3. **落盘根**：`<cwd>/.grape-takeover-skills` 若已存在且是符号链接 → 拒绝；`realpathSync` 取真实根做前缀校验基。
 4. **逐级 lstat**：`ensureDirPath` 从真实根逐段下钻，已存在段必须是目录且**非符号链接**；文件目标若已是符号链接/目录 → 拒绝（写前不跟随 symlink）。
 5. **前缀校验**：写入前 `resolve(target)` 必须 `=== rootReal` 或以 `rootReal + path.sep` 开头。
-6. **zip 条目**：拒 zip64、加密（GP bit0）、非 store/deflate 压缩方式；unix mode `S_IFLNK` → 拒绝解压（逃逸防护）；解压后体积/条目数上限（32MB 包 / 64MB 解压 / 512 文件）。
+6. **zip 条目**：拒 zip64、加密（GP bit0）、非 store/deflate 压缩方式；unix mode `S_IFLNK` → 拒绝解压（逃逸防护）；体积/条目数上限（32MB 包 / 64MB 解压 / 512 文件）——**inflate 前按中央目录 `usize` 预检剩余额度**，并给 `inflateRawSync` 传 `maxOutputLength` 兜底（usize 谎报也无法突破全局上限，防 zip 炸弹）；解压后校验 `data.length === usize` 与条目 CRC-32，损坏/截断即 `failed`。
 7. **`.skills/` 恒不写**：物化根名与保留名单都不含 `.skills`，条目路径中的 `.skills` 段直接拒绝；测试做目录快照断言。
 
 失败清理：仅当目标目录由本次调用新建且中途失败时 `rmSync` 该目录（不删上一轮已成功的物化结果，保持幂等覆盖语义）。

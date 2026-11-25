@@ -139,7 +139,7 @@ sequenceDiagram
 - **时机**：物化在 `native()` 后置执行，结果挂 `json.skillMaterialization`；`render()` 保持同步纯函数，只读该字段（`test/takeover-hardening.test.mjs` 的同步直调 seam 不受影响）。
 - **目录口径**：`cwd = bundle.workspace.cwd_hint || process.cwd()`，与接管脚本 `{{CWD}}` 同源。
 - **失败语义**：会话已建立即保留——物化失败不外抛、不回滚，`status:'failed'` + reason 进渲染 warning；仅当目标目录由本次调用新建时才清理半成品。
-- **安全**：技能名白名单 `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`（拒 `.`/`..`/`.skills`/分隔符与盘符，不归一化）；条目拒 `..`、绝对路径、反斜杠盘符、`.skills` 段；逐级 `lstat` 拒符号链接（含 zip `S_IFLNK` 条目）；落盘前缀校验；恒不写 `.skills/`。
+- **安全**：技能名白名单 `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`（拒 `.`/`..`/`.skills`/分隔符与盘符，不归一化）；条目拒 `..`、绝对路径、反斜杠盘符、`.skills` 段（大小写/尾点归一后比较）；逐级 `lstat` 拒符号链接（含 zip `S_IFLNK` 条目）；落盘前缀校验；恒不写 `.skills/`；zip 解压 inflate 前按 `usize` 预检 + `maxOutputLength` 兜底（64MB 封顶），解压后校验长度与 CRC-32。
 
 ## 4. 验证矩阵（全部真机）
 
