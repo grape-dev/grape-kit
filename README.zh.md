@@ -37,6 +37,7 @@ agent 宿主（MCP stdio：opencode / CodeArts / WorkBuddy / dsh…；其他 MCP
   - 平台要求 weekly-11+；旧平台自动回退只读上下文。完整时序：[docs/20261114-takeover-architecture.md](docs/20261114-takeover-architecture.md)
 - **场景与仓库**：场景列表（市场 / 仓库副本）· 应用场景（建仓库副本，可选设默认）· 设仓库默认场景（决定新建需求走哪条流水线）· 托管仓库 · 同步仓库 · 项目模板 · 项目信息
 - **搜索、知识与技能**：全局搜索（all/event/repo/agent）· 技能 ×6（列表/搜索/详情 + **上传/升级/跨 scope 复制**：本地预检、自动打 ZIP 带顶层目录、服务端 errors 全量透出）· 知识 ×2 · 仪表盘
+  - `grape_get_skill_detail` 返回 **SKILL.md 全文**（去掉旧的 3000 字截断）；超过 **64KB（UTF-8 字节）** 时把正文**逐字节**写入临时文件，只返回 2000 字预览并显式标注「已截断，全文在 <path>」（含字节数）。
 - **Worker 接入**：把本机注册为 grape 执行引擎（`grape_worker_onboard`）
 - **自管理**（v0.4.1+）：`grape_kit_version`（版本全景：本地 kit 版本 / npm 最新版 / grape CLI / 服务端连通性与契约版本 / 凭据来源）与 `grape_kit_check_update`（更新检查，支持 `dismiss` 3 天冷却）进程内只读直执行；`grape_kit_upgrade` / `grape_kit_install` / `grape_kit_uninstall` **只生成可复制命令**（自动识别安装形态：全局 npm / npx 缓存 / ClawHub / 项目本地依赖）——工具本身不执行任何变更，由用户确认后手动执行。只生成命令，无静默执行。
 

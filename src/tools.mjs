@@ -13,9 +13,9 @@
  */
 import * as R from './render.mjs'
 import * as lifecycleModule from './lifecycle.mjs'
-import { hostname } from 'node:os'
-import { existsSync, readFileSync, statSync } from 'node:fs'
-import { basename, resolve as resolvePath } from 'node:path'
+import { hostname, tmpdir } from 'node:os'
+import { existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { basename, join, resolve as resolvePath } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { zipDirectory } from './zip.mjs'
 import { api, apiRequest, getBaseUrl, AGENT_TYPES, normalizeTriggerAgent, GrapeApiError } from './api.mjs'
@@ -24,6 +24,24 @@ import { materializeSkillAssets, SKILL_ROOT_DIRNAME } from './skill-materialize.
 /** kit 安装根（发布包含 skills/，Node 版接管脚本随 skill 副本分发） */
 const KIT_ROOT = fileURLToPath(new URL('..', import.meta.url)).replace(/[\\/]+$/, '')
 const fillCwd = (text, cwd) => String(text ?? '').replaceAll('{{CWD}}', cwd)
+
+/** skill 详情直出上限（UTF-8 字节 = 64KB）；超过则落盘 + 预览，绝不静默截断（Issue #29） */
+const SKILL_DETAIL_INLINE_LIMIT = 64 * 1024
+/** 落盘场景透出的预览字数（Issue #29） */
+const SKILL_DETAIL_PREVIEW_CHARS = 2000
+
+/**
+ * 超阈值正文落盘（Issue #29）：写入 os.tmpdir() 下的独立目录（mkdtemp 0700，防并发冲突），返回文件路径。
+ * 逐字节原样写入（不做任何二次加工，与 API 返回的 content 字符串一致）；文件保留不删除，供调用方按路径读取全文。
+ */
+function dumpSkillDetail(name, body) {
+  const dir = mkdtempSync(join(tmpdir(), 'grape-kit-skill-'))
+  const safe = String(name || 'skill').replace(/[^\w.-]+/g, '_').slice(0, 60) || 'skill'
+  const path = join(dir, `${safe}-${Date.now()}.md`)
+  writeFileSync(path, body, 'utf8')
+  return path
+}
+
 /** 服务端渲染脚本（未来 host_os 字段）兼容：字符串 / 数组 / 对象三种形态，统一替换 {{CWD}} */
 function renderBundleScripts(scripts, cwd) {
   if (!scripts) return null
@@ -1420,8 +1438,13 @@ export const TOOLS = [
     async native(a) { return api.skillDetail(a.skill_id) },
     render(json) {
       if (json && typeof json === 'object') {
+        const title = `### ${json.name ?? json.skill_id ?? ''}\n\n`
         const body = String(json.content ?? json.skill_md ?? json.description ?? '')
-        return `### ${json.name ?? json.skill_id ?? ''}\n\n${body.slice(0, 3000)}`
+        const bytes = Buffer.byteLength(body, 'utf8')
+        // 常规体量全文直出；超 64KB 落盘 + 预览 + 显式标注（Issue #29：不得静默截断）
+        if (bytes <= SKILL_DETAIL_INLINE_LIMIT) return `${title}${body}`
+        const path = dumpSkillDetail(json.name ?? json.skill_id, body)
+        return `${title}${body.slice(0, SKILL_DETAIL_PREVIEW_CHARS)}\n\n> 已截断，全文在 ${path}（共 ${bytes} 字节）`
       }
       return R.fallbackJson(json)
     },

@@ -1,5 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { TOOLS, toolDefs, findTool } from '../src/tools.mjs'
 import * as R from '../src/render.mjs'
 
@@ -545,3 +547,52 @@ test('SJ5 目标宿主全为 damaged：空命令文案说「配置损坏待修�
 })
 
 
+
+/* ── Issue #29：grape_get_skill_detail 去 3000 字静默截断 ── */
+
+/** 落盘目录快照（前缀 grape-kit-skill-），用于「未超阈值不落盘」的分档断言，与用例顺序无关 */
+const dumpSnap = () => new Set(readdirSync(tmpdir()).filter((n) => n.startsWith('grape-kit-skill-')))
+
+test('#29 skill_detail >3000 字全文直出，可读到结尾标记', () => {
+  const t = findTool('grape_get_skill_detail')
+  const body = `${'技能正文 filler line\n'.repeat(300)}ENDING-MARKER-29`
+  assert.ok(body.length > 3000, '用例前提：正文 >3000 字')
+  assert.ok(Buffer.byteLength(body, 'utf8') <= 65536, '用例前提：正文 ≤64KB')
+  const before = dumpSnap()
+  const out = t.render({ skill_id: 's1', name: 'demo-skill', content: body })
+  assert.match(out, /^### demo-skill\n\n/, '标题行保持原渲染风格')
+  assert.ok(out.includes('ENDING-MARKER-29'), '>3000 字的结尾标记必须可读（不得静默截断）')
+  assert.ok(out.includes(body), '≤64KB 应全文直出')
+  assert.ok(!out.includes('已截断'), '未截断不得出现截断标注')
+  assert.deepEqual(dumpSnap(), before, '≤64KB 不落盘')
+})
+
+test('#29 skill_detail >64KB 落盘临时文件，返回路径 + 前 2000 字预览并显式标注', () => {
+  const t = findTool('grape_get_skill_detail')
+  // 22000 个汉字 = 66000 字节 > 65536，而字符数 < 65536：阈值必须按 UTF-8 字节判定
+  const body = `${'技'.repeat(22000)}TAIL-CHN`
+  const bytes = Buffer.byteLength(body, 'utf8')
+  assert.ok(bytes > 65536 && body.length < 65536, '用例前提：字节超阈值而字符数未超')
+  const before = dumpSnap()
+  const out = t.render({ skill_id: 'big', name: 'big-skill', content: body })
+  const m = /已截断，全文在 (.+?)（共 (\d+) 字节）/.exec(out)
+  assert.ok(m, '必须显式标注「已截断，全文在 <path>」并给出字节数')
+  const [, path, bytesInNotice] = m
+  assert.ok(dumpSnap().size > before.size, '超阈值必须落盘')
+  assert.ok(existsSync(path), `临时文件应存在：${path}`)
+  assert.equal(bytesInNotice, String(bytes), '标注的字节数口径为 UTF-8 字节')
+  assert.equal(readFileSync(path, 'utf8'), body, '落盘内容与 API 返回逐字节一致')
+  assert.ok(out.includes(body.slice(0, 2000)), '含前 2000 字预览')
+  assert.ok(!out.includes(body.slice(0, 2001)), '预览恰好 2000 字，不全量透出')
+})
+
+test('#29 skill_detail 恰为 65536 字节（64KB 边界）全文直出且不落盘', () => {
+  const t = findTool('grape_get_skill_detail')
+  const body = `${'x'.repeat(65531)}BOUND`
+  assert.equal(Buffer.byteLength(body, 'utf8'), 65536, '用例前提：恰好 65536 字节')
+  const before = dumpSnap()
+  const out = t.render({ skill_id: 'edge', name: 'edge-skill', content: body })
+  assert.ok(out.includes(body), '边界值应全文直出')
+  assert.ok(!out.includes('已截断'), '边界值不得出现截断标注')
+  assert.deepEqual(dumpSnap(), before, '边界值不落盘')
+})
