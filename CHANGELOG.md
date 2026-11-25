@@ -6,8 +6,14 @@
 
 ## Unreleased
 
+### Added
+
+- 本地接管 workspace 覆盖（#37）：`grape_takeover_start` 新增可选 `workspace`（本机绝对路径）。统一解析优先级 `args.workspace` > `bundle.workspace.cwd_hint` > `process.cwd()`（`resolveLocalWorkspace`，纯优先级、不探测存在性），技能物化目录、接管脚本 `{{CWD}}`、`GRAPE_AUTH_FILE` 均以解析出的本地路径为准，返回体带 `workspace_effective`；与云端 `cwd_hint` 不一致时渲染显式披露「云端工作区路径在本机不存在（<hint>），已改用 <本地路径>」，不静默替换。本地接管不再被云端路径锁死，且不依赖平台 #3620。
+- `GRAPE_AUTH_FILE` 本地化（#37）：`{{CWD}}` 占位符以本地 workspace 填充；位于 `cwd_hint` 根内的云端路径（含平台默认 `<hint>/.grape-takeover-token`）按前缀替换为本地 workspace；自定义绝对路径与相对路径一律不改写（相对路径不丢子目录），仅对绝对路径提示「本机可能不可读、source 前先确认」。
+
 ### Fixed
 
+- `grape_git_credential` 换券会话根（#37）：改为单一解析器 `resolveCredentialSessionRoot`——`cwd_hint` 在本机存在时作可信越界边界（workspace 必须在其内，工作区外继续拒绝且不落盘），本机不存在（本地接管）时显式 workspace 即会话根并**明确降级披露**「无云端工作区可作越界边界、仅校验目录存在」，返回 `session_root` / `session_boundary` / `session_root_note`；workspace 必须是本机已存在的目录，工具描述与真实边界一致。
 - 接管技能物化不再把 OBS 引用形态写成 0 字节空文件（#39）：`assets.skill.files` 条目只持 `__obs_key__`（无 `content`/`text`/`data`/`body`）时，此前 `pickContent` 的 `?? ''` 兜底产出空串，落盘 0 字节 `.grape-takeover-skills/<skill>/<file>` 而接管 prompt 仍声称「技能已物化」，agent 读到空 SKILL.md。现在：① 条目无正文且持引用键 → 整包走引用解析（资产内短签 `zip_url`/`download_url`，或按 `skill_id` 调契约端点 `GET /api/skills/by-id/{id}/download` 取 `{url, expires_in}` 后拉 zip）→ 复用既有零依赖 ZIP 解压物化；② 两路都解析不出 → `failed()` 拒绝物化，reason 明示「引用形态技能需服务端转 inline/zip_url 下发，客户端不解析 OBS 引用」，盘上零副作用、接管会话不受影响；③ 条目既无正文也无引用键、或资产混入引用条目（不能只落半份技能）同样显式 `failed`，`?? ''` 空文件兜底全线移除。渲染行新增来源标注（`inline`/`zip`/`reference` 经引用形态拉取），成功给实际落盘条数、失败给 reason。新增 `api.skillDownload`（下载端点封装，`scope=user_only`）与 7 个单测（成功拉取/端点失败/无解析标识/资产带短签 URL/混合形态/无正文条目/渲染如实）。
 
 ## 0.5.1 (2026-11-25)
