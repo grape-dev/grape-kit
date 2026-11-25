@@ -179,7 +179,7 @@ test('README 版本历史节链接 CHANGELOG.md、含 0.3.3/0.3.6/0.3.7/0.3.8/0.
   assert.ok(row033, '版本历史表应含 0.3.3 行')
   assert.match(row033, /\| 2026-11-18 \|/, '0.3.3 日期应为 npm 发布日 2026-11-18')
 
-  assert.match(section, /23 条发布记录/, '发布记录计数应为 23（npm 已发布 22 + next 通道候选 0.5.1-next.0，含 0.0.0-stage 占位包）')
+  assert.match(section, /25 条发布记录/, '发布记录计数应为 25（npm 已发布 24 + next 通道候选 0.5.2-next.0，含 0.0.0-stage 占位包）')
   assert.ok(!/12 个已发布版本|12 条发布记录/.test(section), '不得再写「12 个已发布版本」')
 })
 

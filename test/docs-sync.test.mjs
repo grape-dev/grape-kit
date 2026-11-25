@@ -53,7 +53,7 @@ test('README 双语单测计数一致（同一口径，不许一边 136 一边 1
   assert.notEqual(en[1], '136', '旧口径 136 已过期，应更新为当前实际单测数')
 })
 
-test('CHANGELOG 保留 Unreleased 段（下一周期入口），候选节 0.5.1-next.0 置于已发布节之前，0.5.0 发布节覆盖 #26 五宿主 / #20 场景技能 / #27 自管理工具批', () => {
+test('CHANGELOG 保留 Unreleased 段（下一周期入口），候选节 0.5.2-next.0 置于已发布节之前，0.5.0 发布节覆盖 #26 五宿主 / #20 场景技能 / #27 自管理工具批', () => {
   const md = read('CHANGELOG.md')
   const at = md.search(/^## Unreleased$/m)
   assert.ok(at >= 0, 'CHANGELOG.md 必须保留 ## Unreleased 段（CONTRIBUTING §7）')
@@ -64,10 +64,13 @@ test('CHANGELOG 保留 Unreleased 段（下一周期入口），候选节 0.5.1-
     !/^- \S/m.test(unreleasedBody) || /### (Added|Changed|Fixed)/.test(unreleasedBody),
     'Unreleased 段有条目时必须按 Added/Changed/Fixed 归类（发版后允许空段）',
   )
-  // 0.5.1 转正后：首个版本节为 stable 节 0.5.1，next 候选节 0.5.1-next.0 紧随其后（changelog.test 同口径断言）
-  assert.match(md.slice(firstVersion, firstVersion + 40), /^## 0\.5\.1 \(2026-11-25\)/, '首个版本节应为 stable 节 0.5.1 (2026-11-25)')
+  // 0.5.2-next.0 是 npm next 通道候选节（预发布号），排在全部已发布节之前（changelog.test 同口径断言）
+  assert.match(md.slice(firstVersion, firstVersion + 40), /^## 0\.5\.2-next\.0 \(2026-11-26\)/, '首个版本节应为候选节 0.5.2-next.0 (2026-11-26)')
+  // 0.5.1 转正后：stable 节 0.5.1 与 next 候选节 0.5.1-next.0 依次紧随其后（发布史不删）
+  const at051 = md.search(/^## 0\.5\.1 \(2026-11-25\)/m)
+  assert.ok(at051 > firstVersion, 'stable 节 0.5.1 应保留在 0.5.2-next.0 节之后（发布史不删）')
   const atNext = md.search(/^## 0\.5\.1-next\.0 \(2026-11-25\)/m)
-  assert.ok(atNext > firstVersion, '候选节 0.5.1-next.0 应保留在 0.5.1 节之后（发布史不删）')
+  assert.ok(atNext > at051, '候选节 0.5.1-next.0 应保留在 0.5.1 节之后（发布史不删）')
   // #26 五宿主 + #20 场景/技能 + #27 自管理工具批已随 0.5.0 发布：候选节上移后按 0.5.0 节锚点取段（不再用 firstVersion 切段）
   const at050 = md.search(/^## 0\.5\.0 \(/m)
   assert.ok(at050 >= 0, 'CHANGELOG 应有 0.5.0 发布节')
@@ -162,6 +165,34 @@ test('0.5.1-next.0 候选节覆盖 #31 git 写回 / #28 技能物化 / #32 握�
     [/64KB/, '#29 SKILL.md ≤64KB 全文直出'],
   ]) {
     assert.match(body, re, `0.5.1-next.0 候选节应记录 ${what}`)
+  }
+})
+/* ── Issue #40：0.5.2-next.0（npm next 通道候选）节载荷覆盖断言 ──
+ * 候选节承载 #37 三批载荷（workspace 覆盖 / GRAPE_AUTH_FILE 本地化 / 换券会话根单一解析器）；
+ * next 通道口径与转正条件写在节内 blockquote（节头不放 dist-tag——changelog.test 的 sections()
+ * 只认 `## <version> (<date>)` 严格行）。 */
+test('0.5.2-next.0 候选节覆盖 #37 workspace 覆盖 / AUTH_FILE 本地化 / resolveCredentialSessionRoot 换券越界边界', () => {
+  const md = read('CHANGELOG.md')
+  const at = md.search(/^## 0\.5\.2-next\.0 \(/m)
+  assert.ok(at >= 0, 'CHANGELOG 应有 0.5.2-next.0 候选节')
+  const next = md.slice(at + 1).search(/^## /m)
+  const body = next === -1 ? md.slice(at) : md.slice(at, at + 1 + next)
+  assert.match(body, /### (Added|Changed|Fixed)/, '0.5.2-next.0 节必须按 Added/Changed/Fixed 归类')
+  assert.match(body, /--tag next/, '0.5.2-next.0 节应写明 npm next 通道口径（latest 仍为 0.5.1）')
+  assert.match(body, /转正/, '0.5.2-next.0 节应写明转正 0.5.2 stable 的条件')
+  for (const [re, what] of [
+    [/grape_takeover_start/, '#37 takeover_start 新增可选 workspace 入参'],
+    [/resolveLocalWorkspace/, '#37 统一解析器 resolveLocalWorkspace'],
+    [/workspace_effective/, '#37 返回体 workspace_effective'],
+    [/\{\{CWD\}\}/, '#37 {{CWD}} / AUTH_FILE 以本地 workspace 为准'],
+    [/GRAPE_AUTH_FILE/, '#37 GRAPE_AUTH_FILE 本地化'],
+    [/前缀替换/, '#37 cwd_hint 根内云端路径前缀替换'],
+    [/resolveCredentialSessionRoot/, '#37 换券会话根单一解析器'],
+    [/越界边界/, '#37 cwd_hint 可信越界边界'],
+    [/降级披露/, '#37 本地接管降级披露'],
+    [/session_root_note/, '#37 返回 session_root / session_boundary / session_root_note'],
+  ]) {
+    assert.match(body, re, `0.5.2-next.0 候选节应记录 ${what}`)
   }
 })
 /* ── Issue #20：凭据优先级链与新命令用法必须双语 README + CHANGELOG 同步 ── */
