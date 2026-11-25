@@ -6,6 +6,15 @@
 
 ## Unreleased
 
+### Added
+
+- 本地接管 workspace 覆盖（#37）：`grape_takeover_start` 新增可选 `workspace`（本机绝对路径）。统一解析优先级 `args.workspace` > `bundle.workspace.cwd_hint` > `process.cwd()`（`resolveLocalWorkspace`，纯优先级、不探测存在性），技能物化目录、接管脚本 `{{CWD}}`、`GRAPE_AUTH_FILE` 均以解析出的本地路径为准，返回体带 `workspace_effective`；与云端 `cwd_hint` 不一致时渲染显式披露「云端工作区路径在本机不存在（<hint>），已改用 <本地路径>」，不静默替换。本地接管不再被云端路径锁死，且不依赖平台 #3620。
+- `GRAPE_AUTH_FILE` 本地化（#37）：`{{CWD}}` 占位符以本地 workspace 填充；位于 `cwd_hint` 根内的云端绝对路径按前缀替换为本地 workspace；平台默认 token 文件（`.grape-takeover-token`）落不到本机时回落 `<workspace>/.grape-takeover-token` 并提示写入后再 source；其余无法安全重写的自定义路径保持原值并提示核对文件存在（不误改用户路径）。
+
+### Fixed
+
+- `grape_git_credential` 换券会话根（#37）：显式 `workspace` 优先于 `cwd_hint`。云端 `cwd_hint` 在本机不存在时以显式 workspace 作会话根（返回 `session_root` + 披露文案），本地接管可正常换券落盘；`cwd_hint` 在本机确实存在时仍以它作越界边界，工作区外路径继续拒绝且不落盘（`insideRoot` 未放松）。
+
 ## 0.5.1-next.0 (2026-11-25)
 
 > **npm next 通道候选版**：以 `npm publish --tag next` 发布——latest 仍指 0.5.0，`npm i -g @grape-dev/grape-kit` 默认不落本版。转正 0.5.1 stable 的条件：真机 `@next` 回归通过 + #23 Windows 11 回填后另行批准。
