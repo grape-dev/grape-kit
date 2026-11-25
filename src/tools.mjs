@@ -150,6 +150,21 @@ function renderBundleScripts(scripts, cwd) {
 }
 
 /**
+ * 物化环境合并（Issue #39 QA 复审）：`bundle.env` 是平台注入的接管会话环境，若整体替代
+ * `process.env`，宿主的 `GRAPE_API_TOKEN` / `GRAPE_BASE_URL` 将不可见——下载端点凭据回落
+ * 文件通道、baseUrl 回落默认生产域，自部署实例会把技能下载请求打到生产。合并规则：
+ * `process.env` 非空值**优先**（用户级凭据与真实实例地址所在层），`bundle.env` 补平台侧键
+ * （如 `GRAPE_BOUND_SKILL`）；键冲突时以用户环境为准。
+ */
+function mergeBundleEnv(bundleEnv) {
+  const merged = { ...(bundleEnv && typeof bundleEnv === 'object' ? bundleEnv : {}) }
+  for (const [k, v] of Object.entries(process.env)) {
+    if (typeof v === 'string' && v !== '') merged[k] = v
+  }
+  return merged
+}
+
+/**
  * Issue #28：接管会话建立后，把平台下发的 `bundle.assets.skill` 物化到本地工作区
  * `<cwd>/.grape-takeover-skills/<skill>/`（cwd 与接管脚本 `{{CWD}}` 同源：Issue #37 起为
  * `args.workspace > bundle.workspace.cwd_hint > process.cwd()` 解析出的**本地**路径）。
@@ -173,8 +188,9 @@ async function attachSkillMaterialization(json, { workspace, repo } = {}) {
   }
   if (json.detail) return json
   try {
-    // Issue #39：repo 上下文只喂引用形态的下载端点（repo scope 技能过滤；官方/个人技能自动忽略）
-    json.skillMaterialization = await materializeSkillAssets(bundle.assets?.skill, cwd, { env: bundle.env || process.env, repo })
+    // Issue #39：repo 上下文只喂引用形态的下载端点（repo scope 技能过滤；官方/个人技能自动忽略）；
+    // env 走 mergeBundleEnv——bundle.env 不得遮蔽用户级凭据/baseUrl（QA 复审）
+    json.skillMaterialization = await materializeSkillAssets(bundle.assets?.skill, cwd, { env: mergeBundleEnv(bundle.env), repo })
   } catch (e) {
     json.skillMaterialization = {
       status: 'failed',
@@ -1224,6 +1240,26 @@ function serverRow(srv = {}) {
   }
 }
 
+/**
+ * Issue #39 QA 复审（H1）· 物化失败的「下一步」按失败类别分派——失败行的下一步必须可执行，
+ * 不再给笼统「可重试」。匹配顺序即优先级：凭据（401/403）＞ 临时性故障（重开接管即可重试）＞
+ * 平台下发格式（重试/改客户端无效）＞ 技能包内容。注意 403 必须先于格式类：引用形态 + 端点 403
+ * 的下一步是「换用户级凭据」，不是「找平台改格式」。
+ */
+function skillMaterializeNextStep(reason) {
+  const r = String(reason || '')
+  if (/\b40[13]\b/.test(r) || /凭据|Missing token/i.test(r)) {
+    return '技能下载端点 scope=user_only，接管凭据（tko_/tk_）不可用——在配置了用户级 grape_ 凭据（GRAPE_API_TOKEN 或 ~/.grape/config.json）的环境重开接管；或请服务端把该技能转 inline/zip_url 下发。'
+  }
+  if (/超时|abort|无法连接|HTTP 5\d\d|HTTP 404|网络/i.test(r)) {
+    return '临时性网络/超时类失败（短签 URL 也可能已过期）：确认网络与 GRAPE_BASE_URL 后重开接管——新接管会重新解析并取新短签 URL。'
+  }
+  if (/引用形态技能需服务端转|既无内容|无可解析标识|未返回可用的 zip|形态不可识别/.test(r)) {
+    return '平台下发格式问题：请服务端把该技能转 inline/zip_url 下发（或补 skill_id / 短签 zip_url）；改客户端、本地重试均无效。'
+  }
+  return '按失败原因修正技能包（命名/路径/正文），由平台重新下发后再接管；安全校验类失败（上跳/绝对路径/符号链接）不落任何文件。'
+}
+
 export const TOOLS = [
   {
     name: 'grape_trigger_pipeline',
@@ -2053,7 +2089,7 @@ export const TOOLS = [
       '或用 grape_takeover_abort 让渡回流水线（当前节点重新派发，链不断）。' +
       '⚠️ push 能力边界：tko_ 仅 repo_session 能力，**不含 git 凭据注入**；洁净机器用 `grape_git_credential` 以 tko_ 换一次性本仓券（600s → GIT_ASKPASS 0600）后 push，PR 用 `grape_create_pull`。' +
       `接管同时把平台下发的 bundle.assets.skill 物化到本地工作区 <cwd>/${SKILL_ROOT_DIRNAME}/<skill>/（SKILL.md + references/），渲染给出落盘路径；旧平台未下发技能包时显式提示未物化。` +
-      '⚠️ 引用形态（Issue #39）：`files` 条目只持 `__obs_key__`（无 content/text/data/body）时，客户端先按资产内短签 URL / 契约端点 `GET /api/skills/by-id/{id}/download` 拉 zip 物化；拉不到即 `failed` 并在渲染行明示「需服务端转 inline/zip_url 下发」，盘上零副作用——不再静默落 0 字节空文件（复现该失败时去改平台下发格式，重试客户端无用）。' +
+      '⚠️ 引用形态（Issue #39）：`files` 条目只持 `__obs_key__`（无 content/text/data/body）时，客户端先按资产内短签 URL / 契约端点 `GET /api/skills/by-id/{id}/download` 拉 zip 物化；拉不到即 `failed`，渲染行按失败类别给下一步。失败两类：端点 401/403 属凭据缺口——该端点 scope=user_only，接管凭据（tko_/tk_）不可用，换用户级 grape_ 凭据环境或让服务端转 inline/zip_url；其余（缺 skill_id/短签、条目缺正文、混合形态）属平台下发格式问题——找平台改下发，重试客户端无用。两路都解析不出即 `failed`，盘上零副作用，不再静默落 0 字节空文件。' +
       '本地接管（服务端在别的机器/云端跑）时务必传 `workspace`=本机绝对路径：解析优先级 `workspace` > `bundle.workspace.cwd_hint` > `process.cwd()`，' +
       '物化目录、脚本 `{{CWD}}`、`GRAPE_AUTH_FILE` 一律以解析出的本地路径为准；与 cwd_hint 不一致时渲染显式披露「云端路径在本机不存在，已改用本地路径」，不静默替换。' +
 
@@ -2157,7 +2193,8 @@ export const TOOLS = [
         } else if (sm.status === 'legacy') {
           lines.push(`- ⚠️ 本次未物化技能：${sm.reason || '平台未下发 assets.skill'}。技能名见 env.GRAPE_BOUND_SKILL，SKILL.md 需自行获取后再动手。`)
         } else {
-          lines.push(`- ⚠️ 技能未能物化：${sm.reason || '未知原因'}（接管会话不受影响；核对技能包后可重试）`)
+          lines.push(`- ⚠️ 技能未能物化：${sm.reason || '未知原因'}（接管会话不受影响）`)
+          lines.push(`- 下一步：${skillMaterializeNextStep(sm.reason)}`)
         }
       }
       if (sid) {

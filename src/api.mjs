@@ -135,6 +135,10 @@ export function hintFor(status, ctx = {}) {
       return 'finish 是用户的授权点：需用户级凭据（grape_），接管凭据 tko_ 仅 repo_session、不推进流水线，调用必被 403 拒绝——这是角色分工，不是权限缺失，不要重试。'
         + '标准路径：request-finish（agent）→ 用户在对话中授权 → 由持有用户级 token 的会话执行 finish。'
     }
+    if (/\/skills\/by-id\/.+\/download\b/.test(String(ctx.path || ''))) {
+      return '技能下载端点 scope=user_only：会话级凭据（tko_ / tk_）调用必 403，属预期边界——'
+        + '在配置了用户级 grape_ 凭据（GRAPE_API_TOKEN / ~/.grape/config.json）的环境重试，或请服务端把该技能转 inline/zip_url 下发。'
+    }
     return '可能是 session_only 端点（外部用户 token 不可用，属预期边界）或权限不足'
   }
   const isMismatch = String(ctx.code || '') === 'agent_mismatch' || /agent_mismatch/i.test(String(ctx.detail || ''))
@@ -147,9 +151,11 @@ export function hintFor(status, ctx = {}) {
 
 /**
  * 调 grape HTTP API。
+ * `opts.binary`（Issue #39）：技能下载端点等二进制通道——响应不是合法 JSON 时原样回 Buffer，
+ * 交由调用方按字节处理（zip 解压）；JSON 响应（如 OBS 短签 `{url, expires_in}`）行为不变。
  * @param {string} method
  * @param {string} path 以 /api 开头
- * @param {{query?: object, body?: object, timeoutMs?: number, env?: object}} [opts]
+ * @param {{query?: object, body?: object, timeoutMs?: number, env?: object, binary?: boolean}} [opts]
  */
 export async function apiRequest(method, path, opts = {}) {
   const env = opts.env || process.env
@@ -183,7 +189,9 @@ export async function apiRequest(method, path, opts = {}) {
   } finally {
     clearTimeout(t)
   }
-  const text = await resp.text()
+  // binary 通道只读一次 body：先取字节再从中解文本，避免 text()/arrayBuffer() 二次消费同一流
+  const raw = opts.binary ? Buffer.from(await resp.arrayBuffer()) : null
+  const text = raw ? raw.toString('utf8') : await resp.text()
   let json
   try { json = text ? JSON.parse(text) : null } catch { json = undefined }
   if (!resp.ok) {
@@ -196,6 +204,7 @@ export async function apiRequest(method, path, opts = {}) {
       hint: hintFor(resp.status, { path, detail, baseUrl, code }),
     })
   }
+  if (opts.binary && json === undefined && raw) return raw
   return json
 }
 
@@ -370,14 +379,20 @@ export const api = {
   skillsSearch: (q) => apiRequest('GET', '/api/skills/search', { query: { q } }),
   skillDetail: (skillId) => apiRequest('GET', `/api/skills/by-id/${skillId}`),
   /**
-   * 技能包下载（Issue #39 引用形态解析的唯一契约端点）：OBS 形态返回 `{url, expires_in}` 短签 URL
-   * （拉 zip 的第二步不带凭据，直接 GET 该 URL），其余形态直出 zip 二进制。
-   * `repo` 只对 repo scope 技能有意义（官方 / 个人技能留空）。该端点 scope=user_only，tko_ 会话凭据不可用。
+   * 技能包下载（Issue #39 引用形态解析的唯一契约端点）。该端点 scope=user_only：会话级凭据
+   * （tko_/tk_）调用必 403——需用户级 grape_ 凭据环境，或由服务端把技能转 inline/zip_url 下发。
+   * 响应两类：OBS 形态回 `{url, expires_in}` 短签 URL（拉 zip 的第二步不带凭据，直接 GET 该 URL）；
+   * 其余形态直出 zip 二进制——apiRequest 的 binary 通道把非 JSON 响应原样回传 Buffer，
+   * 由 `zipSourceOf` 的二进制分支承接。`timeoutMs` 与 zip 拉取共用同一旋钮（缺省 15s，
+   * 引用解析全程有上界，不再吃 apiRequest 的 30s 默认）。
+   * `repo` 只对 repo scope 技能有意义（官方 / 个人技能留空）。
    */
-  skillDownload: (skillId, repo, env) =>
+  skillDownload: (skillId, repo, env, timeoutMs) =>
     apiRequest('GET', `/api/skills/by-id/${encodeURIComponent(String(skillId ?? '').trim())}/download`, {
       query: repo ? { repo: String(repo) } : {},
       env,
+      timeoutMs,
+      binary: true,
     }),
   /**
    * 上传技能 ZIP。scope=user 个人技能；scope=repo 需 repo + agent_type（必填）。

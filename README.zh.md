@@ -33,7 +33,7 @@ agent 宿主（MCP stdio：opencode / CodeArts / WorkBuddy / dsh…；其他 MCP
 - **需求与事件**：列表/详情/事件流/我的需求 · 建单 · 结构化交回模板
 - **端云协同**（v0.3.2+ 核心）：**接管会话**把云端节点（如 coding）原子让渡到你的 Agent——签发 `tko_` 凭据（12h）并返回完整上下文（prompt/env/workspace/skill/history）；Agent 在本地干活、上报进度，按两阶段交回：`request-finish` 只报告完成，**在对话中经你确认**后再 `finish` 正式交回（结构化产物，链路保持完整）。
   - **凭据语义**：`tko_` 仅 repo_session 能力（继续节点工作 / 回报进度，**不含 git 凭据注入**）——`request-finish` 用 tko_ 即可，但**最终 `finish` 必须用用户级凭据（`grape_`）**，tko_ 调 finish 会 403 属预期边界。平台不提供 UI 确认按钮，确认只发生在你与 Agent 的对话里。
-  - **技能物化**：接管建立时把平台下发的 `assets.skill` 落到本地工作区 `<cwd>/.grape-takeover-skills/<skill>/`（`SKILL.md` + `references/*`），渲染直接给出落盘路径（`技能已物化：<path>` + 文件数 + 是否含 references）——接管 prompt 里「技能已物化，直接读 SKILL.md」由指引变成事实。内联 `files` 与 `zip_url` 两种下发都支持（zip 走 Node 原生 `zlib` 零依赖解压，仅 store/deflate）；OBS 引用形态（`files` 条目只带 `__obs_key__`）先经资产内短签 URL 或 `GET /api/skills/by-id/{id}/download` 端点拉 zip 后同样解压物化，两路都解析不出即显式 `failed`（reason：需服务端转 inline/zip_url 下发）且盘上零副作用，不再静默落 0 字节空文件；旧平台未下发技能包时显式提示「本次未物化技能」，物化失败只告警、不作废已建立的会话。技能名过白名单、条目拒路径穿越/绝对路径/盘符/符号链接，恒不写 `.skills/`（worker 会清理该目录）。
+  - **技能物化**：接管建立时把平台下发的 `assets.skill` 落到本地工作区 `<cwd>/.grape-takeover-skills/<skill>/`（`SKILL.md` + `references/*`），渲染直接给出落盘路径（`技能已物化：<path>` + 文件数 + 是否含 references）——接管 prompt 里「技能已物化，直接读 SKILL.md」由指引变成事实。内联 `files` 与 `zip_url` 两种下发都支持（zip 走 Node 原生 `zlib` 零依赖解压，仅 store/deflate）；OBS 引用形态（`files` 条目只带 `__obs_key__`）先经资产内短签 URL 或 `GET /api/skills/by-id/{id}/download` 端点拉 zip 后同样解压物化——该端点**需用户级凭据（`grape_`）**，`tko_`/`tk_` 会话凭据调用必 403 属预期（失败行会按类别给出下一步）；两路都解析不出即显式 `failed`（reason：需服务端转 inline/zip_url 下发）且盘上零副作用，显式空串正文也按缺正文处理，不再静默落 0 字节空文件；旧平台未下发技能包时显式提示「本次未物化技能」，物化失败只告警、不作废已建立的会话。技能名过白名单、条目拒路径穿越/绝对路径/盘符/符号链接，恒不写 `.skills/`（worker 会清理该目录）。
   - 平台要求 weekly-11+；旧平台自动回退只读上下文。完整时序：[docs/20261114-takeover-architecture.md](docs/20261114-takeover-architecture.md)
   - **本地接管 workspace 覆盖**（Issue #37）：`grape_takeover_start` 支持可选 `workspace`（本机绝对路径）。解析优先级 `workspace` > `bundle.workspace.cwd_hint` > `process.cwd()`；技能物化目录、脚本 `{{CWD}}`、`GRAPE_AUTH_FILE` 均按本地路径解析，返回体带 `workspace_effective`；与云端 `cwd_hint` 不一致时渲染显式说明「云端路径在本机不存在」，不静默替换。`GRAPE_AUTH_FILE` 仅在含 `{{CWD}}` 或位于 `cwd_hint` 根内时才改写（平台默认 `<hint>/.grape-takeover-token` 属于后者）；自定义绝对路径与相对路径一律不改写，只提示核对/自行 source。`grape_git_credential` 复用同一会话根解析：`cwd_hint` 在本机存在时即越界边界（界外路径拒绝），本机不存在时显式 workspace 即会话根，并在返回体 `session_boundary` / `session_root_note` 明确披露「无云端越界边界」。
 - **场景与仓库**：场景列表（市场 / 仓库副本）· 应用场景（建仓库副本，可选设默认）· 设仓库默认场景（决定新建需求走哪条流水线）· 托管仓库 · 同步仓库 · 项目模板 · 项目信息
@@ -304,7 +304,7 @@ npx -y @grape-dev/grape-kit intro     # 随时重看能力地图
 ```bash
 npm install
 
-npm test        # 481 个单测（fake-grape 替身，不依赖真实服务端）
+npm test        # 503 个单测（fake-grape 替身，不依赖真实服务端）
 
 npm run smoke   # 真实 stdio JSON-RPC 往返：initialize → tools/list → tools/call
 ```

@@ -15,8 +15,9 @@
  *
  * Issue #39 · 引用形态（`files` 条目只持 `__obs_key__` 等引用键，无 content/text/data/body）：
  * 平台可能把技能包下发成 OBS 引用而非正文。客户端不解析 OBS（无凭据、不耦合桶策略）——能解析就拉 zip 物化
- * （资产内短签 URL，或契约端点 `GET /api/skills/by-id/{id}/download` 的 `{url, expires_in}`），解析不出就
- * `failed()` 明示「需服务端转 inline/zip_url 下发」，绝不落 0 字节文件（旧实现 `?? ''` 兜底造成的静默误导）。
+ * （资产内短签 URL，或契约端点 `GET /api/skills/by-id/{id}/download`：OBS 形态回 `{url, expires_in}`、
+ * 其余形态直出 zip 二进制），解析不出就 `failed()` 明示「需服务端转 inline/zip_url 下发」，
+ * 绝不落 0 字节文件（旧实现 `?? ''` 兜底造成的静默误导）。
  */
 import { mkdirSync, lstatSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { isAbsolute, join, resolve, sep } from 'node:path'
@@ -86,8 +87,18 @@ const REFERENCE_KEYS = ['__obs_key__', 'obs_key', 'object_key', 'ref']
 const INLINE_CONTENT_KEYS = ['content', 'text', 'data', 'body']
 /** 引用拉取超时：接管不能被下载拖死，超时即降级 failed（Spec 风险项） */
 const DEFAULT_FETCH_TIMEOUT_MS = 15_000
+/** 超时单旋钮（QA 复审）：端点调用与 zip 拉取共用 `opts.fetchTimeoutMs`——
+ *  引用解析全程最坏 15s + 15s，不再出现端点吃 apiRequest 30s 默认的半程失控 */
+const fetchTimeoutMsOf = (opts) => (Number(opts.fetchTimeoutMs) > 0 ? Number(opts.fetchTimeoutMs) : DEFAULT_FETCH_TIMEOUT_MS)
 
-const hasInlineContent = (holder) => INLINE_CONTENT_KEYS.some((k) => holder[k] !== undefined && holder[k] !== null)
+/**
+ * Issue #39 · 判空单一口径（QA 复审）：`null` / `undefined` / 空串一律视为「无正文」。
+ * 显式 `content: ''` 与缺正文键同判——不再落 0 字节文件；三处消费方（hasInlineContent /
+ * pickContent / 落盘前校验）共用本谓词，口径不再漂移。非字符串真值（0/false/Buffer 等）仍算有正文。
+ */
+const hasBody = (v) => v !== undefined && v !== null && v !== ''
+
+const hasInlineContent = (holder) => INLINE_CONTENT_KEYS.some((k) => hasBody(holder[k]))
 const isHttpUrl = (v) => /^https?:\/\//i.test(String(v ?? '').trim())
 
 /**
@@ -203,18 +214,20 @@ function writeEntry(baseReal, rel, content) {
 }
 
 /**
- * 取条目正文：四字段都没有时返回 `undefined`。
+ * 取条目正文：四字段按序取第一个「非空」值（content → text → data → body）。
  * Issue #39：这里**不允许** `?? ''` 兜底——无正文的条目曾经被物化成 0 字节空文件，
- * 而接管 prompt 仍声称「技能已物化」，agent 读到空 SKILL.md 却无从察觉。缺正文由调用方显式拒绝。
+ * 而接管 prompt 仍声称「技能已物化」，agent 读到空 SKILL.md 却无从察觉。判空走 `hasBody`
+ * 单一口径：空串与缺键同判（QA 复审：三处消费方共用同一谓词），缺正文由调用方显式拒绝。
  */
-const pickContent = (holder) => holder.content ?? holder.text ?? holder.data ?? holder.body
+const pickContent = (holder) => INLINE_CONTENT_KEYS.map((k) => holder[k]).find(hasBody)
 
 const entryBase64 = (holder) => holder.base64 === true || holder.encoding === 'base64' || holder.encoding === 'b64'
 
 /**
  * inline 条目归一：数组形态 `{path, content}` 或「路径→内容」映射。
  * Issue #39：引用形态条目单列成 `{path, ref}`（无正文），由 `collectReferenceEntries` 整包解析，
- * 不再产出 `content: ''` 的空条目；既无正文也无引用键的条目带 `missing` 标记，交由调用方拒绝。
+ * 不再产出 `content: ''` 的空条目；既无正文也无引用键的条目（含显式空串，`hasBody` 单一口径）
+ * 带 `missing` 标记，交由调用方拒绝。
  */
 function collectInlineEntries(files) {
   const out = []
@@ -232,7 +245,7 @@ function collectInlineEntries(files) {
         continue
       }
       const content = pickContent(raw)
-      out.push({ path, content, base64: entryBase64(raw), missing: content === undefined })
+      out.push({ path, content, base64: entryBase64(raw), missing: !hasBody(content) })
     }
     return out
   }
@@ -246,9 +259,9 @@ function collectInlineEntries(files) {
           continue
         }
         const content = pickContent(v)
-        out.push({ path: p, content, base64: entryBase64(v), missing: content === undefined })
+        out.push({ path: p, content, base64: entryBase64(v), missing: !hasBody(content) })
       } else {
-        out.push({ path: p, content: v })
+        out.push({ path: p, content: v, missing: !hasBody(v) })
       }
     }
   }
@@ -345,7 +358,7 @@ function parseZip(buf) {
 
 /** 下载超时信号：`AbortSignal.timeout` 不可用时退回无信号（不因缺能力就拒绝物化） */
 function fetchTimeoutSignal(opts) {
-  const ms = Number(opts.fetchTimeoutMs) > 0 ? Number(opts.fetchTimeoutMs) : DEFAULT_FETCH_TIMEOUT_MS
+  const ms = fetchTimeoutMsOf(opts)
   try {
     return typeof AbortSignal?.timeout === 'function' ? AbortSignal.timeout(ms) : undefined
   } catch {
@@ -388,9 +401,9 @@ async function collectZipEntries(asset, opts, name) {
 }
 
 /** 默认下载通道：契约端点 `GET /api/skills/by-id/{skill_id}/download`（懒加载 api.mjs，单测可整体注入替换） */
-const defaultSkillDownload = async (skillId, repoKey, env) => {
+const defaultSkillDownload = async (skillId, repoKey, env, timeoutMs) => {
   const mod = await import('./api.mjs')
-  return mod.api.skillDownload(skillId, repoKey, env)
+  return mod.api.skillDownload(skillId, repoKey, env, timeoutMs)
 }
 
 /** 下载端点响应归一：短签 URL（`{url}`/`{download_url}`/裸字符串）或直接二进制 zip */
@@ -405,7 +418,9 @@ function zipSourceOf(payload) {
  * Issue #39 · 引用形态解析（方案 B）：把 `__obs_key__` 换成可拉取的 zip，再走统一解包路径。
  * 解析顺序（都不命中即抛错，由调用方降级 failed）：
  *   ① 资产内显式 URL：引用键本身是 http(s)，或 `zip_url`/`download_url`（平台已把引用转成短签 URL 的下发形态）
- *   ② 契约下载端点：`skill_id` → `GET /api/skills/by-id/{id}/download`（OBS 形态返回 `{url, expires_in}`）
+ *   ② 契约下载端点：`skill_id`（`skillId`/资产内 `id` 兜底）→ `GET /api/skills/by-id/{id}/download`
+ *      （OBS 形态返回 `{url, expires_in}`，其余形态直出 zip 二进制——`zipSourceOf` 两分支均可达）。
+ *      端点调用与 zip 拉取共用 `fetchTimeoutMs` 单旋钮（缺省 15s）。
  * 客户端始终不直接解析 OBS 对象（不持 OBS 凭据，也不耦合桶策略）。
  */
 async function collectReferenceEntries(asset, refs, opts, name) {
@@ -420,7 +435,7 @@ async function collectReferenceEntries(asset, refs, opts, name) {
     throw new MaterializeError('资产未给出可解析标识（无 skill_id、无 zip_url/download_url，引用键仅为 OBS key）')
   }
   const download = opts.skillDownload || defaultSkillDownload
-  const payload = await download(skillId, opts.repo, opts.env)
+  const payload = await download(skillId, opts.repo, opts.env, fetchTimeoutMsOf(opts))
   const from = zipSourceOf(payload)
   if (from.buf) return parseZipBuffer(from.buf, name)
   if (from.url) return parseZipBuffer(await fetchZipBytes(from.url, fetchImpl, opts), name)
@@ -529,8 +544,9 @@ export async function materializeSkillAssets(skill, cwd, options = {}) {
         continue
       }
       const raw = entry.content
-      // Issue #39：正文缺失在这里也必须炸——`?? ''` 会静默写 0 字节文件，正是本缺陷的根因行为
-      if (raw === undefined || raw === null) throw new MaterializeError(`条目 "${entry.rel}" 无内容，拒绝物化成空文件`)
+      // Issue #39：正文缺失在这里也必须炸——`?? ''` 会静默写 0 字节文件，正是本缺陷的根因行为。
+      // 判空走 hasBody 单一口径（QA 复审）：显式空串与缺键同判，三处消费方不漂移。
+      if (!hasBody(raw)) throw new MaterializeError(`条目 "${entry.rel}" 无内容，拒绝物化成空文件`)
       const content = entry.base64 ? Buffer.from(String(raw), 'base64') : raw
       writeEntry(targetDir, entry.rel, content)
       fileCount += 1

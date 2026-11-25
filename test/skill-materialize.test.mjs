@@ -861,6 +861,10 @@ test('R7 render（H1）：失败行按失败类别分派下一步——403 凭�
   const format = renderWith('引用形态技能需服务端转 inline/zip_url 下发，客户端不解析 OBS 引用（引用键 k；资产未给出可解析标识（无 skill_id、无 zip_url/download_url，引用键仅为 OBS key））')
   assert.match(format, /平台下发格式问题/, '下发格式类失败：下一步必须指向平台改下发，而不是重试客户端')
 
+  const refTimeout = renderWith('引用形态技能需服务端转 inline/zip_url 下发，客户端不解析 OBS 引用（引用键 k；请求超时（>15s））')
+  assert.ok(!/平台下发格式问题/.test(refTimeout), '引用形态 + 网络超时不是格式问题：临时类分派必须先于格式类')
+  assert.match(refTimeout, /重开接管/, '引用形态 + 网络超时：下一步是重开接管取新短签')
+
   const transient = renderWith('技能 zip 下载失败：HTTP 404')
   assert.match(transient, /重开接管/, '网络/超时/短签过期类失败：重开接管（取新短签）才是可执行下一步')
 

@@ -136,13 +136,14 @@ sequenceDiagram
 |----|------|------|
 | inline | `assets.skill.files`（数组或「路径→内容」映射） | 逐条目落盘到 `<cwd>/.grape-takeover-skills/<skill>/` |
 | zip | `assets.skill.zip_url` | 零依赖解压（`zlib.inflateRawSync` + 最小 ZIP 解析，仅 store/deflate），剥离 `<skill>/` 顶层前缀 |
-| reference（#39） | `files` 条目只持 `__obs_key__` / `obs_key` / `object_key` / `ref`，无 content/text/data/body | 先按资产内短签 URL（`zip_url`/`download_url`，或引用键本身是 http(s)）拉 zip；否则按 `skill_id` 调契约端点 `GET /api/skills/by-id/{id}/download`（OBS 形态返回 `{url, expires_in}`）→ 复用同一 ZIP 解压物化。**两路都解析不出即 `failed` +「引用形态技能需服务端转 inline/zip_url 下发」，盘上零副作用**——不再用 `?? ''` 兜底落 0 字节文件 |
+| reference（#39） | `files` 条目只持 `__obs_key__` / `obs_key` / `object_key` / `ref`，无 content/text/data/body | 先按资产内短签 URL（`zip_url`/`download_url`，或引用键本身是 http(s)）拉 zip；否则按 `skill_id`（`skillId` / 资产内 `id` 兜底）调契约端点 `GET /api/skills/by-id/{id}/download`——OBS 形态返回 `{url, expires_in}` 短签 URL、其余形态直出 zip 二进制（`apiRequest` binary 通道回 Buffer），两分支复用同一 ZIP 解压物化。**两路都解析不出即 `failed` +「引用形态技能需服务端转 inline/zip_url 下发」，盘上零副作用**——不再用 `?? ''` 兜底落 0 字节文件。端点 `scope=user_only`：接管凭据（tko_/tk_）必 403，需用户级 `grape_` 凭据环境（渲染失败行会按此分派下一步）；端点调用与 zip 拉取共用 15s 超时旋钮（最坏 ~30s 有上界） |
 | legacy | 无 `assets.skill`（旧平台） | 不落盘，渲染显式提示「本次未物化技能」 |
 
 - **时机**：物化在 `native()` 后置执行，结果挂 `json.skillMaterialization`；`render()` 保持同步纯函数，只读该字段（`test/takeover-hardening.test.mjs` 的同步直调 seam 不受影响）。
+- **env 口径（#39 QA）**：物化环境 = `bundle.env` 与 `process.env` 合并，`process.env` 非空值优先——宿主的 `GRAPE_API_TOKEN` / `GRAPE_BASE_URL` 不被平台注入的会话环境遮蔽，自部署实例的技能下载请求不会打到默认生产域；`bundle.env` 的平台侧键（`GRAPE_BOUND_SKILL` 等）仍可见。
 - **目录口径**：`cwd = bundle.workspace.cwd_hint || process.cwd()`，与接管脚本 `{{CWD}}` 同源。
-- **失败语义**：会话已建立即保留——物化失败不外抛、不回滚，`status:'failed'` + reason 进渲染 warning；仅当目标目录由本次调用新建时才清理半成品。
-- **空文件禁令（#39）**：条目无正文且非引用键 → 直接 `failed`（「既无内容也无引用键，拒绝物化成空文件」）；混入引用条目的资产不再落同批 inline 占位内容（半份技能 = 静默误导）。`source` 字段（`inline`/`zip`/`reference`）让渲染行标注来源，成功条数取实际落盘文件数。
+- **失败语义**：会话已建立即保留——物化失败不外抛、不回滚，`status:'failed'` + reason 进渲染 warning；仅当目标目录由本次调用新建时才清理半成品。渲染失败行按类别分派下一步（#39 QA）：401/403 凭据 → 用户级 `grape_` 凭据环境或让服务端转 inline/zip_url；引用形态/缺正文/无可解析标识 → 平台下发格式问题，找平台改下发；超时/网络/HTTP 4xx-5xx → 重开接管取新短签；其余 → 修正技能包重新下发。不再给笼统「可重试」。
+- **空文件禁令（#39）**：正文判定单一口径（`hasBody`）——`null`/`undefined`/**显式空串**一律视为无正文：条目无正文且非引用键 → 直接 `failed`（「既无内容也无引用键，拒绝物化成空文件」），`content:''` 不得遮蔽 `text` 等后续字段的非空取值。**混合形态整包语义（#39 越界回填）**：资产混入引用条目时整包走引用解析、inline 条目按占位对待——两路解析不出即整包 `failed`，不落半份技能（半份技能 = 静默误导；基线行为是落半份 inline 内容）。引用键白名单 `__obs_key__` / `obs_key` / `object_key` / `ref`——`ref` 按通用引用字段兼容处理，平台下发不应将 `ref` 用于其它语义（无正文 + `ref` 的条目会被判成引用形态）。`source` 字段（`inline`/`zip`/`reference`）让渲染行标注来源，成功条数取实际落盘文件数。
 - **安全**：技能名白名单 `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`（拒 `.`/`..`/`.skills`/分隔符与盘符，不归一化）；条目拒 `..`、绝对路径、反斜杠盘符、`.skills` 段（大小写/尾点归一后比较）；逐级 `lstat` 拒符号链接（含 zip `S_IFLNK` 条目）；落盘前缀校验；恒不写 `.skills/`；zip 解压 inflate 前按 `usize` 预检 + `maxOutputLength` 兜底（64MB 封顶），解压后校验长度与 CRC-32。
 
 ## 4. 验证矩阵（全部真机）
