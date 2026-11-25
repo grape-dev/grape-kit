@@ -6,7 +6,16 @@
 
 ## Unreleased
 
-暂无待发布变更。下一开发周期的用户可见变更先落本段（按 Added / Changed / Fixed 归类，见 CONTRIBUTING §7），发版时并入对应版本节。
+> 下一开发周期的用户可见变更先落本段（按 Added / Changed / Fixed 归类，见 CONTRIBUTING §7），发版时并入对应版本节。
+
+### Added
+
+- `grape_takeover_start` 物化平台下发的 `bundle.assets.skill`（#28）：接管建立后把节点技能落到本地工作区 `<cwd>/.grape-takeover-skills/<skill>/`（`SKILL.md` + `references/*`），渲染给出 `技能已物化：<path>` + 文件数 + 是否含 references——接管 prompt 里「技能已物化，直接读 SKILL.md」由指引变成事实。内联 `files`（数组或「路径→内容」映射）与 `zip_url` 两种下发都支持（zip 走 `zlib.inflateRawSync` 零依赖解压，仅 store/deflate，剥离 `<skill>/` 顶层前缀）；物化幂等覆盖，重复接管不叠加文件。
+- 物化安全面：技能名白名单 `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`（拒 `.` / `..` / `.skills` / 分隔符与盘符，非法即拒绝、不归一化），条目路径拒 `..`、绝对路径、反斜杠与盘符、`.skills` 段，逐级 `lstat` 拒符号链接（含 zip 的 `S_IFLNK` 条目）并做落盘前缀校验；恒不写 `.skills/`（worker 会 rmtree 该目录）。
+
+### Changed
+
+- 接管渲染新增「技能物化」段：`ok` 给落盘路径、`legacy`（旧平台未下发技能包）与 `failed` 各给显式 warning，失败不作废已建立的接管会话。
 
 ## 0.4.0 (2026-11-23)
 

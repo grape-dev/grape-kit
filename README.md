@@ -33,6 +33,7 @@ agent (MCP stdio: opencode / CodeArts / WorkBuddy / dsh…; other MCP-capable ag
 - **Issues & events**: list/detail/events/my-issues · create · structured hand-back templates
 - **Cloud-local collaboration** (v0.3.2+ core): **takeover sessions** atomically hand cloud nodes (e.g. coding) over to your agent — a `tko_` credential (12h) plus the full context bundle (prompt/env/workspace/skill/history) come back; your agent works locally and reports progress. Hand-back is two-phase: `request-finish` only reports completion, and after you confirm **in the conversation** the `finish` call hands back the structured result (the pipeline chain never breaks).
   - **Credential semantics**: `tko_` is repo_session-only (keep working the node / report progress, **no git credential injection**). `request-finish` works with `tko_`, but the final `finish` **requires a user-level credential (`grape_`)**; calling `finish` with `tko_` returns 403 by design. There is no UI confirm button — confirmation happens only in your chat with the agent.
+  - **Skill materialization**: on takeover the platform-supplied `assets.skill` is materialized into your local workspace at `<cwd>/.grape-takeover-skills/<skill>/` (`SKILL.md` + `references/*`), and the render prints the on-disk path (`技能已物化：<path>` plus file count and whether references are included) — the takeover prompt's "skills are already materialized, read SKILL.md" stops being a promise. Both inline `files` and a `zip_url` bundle are supported (zip is extracted with Node's built-in `zlib`, zero new dependencies, store/deflate only); older platforms send no skill bundle, so the render states "not materialized" explicitly, and a failed materialization only warns — it never invalidates the established session. Skill names go through a whitelist, entries reject path traversal / absolute paths / drive letters / symlinks, and `.skills/` is never written (the worker rmtree's that directory).
   - Platform requirement: weekly-11+; older platforms fall back to the legacy read-only context automatically. Full sequence: [docs/20261114-takeover-architecture.md](docs/20261114-takeover-architecture.md)
 - **Scenes & repos**: list_scenes · apply_scene · host_repo · sync_repos · managed/member repos · project templates · project-info
 - **Search, knowledge & skills**: search (all/event/repo/agent) · skills ×3 · knowledge ×2 · dashboard
@@ -218,7 +219,7 @@ Full release notes: [CHANGELOG.md](CHANGELOG.md) — 21 条发布记录（含 0.
 ```bash
 npm install
 
-npm test        # 270 unit tests (fake-grape stand-in, no real server needed)
+npm test        # 289 unit tests (fake-grape stand-in, no real server needed)
 
 npm run smoke   # real stdio JSON-RPC round-trip: initialize → tools/list → tools/call
 ```

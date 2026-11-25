@@ -126,6 +126,21 @@ sequenceDiagram
 
 **验收口径修正**：兜底路径只回填 `next_seq`，`handoff_seq` 由平台写入、本工具不写——AC 中「`handoff_seq`/`next_seq` 非 0」按「派发指针 `next_seq` 非 0」读取。`next_step` 仅整串 agent 名（如 `qa`）命中，散文（如「qa：请复查 PR #10」）不解析，由场景链 coding→qa 兜底。
 
+### 3.3 技能物化（Issue #28）
+
+接管 prompt 声称「技能已物化，直接读 SKILL.md」，而此前 `grape_takeover_start` 对 `bundle.assets.skill` 零引用——目录实际不存在（接管链路首个断点）。现由 `src/skill-materialize.mjs` 承接：
+
+| 态 | 输入 | 行为 |
+|----|------|------|
+| inline | `assets.skill.files`（数组或「路径→内容」映射） | 逐条目落盘到 `<cwd>/.grape-takeover-skills/<skill>/` |
+| zip | `assets.skill.zip_url` | 零依赖解压（`zlib.inflateRawSync` + 最小 ZIP 解析，仅 store/deflate），剥离 `<skill>/` 顶层前缀 |
+| legacy | 无 `assets.skill`（旧平台） | 不落盘，渲染显式提示「本次未物化技能」 |
+
+- **时机**：物化在 `native()` 后置执行，结果挂 `json.skillMaterialization`；`render()` 保持同步纯函数，只读该字段（`test/takeover-hardening.test.mjs` 的同步直调 seam 不受影响）。
+- **目录口径**：`cwd = bundle.workspace.cwd_hint || process.cwd()`，与接管脚本 `{{CWD}}` 同源。
+- **失败语义**：会话已建立即保留——物化失败不外抛、不回滚，`status:'failed'` + reason 进渲染 warning；仅当目标目录由本次调用新建时才清理半成品。
+- **安全**：技能名白名单 `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`（拒 `.`/`..`/`.skills`/分隔符与盘符，不归一化）；条目拒 `..`、绝对路径、反斜杠盘符、`.skills` 段；逐级 `lstat` 拒符号链接（含 zip `S_IFLNK` 条目）；落盘前缀校验；恒不写 `.skills/`。
+
 ## 4. 验证矩阵（全部真机）
 
 | 验证项 | 环境 | 结果 |
@@ -142,6 +157,7 @@ sequenceDiagram
 ## 5. 遗留与边界
 
 - **内置 Node 接管脚本**：`skills/grape-remote/scripts/takeover/{report,request-finish,finish}.mjs` 随 `skills/` 目录分发（Node ≥20，Windows/Linux 通用）；token 只从环境变量读取，不进入 argv/历史。
+- **技能物化（#28）**：`<cwd>/.grape-takeover-skills/<skill>/` 是物化产物目录，随工作区存在；`.skills/` 恒不写（worker 会 rmtree）。Windows 路径口径由 `resolve` + `path.sep` 前缀校验覆盖，条目含 `\` 一律拒绝。
 - **tko_ 不含 git 凭据注入**：接管期间的回推依赖宿主已有用户级凭据（`grape git` 注入 / 自有 PAT / SSH key）；洁净机器需用户先配置。kit 在 `grape_takeover_start` 返回体显式披露该边界（0.3.8）。
 - **生产未部署**：weekly-11（含 #1268 + !1425）未上 www.grapedev.cn——takeover 工具面在生产 404 属预期，grape-kit 已按 404 回退老路径并提示
 - **!1425 待合入**：修复在分支，PR 审核后随 weekly-11 发版列车走（与 #2238/2.4.0 同列）
