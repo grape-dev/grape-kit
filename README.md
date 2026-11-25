@@ -34,7 +34,7 @@ agent (MCP stdio: opencode / CodeArts / WorkBuddy / dsh…; other MCP-capable ag
 - **Cloud-local collaboration** (v0.3.2+ core): **takeover sessions** atomically hand cloud nodes (e.g. coding) over to your agent — a `tko_` credential (12h) plus the full context bundle (prompt/env/workspace/skill/history) come back; your agent works locally and reports progress. Hand-back is two-phase: `request-finish` only reports completion, and after you confirm **in the conversation** the `finish` call hands back the structured result (the pipeline chain never breaks).
   - **Credential semantics**: `tko_` is repo_session-only (keep working the node / report progress, **no git credential injection**). `request-finish` works with `tko_`, but the final `finish` **requires a user-level credential (`grape_`)**; calling `finish` with `tko_` returns 403 by design. There is no UI confirm button — confirmation happens only in your chat with the agent.
   - Platform requirement: weekly-11+; older platforms fall back to the legacy read-only context automatically. Full sequence: [docs/20261114-takeover-architecture.md](docs/20261114-takeover-architecture.md)
-  - **Git write-back** (Issue #31, clean machines with no PAT/SSH/CLI): `grape_git_credential` exchanges the takeover credential for a one-shot repo-scoped credential (600s) and writes `GIT_ASKPASS` in the workspace (`0600`, embedded expiry epoch; an expired script exits non-zero and tells you to re-exchange, with **no silent fallback** to local git/CLI credentials). `grape_create_pull` is a thin proxy over the PR endpoint (create only — no review, no merge). The credential is bound to the session repo and workspace: cross-repo or out-of-workspace paths are refused with no file written, and `finish`/`abort` clean the askpass file up.
+  - **Git write-back** (Issue #31, clean machines with no PAT/SSH/CLI): `grape_git_credential` exchanges the takeover credential for a one-shot repo-scoped credential (600s) and writes `GIT_ASKPASS` in the workspace (`0600`, embedded expiry epoch; an expired script exits non-zero and tells you to re-exchange, with **no silent fallback** to local git/CLI credentials). `grape_create_pull` is a thin proxy over the PR endpoint (create only — no review, no merge). The credential is bound to the session repo and workspace: cross-repo or out-of-workspace paths are refused with no file written, symlinked `.grape` dirs / askpass files are rejected (no write outside the workspace), and the tool writes `/.grape/` into `.git/info/exclude` + verifies with `git check-ignore` before writing (refuses if exclusion cannot be confirmed — the 600s token must never reach remote history). `finish`/`abort` clean the askpass file up, and validated branch/commit/PR are carried into the hand-back `artifacts`.
 - **Scenes & repos**: list_scenes · apply_scene · host_repo · sync_repos · managed/member repos · project templates · project-info
 - **Search, knowledge & skills**: search (all/event/repo/agent) · skills ×3 · knowledge ×2 · dashboard
 - **Worker onboarding**: register this machine as a grape execution engine (`grape_worker_onboard`)
@@ -219,7 +219,7 @@ Full release notes: [CHANGELOG.md](CHANGELOG.md) — 21 条发布记录（含 0.
 ```bash
 npm install
 
-npm test        # 283 unit tests (fake-grape stand-in, no real server needed)
+npm test        # 292 unit tests (fake-grape stand-in, no real server needed)
 
 npm run smoke   # real stdio JSON-RPC round-trip: initialize → tools/list → tools/call
 ```

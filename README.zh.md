@@ -34,7 +34,7 @@ agent 宿主（MCP stdio：opencode / CodeArts / WorkBuddy / dsh…；其他 MCP
 - **端云协同**（v0.3.2+ 核心）：**接管会话**把云端节点（如 coding）原子让渡到你的 Agent——签发 `tko_` 凭据（12h）并返回完整上下文（prompt/env/workspace/skill/history）；Agent 在本地干活、上报进度，按两阶段交回：`request-finish` 只报告完成，**在对话中经你确认**后再 `finish` 正式交回（结构化产物，链路保持完整）。
   - **凭据语义**：`tko_` 仅 repo_session 能力（继续节点工作 / 回报进度，**不含 git 凭据注入**）——`request-finish` 用 tko_ 即可，但**最终 `finish` 必须用用户级凭据（`grape_`）**，tko_ 调 finish 会 403 属预期边界。平台不提供 UI 确认按钮，确认只发生在你与 Agent 的对话里。
   - 平台要求 weekly-11+；旧平台自动回退只读上下文。完整时序：[docs/20261114-takeover-architecture.md](docs/20261114-takeover-architecture.md)
-  - **git 写回**（Issue #31，干净机器无 PAT/SSH/CLI）：`grape_git_credential` 用接管凭据换一次性本仓券（600s）并在工作区写 `GIT_ASKPASS`（`0600`，内嵌到期 epoch；过期脚本非零退出并提示重新换券，**无静默回退**本机 git/CLI 凭据）；`grape_create_pull` 薄代理 PR 端点（只建 PR、不评审不合并）。凭据绑定会话仓库与工作区：非本仓/工作区外一律拒绝且不落盘，`finish`/`abort` 自动清理 askpass。
+  - **git 写回**（Issue #31，干净机器无 PAT/SSH/CLI）：`grape_git_credential` 用接管凭据换一次性本仓券（600s）并在工作区写 `GIT_ASKPASS`（`0600`，内嵌到期 epoch；过期脚本非零退出并提示重新换券，**无静默回退**本机 git/CLI 凭据）；`grape_create_pull` 薄代理 PR 端点（只建 PR、不评审不合并）。凭据绑定会话仓库与工作区：非本仓/工作区外一律拒绝且不落盘；`.grape` 目录/askpass 文件为符号链接时拒绝（不写到工作区外）；写盘前把 `/.grape/` 写入 `.git/info/exclude` 并用 `git check-ignore` 复核，无法确认已排除即拒绝写盘（600s 券不得进远端历史）；`finish`/`abort` 自动清理 askpass，校验通过的 branch/commit/PR 会写入交回 `artifacts` 留痕。
 - **场景与仓库**：场景列表 · 应用场景 · 托管仓库 · 同步仓库 · 项目模板 · 项目信息
 - **搜索、知识与技能**：全局搜索 · 技能 ×3 · 知识库 ×2 · 看板
 - **Worker 接入**：把本机注册为 grape 执行引擎（`grape_worker_onboard`）
@@ -219,7 +219,7 @@ npx -y @grape-dev/grape-kit intro     # 随时重看能力地图
 ```bash
 npm install
 
-npm test        # 283 个单测（fake-grape 替身，不依赖真实服务端）
+npm test        # 292 个单测（fake-grape 替身，不依赖真实服务端）
 
 npm run smoke   # 真实 stdio JSON-RPC 往返：initialize → tools/list → tools/call
 ```

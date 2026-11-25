@@ -8,8 +8,8 @@
 
 ### Added
 
-- git 写回闭环（#31）：新增 `grape_git_credential` —— 用接管凭据 `tko_`（或 `tk_`）调 `/api/repos/{o}/{r}/git-credential` 换一次性本仓券（600s），在工作区写 `GIT_ASKPASS`（POSIX `.grape/git-askpass.sh` / Windows `.cmd`，权限 0600），脚本内嵌到期 epoch、过期非零退出并提示「重新换券」（无静默回退本机 git/CLI 凭据）；`cleanup=true` 幂等清理。新增 `grape_create_pull` 薄代理 `/api/git-repo/{o}/{r}/pulls`（只建 PR，不评审不合并；`issue_number` 映射 `related_issue_nums`）。工具面 39→41。
-- `grape_takeover_finish` 增加 coding 交回产物校验：`agent_type=coding`（或带 branch/commit/pr_number 任一）时须带齐 branch、commit、PR——request-finish 只出强 warning，正式 finish 缺项拒绝并列出缺失项，`allow_incomplete=true` 可覆写并在 actions 留痕；finish/abort 清理本次进程写出的 askpass。
+- git 写回闭环（#31）：新增 `grape_git_credential` —— 用接管凭据 `tko_`（或 `tk_`）调 `/api/repos/{o}/{r}/git-credential` 换一次性本仓券（600s），在工作区写 `GIT_ASKPASS`（POSIX `.grape/git-askpass.sh` / Windows `.cmd`，权限 0600），脚本内嵌到期 epoch、过期非零退出并提示「重新换券」（无静默回退本机 git/CLI 凭据）；写盘前拒绝 `.grape` 目录/askpass 文件 symlink（不越界写），并把 `/.grape/` 写入 `.git/info/exclude` + `git check-ignore --no-index` 复核，无法确认已排除即拒绝写盘（防 600s 券进远端历史）；Windows `.cmd` 用 `set "VAR=…"` 且时间取数失败即非零退出，含 cmd 元字符的券拒写；`cleanup=true` 幂等清理。新增 `grape_create_pull` 薄代理 `/api/git-repo/{o}/{r}/pulls`（只建 PR，不评审不合并；`issue_number` 映射 `related_issue_nums`）。工具面 39→41。
+- `grape_takeover_finish` 增加 coding 交回产物校验：`agent_type=coding`（或带 branch/commit/pr_number 任一）时须带齐 branch、commit、PR；未显式声明且无产物时回退读会话 `agent_type` 判定（封堵静默放行）——request-finish 只出强 warning，正式 finish 缺项拒绝并列出缺失项，`allow_incomplete=true` 可覆写并在 actions 留痕；校验通过的 branch/commit/PR 追加进 `artifacts` 留痕（不写平台顶层字段）；finish/abort 清理 askpass（registry + 显式/会话 workspace 兜底，跨进程重启可清）。`owner/repo` 拒绝 `.`/`..` 段。
 
 ### Changed
 

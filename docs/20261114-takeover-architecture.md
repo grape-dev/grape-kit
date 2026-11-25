@@ -157,22 +157,22 @@ sequenceDiagram
 
 | 步骤 | 工具 | 行为 |
 |---|---|---|
-| ① 换券 | `grape_git_credential(session_id, owner, repo, workspace)` | `tko_` 换一次性本仓券 → 写 `<ws>/.grape/git-askpass.sh`（POSIX）/ `.cmd`（Windows），0600；脚本内嵌 `GRAPE_ASKPASS_EXPIRES`，运行前自检到期 |
+| ① 换券 | `grape_git_credential(session_id, owner, repo, workspace)` | `tko_` 换一次性本仓券 → 写 `<ws>/.grape/git-askpass.sh`（POSIX）/ `.cmd`（Windows），0600；脚本内嵌 `GRAPE_ASKPASS_EXPIRES`，运行前自检到期；写盘前把 `/.grape/` 写入 `.git/info/exclude` 并 `git check-ignore --no-index` 复核 |
 | ② 推送 | 宿主机 `git` + `GIT_ASKPASS` | `export GIT_ASKPASS=<file>` / `GIT_TERMINAL_PROMPT=0` → `git push`；券在 push 前换、不缓存 |
 | ③ 建 PR | `grape_create_pull(owner, repo, title, head, base)` | 薄代理 `/api/git-repo/{o}/{r}/pulls`（只建 PR，不评审不合并）→ 返回编号/URL |
-| ④ 交回 | `grape_takeover_finish(agent_type=coding, branch, commit, pr_number)` | coding 缺项：request-finish 强 warning、正式 finish 拒绝；`allow_incomplete=true` 覆写并在 actions 留痕；finish/abort 清理 askpass |
+| ④ 交回 | `grape_takeover_finish(agent_type=coding, branch, commit, pr_number)` | coding 缺项：request-finish 强 warning、正式 finish 拒绝（未声明 agent_type/无产物时按会话 agent_type 判定）；`allow_incomplete=true` 覆写并在 actions 留痕；校验通过的 branch/commit/PR 写入 artifacts；finish/abort 清理 askpass |
 
 **安全边界（硬性）**：
 
 - **本仓**：`owner/repo` 必须与接管会话的 `repo_key` 绑定一致，不一致拒绝且不落盘；会话无仓库绑定时同样拒绝（无法证明本仓）。
-- **工作区**：`workspace` realpath 必须等于或位于会话工作区（`bundle.workspace.cwd_hint`）内；越界拒绝且不生成文件；`<ws>/.grape` 为符号链接时拒绝写入。
+- **工作区**：`workspace` realpath 必须等于或位于会话工作区（`bundle.workspace.cwd_hint`）内；越界拒绝且不生成文件；`<ws>/.grape` 目录或 askpass 目标文件为符号链接时拒绝写入（不跟随写到工作区外）。
 - **过期**：换券响应无到期或已过期（`expires_in<=0` / 缺 `expires_at`）一律不写盘并提示重新换券；askpass 过期后 `exit 1` + stderr 含「重新换券」，**全仓无 native git / CLI 静默回退分支**。
-- **最小暴露**：0600；仅工作区内；返回值/渲染只给掩码口令；finish/abort 删除本次进程写出的文件（registry 记录，不凭 session_id 猜测路径）。
-- **路径注入**：`owner/repo` 只允许 `[A-Za-z0-9._-]`，API 侧再做 URL 编码。
+- **提交防泄漏**：git 仓库内写盘前把 `/.grape/` 写入 `.git/info/exclude` 并用 `git check-ignore --no-index` 复核，无法确认即拒绝写盘（600s 券不得被 `git add -A` 提交进远端历史）；仓内 `.gitignore` 同时包含 `.grape/`。**最小暴露**：0600；仅工作区内；返回值/渲染只给掩码口令；finish/abort 删除本次进程写出的文件（registry 记录，不凭 session_id 猜测路径）。
+- **路径注入**：`owner/repo` 只允许 `[A-Za-z0-9._-]` 且拒绝 `.`/`..` 段，API 侧再做 URL 编码。
 
 **Out of Scope**：路径 1（服务端 LocalRun prepared 阶段注入凭据，需改 grape 仓且凭据进 bundle env）另行立项；用户级 `grape_` 换券、SSH key 托管、凭据跨 run 持久化均不提供。
 
-**验收**：干净容器全链只用换的券（PR head sha == 本地 commit）；券过期脚本非零退出且提示重新换券；非本仓/越界拒绝且无文件；askpass 0600 且 finish 后清理；coding 缺 branch/commit/PR 时 finish 拒绝、补齐通过；`npm test` 全绿（270 例零回归 + 新增用例）。
+**验收**：干净容器全链只用换的券（PR head sha == 本地 commit）；券过期脚本非零退出且提示重新换券；非本仓/越界拒绝且无文件；askpass 0600 且 finish 后清理；coding 缺 branch/commit/PR 时 finish 拒绝、补齐通过；`npm test` 全绿（292 例）。
 
 ## 6. 分叉裁决 playbook（takeover 前置）
 
