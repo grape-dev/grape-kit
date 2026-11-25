@@ -144,6 +144,7 @@ export function normalizeSkills(source) {
     if (Array.isArray(bundle.skills) && bundle.skills.length) items = bundle.skills
     else if (bundle.assets?.skill) items = [bundle.assets.skill]
     else if (bundle.env?.GRAPE_BOUND_SKILL) items = [bundle.env.GRAPE_BOUND_SKILL]
+    else if (bundle.skill) items = [bundle.skill]
   }
   const out = []
   for (const it of items) {

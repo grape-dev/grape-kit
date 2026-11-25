@@ -15,6 +15,7 @@ import * as R from './render.mjs'
 import { hostname } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { api, apiRequest, getBaseUrl, AGENT_TYPES, normalizeTriggerAgent, GrapeApiError } from './api.mjs'
+import { getServerCapabilities, normalizeSkills, evaluateTakeoverGate } from './capabilities.mjs'
 
 /** kit 安装根（发布包含 skills/，Node 版接管脚本随 skill 副本分发） */
 const KIT_ROOT = fileURLToPath(new URL('..', import.meta.url)).replace(/[\\/]+$/, '')
@@ -54,6 +55,31 @@ const WARNING_HINTS = {
   next_node_pending_dispatch: '下一节点未被派发：确认远端/节点状态后调 grape_trigger_pipeline(agent=…) 补发，或用 grape_takeover_status 复查会话。',
 }
 const warningHint = (w) => WARNING_HINTS[String(w).split(':')[0].trim()] || ''
+
+/**
+ * 多技能 fail-closed 的渲染（Issue #32）：首行必须是稳定错误码，随后完整披露
+ * required 技能、服务端版本/能力来源/握手时间与三条升级指引——判据可追溯到本次握手。
+ */
+function renderCapabilityRefusal(json) {
+  const lines = [
+    `**接管已被拒绝：${json.code}**`,
+    '',
+    String(json.message || ''),
+    '',
+    `- 服务端版本: ${json.service_version || '未知'}`,
+    `- 已声明能力: ${(json.supported_capabilities || []).join(', ') || '（无）'}`,
+    `- 能力来源: ${json.capabilities_source || 'unknown'}`,
+    `- 握手时间: ${json.handshake_at || '未知'}`,
+    `- 要求技能（${json.required_count ?? 0}）: ${(json.required_skills || []).join(', ') || '（无）'}`,
+  ]
+  const remediation = Array.isArray(json.remediation) ? json.remediation : []
+  if (remediation.length) {
+    lines.push('', '**升级指引**', '')
+    for (const r of remediation) lines.push(`- ${r}`)
+  }
+  if (json.retryable) lines.push('', '_本次握手未取得服务端能力（retryable=true）：稍后重试，或检查 /api/health 可达性。_')
+  return lines.join('\n')
+}
 
 /* ── Issue #19：交回后按场景链确保下一节点被派发（「链不断」不能只在描述里） ── */
 
@@ -909,6 +935,7 @@ export const TOOLS = [
       '之后本地继续该节点工作，用 grape_takeover_progress 回报进度，完成用 grape_takeover_finish 携结构化产物交回，' +
       '或用 grape_takeover_abort 让渡回流水线（当前节点重新派发，链不断）。' +
       '⚠️ push 能力边界：tko_ 仅 repo_session 能力，**不含 git 凭据注入**；洁净机器的回推路径见返回体。' +
+      '⚠️ 能力依赖（Issue #32）：接管前握手 `GET /api/health` 的 version/capabilities；节点 required 技能数 > 1 且服务端未声明 `skills.multi` 时拒绝接管，返回稳定错误码 `E_CAP_UNSUPPORTED_MULTI_SKILL` 与升级指引（升级服务端/kit 或改为单技能节点）。`takeover_bundle.v2` 不隐含多技能支持，客户端唯一判据是 `skills.multi`。' +
       '⚠️ 需要平台支持 takeover API（404/无该工具能力时回退 grape_takeover_context + cancel 老路径）。',
     schema: {
       type: 'object',
@@ -917,17 +944,61 @@ export const TOOLS = [
         repo: str('repo'),
         number: num('issue 编号'),
         agent_type: str('要接管的节点（可选，默认当前运行节点，如 coding）'),
+        bundle: {
+          type: 'object',
+          description: '节点接管 bundle（可选）：用于接管前的多技能能力门槛预检，支持 skills[] / assets.skill / env.GRAPE_BOUND_SKILL',
+        },
+        skills: {
+          type: 'array',
+          description: '节点技能清单（可选）：[{name, required}] 或 ["skill-name"]；缺省时 best-effort 读取当前节点绑定技能',
+          items: { type: 'object' },
+        },
       },
       required: ['owner', 'repo', 'number'],
     },
-    async native(a) { return api.takeoverStart(a.owner, a.repo, a.number, a.agent_type) },
+    async native(a) {
+      const caps = await getServerCapabilities()
+      const supplied = a.bundle ?? (a.skills ? { skills: a.skills } : null)
+      let skills = normalizeSkills(supplied)
+      if (!supplied) {
+        // 预检入口：读当前任务绑定技能（只读，不是 takeover 请求）；失败降级为单技能保守处理。
+        try {
+          const ctx = await api.takeoverContext(a.owner, a.repo, a.number)
+          skills = normalizeSkills(ctx)
+        } catch {
+          skills = []
+        }
+      }
+      const gate = evaluateTakeoverGate(skills, caps)
+      if (!gate.allowed) return gate.payload
+      const r = await api.takeoverStart(a.owner, a.repo, a.number, a.agent_type)
+      const out = r && typeof r === 'object' ? r : { result: r }
+      // 判据可追溯：render 需要 version + capabilities + source + handshake_at
+      return {
+        ...out,
+        client_capabilities: {
+          version: caps.version,
+          capabilities: caps.capabilities,
+          source: caps.source,
+          handshake_at: caps.handshake_at,
+          required_count: gate.required_count,
+          required_skills: gate.required_skills,
+          verdict: 'passed',
+        },
+      }
+    },
     render(json) {
       if (!json || typeof json !== 'object') return R.fallbackJson(json)
+      if (json.refused && json.code === 'E_CAP_UNSUPPORTED_MULTI_SKILL') return renderCapabilityRefusal(json)
       if (json.detail) return `接管发起失败：${typeof json.detail === 'string' ? json.detail : JSON.stringify(json.detail)}`
       const sid = json.takeover_id ?? json.session_id ?? json.id ?? ''
       const b = json.bundle || {}
       const env = b.env || {}
       const lines = ['### 接管会话已建立', '']
+      const cc = json.client_capabilities
+      if (cc && typeof cc === 'object') {
+        lines.push(`- capabilities: ${cc.version || '未知版本'} [${(cc.capabilities || []).join(', ') || '—'}]（来源 ${cc.source || 'unknown'}）| 判据：通过（required=${cc.required_count ?? 1}）`)
+      }
       lines.push(`- 会话: \`${sid}\`${json.reused ? '（复用已有会话）' : ''}`)
       if (env.GRAPE_SESSION_TOKEN) lines.push(`- 接管凭据: \`${String(env.GRAPE_SESSION_TOKEN).slice(0, 8)}…\`（完整值在 env.GRAPE_SESSION_TOKEN，12h TTL）`)
       if (b.task && b.task.id) lines.push(`- 让渡的云端任务: ${b.task.id}（已停止）`)
