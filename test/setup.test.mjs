@@ -163,7 +163,7 @@ test('doctor 在本地版本落后时输出升级提示与更新命令', () => {
   seedUpdateCache(h, '9.9.9')
   const r = run(['doctor'], h)
   assert.equal(r.status, 0, r.stderr)
-  assert.match(r.stdout, /\[!!\] 版本更新: 有新版本 \d+\.\d+\.\d+ → 9\.9\.9/)
+  assert.match(r.stdout, /\[!!\] 版本更新: 有新版本 \d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)? → 9\.9\.9/)
   assert.match(r.stdout, /npm i -g @grape-dev\/grape-kit/)
   rmSync(h, { recursive: true, force: true })
 })
