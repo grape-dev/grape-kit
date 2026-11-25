@@ -6,7 +6,20 @@
 
 ## Unreleased
 
-暂无待发布变更。下一开发周期的用户可见变更先落本段（按 Added / Changed / Fixed 归类，见 CONTRIBUTING §7），发版时并入对应版本节。
+### Added
+
+- 客户端 capabilities 握手（Issue #32）：`grape_takeover_start` 接管前调 `GET /api/health` 读取服务端 `version` + `capabilities[]`，兼容 `string[]` / `{name:boolean}` / `items[]` 三种形态；进程内缓存 TTL 300s（`GRAPE_CAPABILITIES_TTL_MS` 可覆盖，`GRAPE_CAPABILITIES_REFRESH=1` 强制刷新）。握手请求声明 `client_capabilities`（`skills.multi=true`），供新服务端拦截未声明支持的旧客户端。
+- 节点 required 技能数 > 1 且服务端未声明 `skills.multi` 时 **fail-closed**：返回结构化拒绝体（首行 `**接管已被拒绝：E_CAP_UNSUPPORTED_MULTI_SKILL**`），含 required 技能、服务端版本、已声明能力、能力来源、握手时间与三条升级指引（升级服务端 / 升级 kit / 改为单技能节点）；拒绝时不发起 takeover 请求，不再静默只跑 `skills[0]`。
+- `normalizeSkills()` 技能清单解析单一入口（`skills[]` > `assets.skill` > `env.GRAPE_BOUND_SKILL`），供 #28 复用。
+
+### Changed
+
+- `grape_takeover_start` 成功路径的 render 披露 `capabilities: <version> [..]（来源 server）| 判据：通过（required=N）`，判据可追溯到本次握手；工具 description 补能力依赖与拒绝错误码说明。
+
+### Fixed
+
+- 旧服务端（`/api/health` 404 或缺字段）与网络失败按 `source=unknown`、`capabilities=[]` 处理，不伪造能力、不做长负缓存（下次调用重试）；TTL 过期后重取失败回退 `stale-cache` 并保留上一份真实握手结果。单技能 + 旧服务端行为不变。
+- `takeover_bundle.v2` 与 `skills.multi` 正交：v2 只描述 bundle 结构，不隐含多技能支持；客户端唯一判据是 `skills.multi`。
 
 ## 0.4.0 (2026-11-23)
 

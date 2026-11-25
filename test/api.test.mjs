@@ -1,6 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { resolveCredentials, apiRequest, GrapeApiError, waitTaskNative, api, getBaseUrl, grapeHome, readAuthChannel, npxCacheRoot, AGENT_TYPES } from '../src/api.mjs'
+import { createServer } from 'node:http'
+import { resolveCredentials, apiRequest, GrapeApiError, waitTaskNative, api, getBaseUrl, grapeHome, readAuthChannel, npxCacheRoot, AGENT_TYPES, health, CLIENT_CAPABILITIES } from '../src/api.mjs'
 import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from 'node:fs'
 import { tmpdir, homedir } from 'node:os'
 import { join } from 'node:path'
@@ -281,4 +282,40 @@ test('Issue #17：worker_onboard 地址与 getBaseUrl() 同源（env / 文件通
     if (saved.auth === undefined) delete process.env.GRAPE_AUTH_FILE; else process.env.GRAPE_AUTH_FILE = saved.auth
     rmSync(dir, { recursive: true, force: true })
   }
+})
+
+
+/* ── Issue #32：/api/health 握手封装 ── */
+
+function serveHealth(handler) {
+  return new Promise((resolve) => {
+    const srv = createServer(handler)
+    srv.listen(0, '127.0.0.1', () => resolve({ srv, port: srv.address().port }))
+  })
+}
+
+test('health：404 不抛错，返回 reachable=false', async () => {
+  const { srv, port } = await serveHealth((req, res) => { res.writeHead(404); res.end('') })
+  const env = { GRAPE_AUTH_FILE: '/nonexistent/gk-test-auth.json', GRAPE_API_TOKEN: 'grape_fake', GRAPE_BASE_URL: `http://127.0.0.1:${port}` }
+  try {
+    const r = await health({ env })
+    assert.equal(r.reachable, false)
+    assert.equal(r.status, 404)
+  } finally { srv.close() }
+})
+
+test('health：上报 client_capabilities 头并返回服务端能力', async () => {
+  let clientHeader = ''
+  const { srv, port } = await serveHealth((req, res) => {
+    clientHeader = String(req.headers['x-grape-client-capabilities'] || '')
+    res.writeHead(200, { 'content-type': 'application/json' })
+    res.end(JSON.stringify({ version: '2.0.0', capabilities: ['skills.multi'] }))
+  })
+  const env = { GRAPE_AUTH_FILE: '/nonexistent/gk-test-auth.json', GRAPE_API_TOKEN: 'grape_fake', GRAPE_BASE_URL: `http://127.0.0.1:${port}` }
+  try {
+    const r = await health({ env })
+    assert.equal(r.version, '2.0.0')
+    assert.match(clientHeader, /skills\.multi=true/)
+    assert.equal(CLIENT_CAPABILITIES['skills.multi'], true)
+  } finally { srv.close() }
 })

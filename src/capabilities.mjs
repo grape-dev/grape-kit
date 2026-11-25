@@ -94,18 +94,19 @@ export async function getServerCapabilities(opts = {}) {
       const hasCapsField = raw && (Array.isArray(raw.capabilities) || Array.isArray(raw.items) || Array.isArray(raw.capability) || (raw.capabilities && typeof raw.capabilities === 'object'))
       const hasVersion = Boolean(versionOf(raw))
       if (!hasCapsField && !hasVersion) {
-        // 旧服务端 200 但缺 version/capabilities：视同握手不可用，不伪造、不缓存。
-        return unknownCaps('health 缺少 version/capabilities 字段', nowIso)
+        // 旧服务端 200 但缺 version/capabilities：视同握手不可用，不伪造；有旧缓存可回退 stale。
+        errorText = 'health 缺少 version/capabilities 字段'
+      } else {
+        const data = {
+          version: versionOf(raw),
+          capabilities: normalizeCapabilities(raw.capabilities ?? raw.capability ?? raw.items),
+          source: 'server',
+          fetched_at: nowIso,
+          handshake_at: nowIso,
+        }
+        cache = { data, fetchedAt: now }
+        return data
       }
-      const data = {
-        version: versionOf(raw),
-        capabilities: normalizeCapabilities(raw.capabilities ?? raw.capability ?? raw.items),
-        source: 'server',
-        fetched_at: nowIso,
-        handshake_at: nowIso,
-      }
-      cache = { data, fetchedAt: now }
-      return data
     }
   } catch (e) {
     errorText = String(e?.message || e || 'handshake failed')

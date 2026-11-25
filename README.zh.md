@@ -34,6 +34,7 @@ agent 宿主（MCP stdio：opencode / CodeArts / WorkBuddy / dsh…；其他 MCP
 - **端云协同**（v0.3.2+ 核心）：**接管会话**把云端节点（如 coding）原子让渡到你的 Agent——签发 `tko_` 凭据（12h）并返回完整上下文（prompt/env/workspace/skill/history）；Agent 在本地干活、上报进度，按两阶段交回：`request-finish` 只报告完成，**在对话中经你确认**后再 `finish` 正式交回（结构化产物，链路保持完整）。
   - **凭据语义**：`tko_` 仅 repo_session 能力（继续节点工作 / 回报进度，**不含 git 凭据注入**）——`request-finish` 用 tko_ 即可，但**最终 `finish` 必须用用户级凭据（`grape_`）**，tko_ 调 finish 会 403 属预期边界。平台不提供 UI 确认按钮，确认只发生在你与 Agent 的对话里。
   - 平台要求 weekly-11+；旧平台自动回退只读上下文。完整时序：[docs/20261114-takeover-architecture.md](docs/20261114-takeover-architecture.md)
+  - **能力握手与多技能 fail-closed**（Issue #32）：接管前先握手 `GET /api/health` 读取服务端 `version` + `capabilities[]`（进程内缓存 300s；`GRAPE_CAPABILITIES_TTL_MS` 可覆盖，`GRAPE_CAPABILITIES_REFRESH=1` 强制刷新）。节点 required 技能数 > 1 且服务端未声明 `skills.multi` 时，`grape_takeover_start` **拒绝接管**并返回稳定错误码 `E_CAP_UNSUPPORTED_MULTI_SKILL`，附 required 技能、服务端版本、已声明能力、能力来源、握手时间与三条升级指引——绝不静默只跑第一个技能。旧服务端（404 / 缺字段）视同仅支持单技能，单技能路径行为不变。`takeover_bundle.v2` **不隐含** `skills.multi`，客户端唯一判据是 `skills.multi`。握手请求同时声明 `client_capabilities`（`skills.multi=true`），供新服务端拦截旧客户端。
 - **场景与仓库**：场景列表 · 应用场景 · 托管仓库 · 同步仓库 · 项目模板 · 项目信息
 - **搜索、知识与技能**：全局搜索 · 技能 ×3 · 知识库 ×2 · 看板
 - **Worker 接入**：把本机注册为 grape 执行引擎（`grape_worker_onboard`）
@@ -218,7 +219,7 @@ npx -y @grape-dev/grape-kit intro     # 随时重看能力地图
 ```bash
 npm install
 
-npm test        # 270 个单测（fake-grape 替身，不依赖真实服务端）
+npm test        # 288 个单测（fake-grape 替身，不依赖真实服务端）
 
 npm run smoke   # 真实 stdio JSON-RPC 往返：initialize → tools/list → tools/call
 ```
