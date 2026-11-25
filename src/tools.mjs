@@ -19,7 +19,7 @@ import {
   readdirSync, readFileSync, lstatSync, realpathSync, statSync,
 } from 'node:fs'
 import { execFileSync } from 'node:child_process'
-import { basename, join, resolve, sep, dirname, isAbsolute, resolve as resolvePath } from 'node:path'
+import { basename, join, resolve, dirname, isAbsolute, resolve as resolvePath } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { zipDirectory } from './zip.mjs'
 import { api, apiRequest, getBaseUrl, AGENT_TYPES, normalizeTriggerAgent, GrapeApiError } from './api.mjs'
@@ -34,11 +34,19 @@ const fillCwd = (text, cwd) => String(text ?? '').replaceAll('{{CWD}}', cwd)
 
 const WIN_ABS_RE = /^[A-Za-z]:[\\/]/
 
-/** 路径比较用归一（统一分隔符、去尾分隔符；不做 fs 解析，云端 Windows 路径也安全） */
-const normPathForCompare = (p) => String(p ?? '').trim().replace(/[\\/]+/g, '/').replace(/\/+$/, '')
+/** 文件系统根（POSIX `/`、Windows `C:\` / `C:/`）：归一化时不得剥掉根分隔符 */
+const PATH_ROOT_RE = /^(?:[A-Za-z]:[\\/]|[\\/])$/
 
-/** 字符串级包含判定（按分隔符边界；/a/bc 不算 /a/b 内） */
-function pathInsideString(root, target) {
+/** 路径比较用归一（统一分隔符、去尾分隔符；不做 fs 解析，云端 Windows 路径也安全） */
+const normPathForCompare = (p) => {
+  const raw = String(p ?? '').trim()
+  const s = raw.replace(/[\\/]+/g, '/')
+  if (PATH_ROOT_RE.test(raw)) return s
+  return s.replace(/\/+$/, '')
+}
+
+/** 单一越界判定（按分隔符边界；/a/bc 不算 /a/b 内）—— 字符串级与 fs 级共用同一套归一 */
+function isPathInside(root, target) {
   const r = normPathForCompare(root)
   const t = normPathForCompare(target)
   if (!r || !t) return false
@@ -47,12 +55,14 @@ function pathInsideString(root, target) {
 
 /**
  * 路径归一：相对路径按基目录解析；绝对路径（含 Windows 盘符）原样保留。
- * 云端 cwd_hint 常是别的机器上的绝对路径，重解析会改写语义，因此只剥尾分隔符。
+ * 云端 cwd_hint 常是别的机器上的绝对路径，重解析会改写语义，因此只剥尾分隔符；
+ * 文件系统根（`/`、`C:\`）原样保留，避免 `C:\` 被剥成 `C:`（那样 join 会生成相对路径）。
  */
 function normalizeWorkspacePath(p, base) {
   const s = String(p ?? '').trim()
   if (!s) return ''
   const out = (isAbsolute(s) || WIN_ABS_RE.test(s)) ? s : resolvePath(base || process.cwd(), s)
+  if (PATH_ROOT_RE.test(out)) return out
   return out.replace(/[\\/]+$/, '') || out
 }
 
@@ -72,9 +82,11 @@ export function resolveLocalWorkspace({ workspace, bundle, cwd } = {}) {
 
 /**
  * 把平台下发的 `GRAPE_AUTH_FILE` 本地化到本机可写工作区（Issue #37）。
- * 规则（按序）：`{{CWD}}` 占位符 → 以本地 workspace 填充；位于 cwd_hint 根内 → 前缀替换为本地 workspace；
- * 平台默认 token 文件（`.grape-takeover-token`）但不在本地工作区 → 回落 `<workspace>/.grape-takeover-token`；
- * 其余无法安全重写的路径保持原值，但返回 note 由 render 显式提示 source。
+ * 规则（按序，只在能确定云端视角路径时才改写）：
+ * 1. `{{CWD}}` 占位符 → 以本地 workspace 填充；
+ * 2. 位于 `cwd_hint` 根内 → 前缀替换为本地 workspace（含平台默认 `<hint>/.grape-takeover-token`）；
+ * 3. 其余路径（自定义绝对路径 / 相对路径）原样保留：绝对路径提示「本机可能不可读」，
+ *    相对路径不改写（避免丢失子目录或误改用户路径，Issue #37 QA）。
  * @returns {{path: string, rewritten: boolean, note: string}}
  */
 export function localizeAuthFile(authFile, { workspace, cwdHint } = {}) {
@@ -84,17 +96,13 @@ export function localizeAuthFile(authFile, { workspace, cwdHint } = {}) {
   if (!local) return { path: raw, rewritten: false, note: '' }
   if (raw.includes('{{CWD}}')) return { path: fillCwd(raw, local), rewritten: true, note: '' }
   const hint = normalizeWorkspacePath(cwdHint)
-  if (hint && pathInsideString(hint, raw)) {
+  if (hint && isPathInside(hint, raw)) {
     const rest = normPathForCompare(raw).slice(normPathForCompare(hint).length + 1)
     const path = rest ? join(local, rest) : local
     return { path, rewritten: true, note: `凭据文件路径已按本地工作区重写：${raw} → ${path}` }
   }
-  if (basename(raw) === '.grape-takeover-token' && !pathInsideString(local, raw)) {
-    const path = join(local, '.grape-takeover-token')
-    return { path, rewritten: true, note: `平台凭据文件位于云端视角路径（${raw}），本机不可写，已改为 ${path}；请把接管 token 写入该文件后再 source。` }
-  }
-  if ((isAbsolute(raw) || WIN_ABS_RE.test(raw)) && !pathInsideString(local, raw)) {
-    return { path: raw, rewritten: false, note: `凭据文件仍在云端视角路径（${raw}），本机可能不可读；source 前先确认文件存在，或把 token 放到本地工作区后重新接管。` }
+  if ((isAbsolute(raw) || WIN_ABS_RE.test(raw)) && !isPathInside(local, raw)) {
+    return { path: raw, rewritten: false, note: `凭据文件仍是绝对路径（${raw}），本机可能不可读；source 前先确认文件存在，或把 token 放到本地工作区后重新接管。` }
   }
   return { path: raw, rewritten: false, note: '' }
 }
@@ -202,11 +210,45 @@ const safeRealpath = (p) => {
   try { return realpathSync(p) } catch { return resolve(String(p ?? '')) }
 }
 
-/** 路径包含判定（归一后比较；按分隔符边界，避免 /a/bc 命中 /a/b 前缀） */
+/** 本机越界判定：先 realpath（解析符号链接）再走与字符串级同一套 `isPathInside` 归一 */
 function insideRoot(root, target) {
-  const r = resolve(root)
-  const t = resolve(target)
-  return t === r || t.startsWith(r + sep)
+  return isPathInside(safeRealpath(root), safeRealpath(target))
+}
+
+/**
+ * 换券会话根（本机视角）与越界边界，Issue #37 QA 整改后的单一入口。
+ * - 会话 `cwd_hint` 在本机存在 → 它就是可信会话根（boundary='hint'），workspace 必须在其内；
+ * - `cwd_hint` 本机不存在（本地接管）→ 显式 workspace 即会话根（boundary='workspace'），
+ *   **没有云端目录可作越界边界**，降级为“仅校验 workspace 是目录”，并在 note 明确披露；
+ * - 两者都缺 → `fallback`（deps.workspaceRoot / process.cwd()）兜底。
+ * @returns {{root: string, boundary: 'hint'|'workspace'|'fallback', note: string}}
+ */
+function resolveCredentialSessionRoot({ workspace, hint, fallback } = {}) {
+  const hintPath = normalizeWorkspacePath(hint)
+  const wsPath = normalizeWorkspacePath(workspace)
+  if (hintPath && existsSync(hintPath)) {
+    return { root: safeRealpath(hintPath), boundary: 'hint', note: '' }
+  }
+  if (wsPath) {
+    // 允许路径尚不存在（接管会递归创建），但已存在时必须是目录——防止把 askpass 写进同名文件
+    if (existsSync(wsPath) && !statSync(wsPath).isDirectory()) {
+      throw new GrapeApiError(`拒绝换券：workspace（${wsPath}）已存在但不是目录`, {
+        status: 400,
+        hint: 'workspace 必须是目录（或尚不存在的路径）；本次未写入任何文件。',
+      })
+    }
+    const root = safeRealpath(wsPath)
+    const degraded = '此场景没有云端工作区可作越界边界（仅校验 workspace 是目录），请只传本机可信工作区。'
+    return {
+      root,
+      boundary: 'workspace',
+      note: hintPath
+        ? `云端 cwd_hint（${hintPath}）在本机不存在，已用显式 workspace（${root}）作会话根；${degraded}`
+        : `无 cwd_hint，已用显式 workspace（${root}）作会话根；${degraded}`,
+    }
+  }
+  const fb = normalizeWorkspacePath(fallback) || safeRealpath(process.cwd())
+  return { root: safeRealpath(fb), boundary: 'fallback', note: '' }
 }
 
 const isDotSeg = (v) => {
@@ -2496,7 +2538,7 @@ export const TOOLS = [
       '用接管凭据 tko_（或会话级 tk_）调 `/api/repos/{owner}/{repo}/git-credential`（600s、仅本仓），' +
       '在工作区写 `.grape/git-askpass.sh`（POSIX）/ `.cmd`（Windows），权限 0600；脚本内嵌到期 epoch，' +
       '过期后非零退出并在 stderr 提示「重新换券」，**不存在**静默回退本机 git / CLI 凭据的分支。' +
-      '⚠️ 先校验：owner/repo 必须与接管会话绑定的仓库一致（非本仓拒绝），workspace 必须在会话工作区内（越界拒绝且不落盘）。' +
+      '⚠️ 先校验：owner/repo 必须与接管会话绑定的仓库一致（非本仓拒绝）；workspace 越界边界取决于会话 `cwd_hint` 是否在本机存在——本机存在时 workspace 必须在其中（越界拒绝且不落盘），本机不存在（本地接管）时显式 workspace 即会话根、无额外越界边界，返回体 `session_root_note` 会明确披露该降级；此场景请只传本机可信工作区。' +
       '⚠️ 提交防泄漏：.grape 目录或 askpass 目标文件为 symlink 时拒绝写入（不越界写）；git 仓库内写盘前把 `/.grape/` 写入 `.git/info/exclude` 并 `git check-ignore --no-index` 复核，无法确认即拒绝（600s 券不得进远端历史）。' +
       '⚠️ 凭据短时（600s）：push 前重新换券、不缓存；返回只含掩码口令，不回显明文。' +
       'cleanup=true 只删除本工具写出的 askpass 文件（幂等），不换券。',
@@ -2506,7 +2548,7 @@ export const TOOLS = [
         session_id: str('接管会话 id（用于 owner/repo 与工作区绑定校验）'),
         owner: str('owner（必须与会话仓库一致）'),
         repo: str('repo（必须与会话仓库一致）'),
-        workspace: str('本地工作区路径（必须是会话工作区或其子目录）'),
+        workspace: str('本地工作区路径（本机已存在目录）。会话 cwd_hint 在本机存在时必须是其子目录；本机不存在（本地接管）时即会话根，请只传本机可信工作区。'),
         cleanup: bool('true=只清理 askpass 文件，不换券'),
       },
       required: ['session_id', 'owner', 'repo', 'workspace'],
@@ -2547,19 +2589,15 @@ export const TOOLS = [
           hint: '只允许为本仓换券；不一致时未写入任何文件（不做跨仓降级）。',
         })
       }
-      // Issue #37：会话根（本机视角）与 workspace 解析同优先级——显式 workspace 优先，cwd_hint 仅兜底。
-      // 本机确实存在该 cwd_hint 目录时仍用它作越界边界（云端 worker 场景不放松）；云端 hint 在本机不存在（本地接管）
-      // 时显式 workspace 即本机会话根，否则本地接管永远无法换券。
-      const hintRaw = sessionWorkspaceOf(session)
-      const hintIsLocal = Boolean(hintRaw) && existsSync(hintRaw)
-      const rootRaw = hintIsLocal && !pathInsideString(hintRaw, ws)
-        ? hintRaw                                                        // 本机存在的 hint → 沿用 insideRoot 越界拒绝
-        : (ws || String(deps.workspaceRoot ?? '').trim() || process.cwd()) // 云端 hint（本机不存在）→ 显式 workspace 作会话根
-      const root = safeRealpath(rootRaw)
-      const rootNote = hintRaw && !hintIsLocal
-        ? `云端 cwd_hint（${hintRaw}）在本机不存在，已用显式 workspace（${root}）作会话根；越界拒绝仍生效。`
-        : ''
-      if (!insideRoot(root, ws)) {
+      // Issue #37：会话根与边界由单一解析器给出（见 resolveCredentialSessionRoot）。
+      // 注意：显式 workspace 仍是本地接管的会话根（Spec 优先级），但当 cwd_hint 在本机存在时
+      // 它是可信越界边界——此场景显式 workspace 必须落在其内，不能反压边界（否则越界校验恒真）。
+      const { root, boundary, note: rootNote } = resolveCredentialSessionRoot({
+        workspace: ws,
+        hint: sessionWorkspaceOf(session),
+        fallback: String(deps.workspaceRoot ?? '').trim() || process.cwd(),
+      })
+      if (boundary === 'hint' && !insideRoot(root, ws)) {
         throw new GrapeApiError(`拒绝换券：workspace（${ws}）不在接管会话工作区（${root}）内`, {
           status: 400,
           hint: '凭据只允许落在会话工作区（含子目录）；越界路径未写入任何文件。',
@@ -2642,6 +2680,7 @@ export const TOOLS = [
         mode: '0600',
         workspace: ws,
         session_root: root,
+        session_boundary: boundary,
         session_root_note: rootNote,
         git_ignore: ignore,
         clone_url: String(cred?.clone_url ?? ''),

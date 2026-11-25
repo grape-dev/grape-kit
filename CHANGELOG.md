@@ -9,11 +9,11 @@
 ### Added
 
 - 本地接管 workspace 覆盖（#37）：`grape_takeover_start` 新增可选 `workspace`（本机绝对路径）。统一解析优先级 `args.workspace` > `bundle.workspace.cwd_hint` > `process.cwd()`（`resolveLocalWorkspace`，纯优先级、不探测存在性），技能物化目录、接管脚本 `{{CWD}}`、`GRAPE_AUTH_FILE` 均以解析出的本地路径为准，返回体带 `workspace_effective`；与云端 `cwd_hint` 不一致时渲染显式披露「云端工作区路径在本机不存在（<hint>），已改用 <本地路径>」，不静默替换。本地接管不再被云端路径锁死，且不依赖平台 #3620。
-- `GRAPE_AUTH_FILE` 本地化（#37）：`{{CWD}}` 占位符以本地 workspace 填充；位于 `cwd_hint` 根内的云端绝对路径按前缀替换为本地 workspace；平台默认 token 文件（`.grape-takeover-token`）落不到本机时回落 `<workspace>/.grape-takeover-token` 并提示写入后再 source；其余无法安全重写的自定义路径保持原值并提示核对文件存在（不误改用户路径）。
+- `GRAPE_AUTH_FILE` 本地化（#37）：`{{CWD}}` 占位符以本地 workspace 填充；位于 `cwd_hint` 根内的云端路径（含平台默认 `<hint>/.grape-takeover-token`）按前缀替换为本地 workspace；自定义绝对路径与相对路径一律不改写（相对路径不丢子目录），仅对绝对路径提示「本机可能不可读、source 前先确认」。
 
 ### Fixed
 
-- `grape_git_credential` 换券会话根（#37）：显式 `workspace` 优先于 `cwd_hint`。云端 `cwd_hint` 在本机不存在时以显式 workspace 作会话根（返回 `session_root` + 披露文案），本地接管可正常换券落盘；`cwd_hint` 在本机确实存在时仍以它作越界边界，工作区外路径继续拒绝且不落盘（`insideRoot` 未放松）。
+- `grape_git_credential` 换券会话根（#37）：改为单一解析器 `resolveCredentialSessionRoot`——`cwd_hint` 在本机存在时作可信越界边界（workspace 必须在其内，工作区外继续拒绝且不落盘），本机不存在（本地接管）时显式 workspace 即会话根并**明确降级披露**「无云端工作区可作越界边界、仅校验目录存在」，返回 `session_root` / `session_boundary` / `session_root_note`；workspace 必须是本机已存在的目录，工具描述与真实边界一致。
 
 ## 0.5.1-next.0 (2026-11-25)
 
