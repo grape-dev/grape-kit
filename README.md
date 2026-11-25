@@ -92,7 +92,7 @@ npx -y @grape-dev/grape-kit doctor     # shows the full runtime > env > file cha
 
 `auth init` writes to `GRAPE_AUTH_FILE` when it is set, otherwise `GRAPE_HOME/config.json` — the write target is always identical to the resolution target, and the file is read back and verified after writing. In `doctor` output the effective tier shows `[ok]`; missed/overridden tiers show `[--]` (informational, no action needed).
 
-A plain `uninstall` removes only the host entry and reports any leftover credentials. Add `--clean-global` to delete `~/.grape` (file channel + worker artifacts), the user-level `GRAPE_API_TOKEN`/`GRAPE_BASE_URL` (POSIX: the exact `export` lines are removed from rc files and the backup keeps only non-credential lines — a backup holding credentials would just be the token under a different name; Windows uses `reg delete`), and only those `_npx` cache entries that contain `node_modules/@grape-dev`. `--clean-global` works with or without `--target` (with no host traces it still runs the global cleanup), and `--dry-run` previews what would be deleted without touching the disk:
+A plain `uninstall` removes only the host entry and reports any leftover credentials. Add `--clean-global` to delete `~/.grape` (file channel + worker artifacts), the user-level `GRAPE_API_TOKEN`/`GRAPE_BASE_URL` (POSIX: the exact `export` lines are removed from rc files and the backup keeps only non-credential lines — a backup holding credentials would just be the token under a different name; Windows: two channels, `reg delete` for the user-level variables *and* the same rc cleanup applied to the `.bashrc` / `.bash_profile` / `config.fish` that Git Bash reads — POSIX rc files are not the only place a Windows box can keep the token), and only those `_npx` cache entries that contain `node_modules/@grape-dev`. `--clean-global` works with or without `--target` (with no host traces it still runs the global cleanup), and `--dry-run` previews what would be deleted without touching the disk:
 
 ```bash
 npx -y @grape-dev/grape-kit uninstall --clean-global --dry-run   # preview first
@@ -303,7 +303,7 @@ Full release notes: [CHANGELOG.md](CHANGELOG.md) — 23 条发布记录（含 0.
 ```bash
 npm install
 
-npm test        # 474 unit tests (fake-grape stub, no live server)
+npm test        # 483 unit tests (fake-grape stub, no live server)
 
 npm run smoke   # real stdio JSON-RPC round-trip: initialize → tools/list → tools/call
 ```

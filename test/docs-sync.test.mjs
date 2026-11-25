@@ -251,3 +251,19 @@ test('S2 贡献流程模板工具面口径与 TOOL_NAMES 同源（PR 模板 / Bu
     assert.ok(contributing.includes(f), `CONTRIBUTING §6 同步清单应列出 ${f}（否则下次照样漏改）`)
   }
 })
+
+/* ── Issue #38（PR #36 QA 硬违规 3）：用户可见行为变化必须双语同步 ──
+ * win32 的 `--clean-global` 从「只有 reg delete」变成「注册表 + Git Bash rc 两条通道」，
+ * 只写一条通道会让 Windows 用户以为 rc 里的凭据行已被清理（实际留盘）。 */
+test('README 双语 --clean-global 说明：Windows 为注册表 + Git Bash rc 两条通道（Issue #38）', () => {
+  const en = read('README.md')
+  const zh = read('README.zh.md')
+  const enLine = en.split('\n').find((l) => l.includes('`--clean-global`') && l.includes('reg delete')) || ''
+  const zhLine = zh.split('\n').find((l) => l.includes('`--clean-global`') && l.includes('reg delete')) || ''
+  assert.ok(enLine, 'README.md 应在 --clean-global 段说明 Windows 的 reg delete 通道')
+  assert.ok(zhLine, 'README.zh.md 应在 --clean-global 段说明 Windows 的 reg delete 通道')
+  assert.match(enLine, /Git Bash/i, '英文版须写明 Windows 同时清理 Git Bash 读取的 rc 文件')
+  assert.match(enLine, /\.bashrc|rc files/i, '英文版须点名 rc 文件形态')
+  assert.match(zhLine, /Git Bash/, '中文版须写明 Windows 同时清理 Git Bash 读取的 rc 文件')
+  assert.match(zhLine, /\.bashrc|rc 文件/, '中文版须点名 rc 文件形态')
+})
