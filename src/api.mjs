@@ -247,6 +247,8 @@ export const api = {
 
   // 场景
   scenesMarket: (q) => apiRequest('GET', '/api/scenes/market', { query: q ? { q } : {} }),
+  /** 场景详情：节点链的权威来源（每节点带 next），客户端兜底派发据此推导下一节点 */
+  scenesDetail: (sceneId) => apiRequest('GET', `/api/scenes/${encodeURIComponent(String(sceneId ?? '').trim())}`),
   applyScene: (owner, repo, sceneId) => apiRequest('POST', `/api/scenes/apply/${owner}/${repo}`, { body: { scene_id: sceneId } }),
 
   // 仓库 / 搜索 / 仪表盘
