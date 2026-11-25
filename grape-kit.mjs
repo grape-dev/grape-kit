@@ -238,7 +238,7 @@ function resolveTarget() {
   if (t !== 'all' && !SUPPORTED_TARGETS.includes(t)) {
     console.error(`不支持的 --target: ${t}`)
     console.error(`受支持宿主: ${SUPPORTED_TARGETS.join(' / ')}`)
-    console.error('（hermes 无 MCP client，复制 skills/grape-remote 手动装配；dsh 走 MCP 最小路径，grape-dsh 为完整形态插件，二者并存）')
+    console.error('（hermes 已支持 MCP client（config.yaml 的 mcp_servers 段）并附带 grape-remote skill 副本；dsh 走 MCP 最小路径，grape-dsh 为完整形态插件，二者并存）')
     process.exit(1)
   }
   return t
@@ -532,7 +532,7 @@ function doctorOfficeace(probe) {
 /**
  * dsh 装配位置：`$DSH_HOME || ~/.dsh`，MCP 客户端以 Cordis patch 行挂在 web profile。
  * `GRAPE_DSH_PATCH` 覆盖 patch 文件路径（实机 profile 差异 / 用例隔离，对齐 GRAPE_CODEARTS_CONFIG）。
- * 口径：dsh 走 MCP 最小路径（41 工具零改动复用），原生 Cordis 插件形态由 grape-dsh 承载，二者并存。
+* 口径：dsh 走 MCP 最小路径（50 工具零改动复用），原生 Cordis 插件形态由 grape-dsh 承载，二者并存。
  */
 function dshPaths() {
   const dshHome = String(process.env.DSH_HOME || '').trim() || join(homedir(), '.dsh')
@@ -768,6 +768,25 @@ function detectDsh() {
   return { ok: text.slice(block.start, block.end).includes('- id: grape-kit'), path: p.patch }
 }
 
+/** dsh 卸载预览（--dry-run）：只列托管块 / skill / receipt，不碰 patch 与依赖 */
+function planUninstallDsh() {
+  const p = dshPaths()
+  const lines = []
+  if (!existsSync(p.patch)) {
+    lines.push(`未找到 ${p.patch}，无需卸载`)
+  } else {
+    const block = findDshBlock(readFileSync(p.patch, 'utf8'))
+    if (!block) lines.push('未发现 dsh 托管块，跳过')
+    else if (!block.complete) lines.push(`配置损坏（${p.patch}）：托管块不完整，请先修复`)
+    else lines.push(`将移除 dsh 托管块（${p.patch}）`)
+  }
+  const skillDir = join(p.skillsDir, 'grape-remote')
+  if (existsSync(skillDir)) lines.push(`将删除 skill 目录 ${skillDir}`)
+  const receipt = join(p.skillsDir, RECEIPT)
+  if (existsSync(receipt)) lines.push(`将删除 receipt ${receipt}`)
+  return lines
+}
+
 function doctorDsh(probe) {
   const p = dshPaths()
   const checks = baseChecks()
@@ -779,6 +798,652 @@ function doctorDsh(probe) {
   checks.push([`${DSH_CLIENT_PKG} 依赖`, dshClientInstalled(dirname(p.patch))
     ? 'ok（dsh web profile 已声明/已安装）'
     : `未安装（npx @deepseek-ai/dsh plugin --profile web add ${DSH_CLIENT_PKG}）`])
+  if (probe) checks.push(['契约连通性', connectivityCheck(getBaseUrl())])
+  printChecks(checks)
+}
+
+/* ---------- 通用 JSON 容器宿主（openclaw / atomcode / trae） ---------- */
+
+/** JSON 宿主配置的解析判据：严格 JSON 优先，含注释/尾随逗号（jsonc）时按 parseLoose 宽松读取
+ *  （Spec：JSON 组与既有宿主一致，容忍注释/尾随逗号）。install / 卸载判定 / detect 共用，避免
+ *  「install 能读、uninstall 报损坏」的口径漂移。 */
+function parseJsonHost(text) {
+  try { return { ok: true, cfg: JSON.parse(text), lenient: false } } catch (e) {
+    try { return { ok: true, cfg: parseLoose(text), lenient: true } } catch { return { ok: false, error: e.message } }
+  }
+}
+
+/** 纯 JSON 宿主读写共用：解析失败显式报错（不静默重置，保住用户其它连接器） */
+function readJsonHostForWrite(file) {
+  if (!existsSync(file)) return { originalText: null, cfg: {} }
+  const originalText = readFileSync(file, 'utf8')
+  const parsed = parseJsonHost(originalText)
+  if (!parsed.ok) {
+    console.error(`${file} 解析失败（${parsed.error}），请先修复或移走该文件后重试`)
+    process.exit(1)
+  }
+  if (parsed.lenient) console.warn(`${file} 含注释/尾随逗号：已按宽松 JSON 读取，写入会规范化该文件（写前备份原文）`)
+  return { originalText, cfg: parsed.cfg }
+}
+
+/** JSON 容器条目卸载判定（dry-run 与真实卸载同源）。
+ *  摘除后若文件只剩空容器（`{"mcpServers": {}}` / `{"mcp": {"servers": {}}}`）→ removeFile：
+ *  与 codex「仅剩托管条目则删文件」同口径（QA#PR22 P2：各宿主卸载残留空容器）。 */
+function inspectJsonContainerUninstall(file, getContainer) {
+  const steps = { path: file, exists: existsSync(file), status: STEP.ABSENT, beforeText: null, nextText: null }
+  if (!steps.exists) return steps
+  const text = readFileSync(file, 'utf8')
+  const parsed = parseJsonHost(text)
+  if (!parsed.ok) { steps.status = STEP.DAMAGED; return steps }
+  const container = getContainer(parsed.cfg, false)
+  if (container && container['grape-kit']) {
+    delete container['grape-kit']
+    steps.beforeText = text
+    steps.nextText = JSON.stringify(parsed.cfg, null, 2) + '\n'
+    steps.status = isEmptyJsonShell(parsed.cfg) ? STEP.REMOVE_FILE : STEP.REMOVE
+  }
+  return steps
+}
+
+/** 只剩空壳（顶层键全是空对象，如 {"mcp":{"servers":{}}}）：文件已无用户内容，删除优于留空容器 */
+function isEmptyJsonShell(value) {
+  if (value === null || typeof value !== 'object') return false
+  if (Array.isArray(value)) return value.length === 0
+  const keys = Object.keys(value)
+  if (keys.length === 0) return true
+  return keys.every((k) => isEmptyJsonShell(value[k]))
+}
+
+/** JSON 容器条目检出：解析失败带 error，doctor 可区分「未装配」与「配置损坏」 */
+function detectJsonContainer(file, getContainer) {
+  if (!existsSync(file)) return { ok: false, path: file }
+  let text
+  try { text = readFileSync(file, 'utf8') } catch (e) { return { ok: false, path: file, error: e.message } }
+  const parsed = parseJsonHost(text)
+  if (!parsed.ok) return { ok: false, path: file, error: parsed.error }
+  const container = getContainer(parsed.cfg, false)
+  return { ok: !!(container && container['grape-kit']), path: file }
+}
+
+/* ---------- codex（OpenAI Codex CLI）：~/.codex/config.toml TOML 表 ---------- */
+
+const CODEX_BLOCK_START = '# >>> grape-kit managed block (codex mcp_servers) >>>'
+const CODEX_BLOCK_END = '# <<< grape-kit managed block (codex mcp_servers) <<<'
+
+/** GRAPE_CODEX_CONFIG 覆盖配置文件路径（实机差异 / 用例隔离） */
+function codexPaths() {
+  const override = String(process.env.GRAPE_CODEX_CONFIG || '').trim()
+  return { config: override || join(homedir(), '.codex', 'config.toml') }
+}
+
+/** 托管块：command/args + env 子表；空 env 子表合法且不写任何凭据（token 走环境变量） */
+function codexBlock() {
+  return [
+    CODEX_BLOCK_START,
+    '[mcp_servers.grape-kit]',
+    'command = "npx"',
+    `args = ${JSON.stringify(NPX_ARGS)}`,
+    '',
+    '[mcp_servers.grape-kit.env]',
+    CODEX_BLOCK_END,
+  ].join('\n')
+}
+
+/** 摘除托管块（含标记行）；块不完整时返回 incomplete，拒绝写入避免删除用户内容 */
+function stripCodexManaged(text) {
+  const lines = text.split('\n')
+  const start = lines.findIndex((l) => l.trim() === CODEX_BLOCK_START)
+  if (start < 0) return { text, removed: false }
+  const end = lines.findIndex((l, i) => i >= start && l.trim() === CODEX_BLOCK_END)
+  if (end < 0) return { text, removed: false, incomplete: true }
+  const before = lines.slice(0, start)
+  const after = lines.slice(end + 1)
+  while (before.length && before[before.length - 1].trim() === '') before.pop()
+  while (after.length && after[0].trim() === '') after.shift()
+  return { text: [...before, ...after].join('\n'), removed: true }
+}
+
+/** 摘除用户手工写入的 [mcp_servers.grape-kit] 及其 .env 子表（只认这两张表，不碰其它表）。
+ *  表头行按「可选尾注释」识别；注释行（`# [mcp_servers.grape-kit]`）不是表头，原样保留。 */
+const CODEX_TABLE_RE = /^\s*\[([^\]]+)\]\s*(?:#.*)?$/
+const CODEX_TABLES = new Set(['mcp_servers.grape-kit', 'mcp_servers.grape-kit.env'])
+
+/** 行级剥离注释后按表头精确匹配（QA#PR22 P2：裸子串判定会被注释行骗成「已安装」） */
+function codexHasTable(text) {
+  return text.split('\n').some((line) => {
+    const m = line.match(CODEX_TABLE_RE)
+    return !!m && CODEX_TABLES.has(m[1].trim())
+  })
+}
+
+function stripCodexExistingTables(text) {
+  const lines = text.split('\n')
+  const out = []
+  let skipping = false
+  for (const line of lines) {
+    const m = line.match(CODEX_TABLE_RE)
+    if (m) skipping = CODEX_TABLES.has(m[1].trim())
+    if (!skipping) out.push(line)
+  }
+  return out.join('\n')
+}
+
+/** 追加托管块：与原文之间保留恰好一个空行，重复安装逐字节幂等 */
+function appendCodexBlock(text) {
+  if (text.trim() === '') return `${codexBlock()}\n`
+  const base = text.endsWith('\n') ? text : `${text}\n`
+  return `${base}\n${codexBlock()}\n`
+}
+
+function installCodex() {
+  const { config } = codexPaths()
+  const originalText = existsSync(config) ? readFileSync(config, 'utf8') : null
+  let base = originalText === null ? '' : originalText
+  const managed = stripCodexManaged(base)
+  if (managed.incomplete) {
+    console.error(`检测到不完整托管块（有起始标记、缺结束标记），为避免删除其后的用户配置，已拒绝安装：${config}`)
+    process.exit(1)
+  }
+  base = stripCodexExistingTables(managed.text)
+  const next = appendCodexBlock(base)
+  mkdirSync(dirname(config), { recursive: true })
+  const backup = backupOf(config, originalText)
+  writeFileSync(config, next)
+  console.log(`已写入 ${config}（[mcp_servers.grape-kit]，${backup ? `备份: ${backup}` : '新建'}）`)
+  console.log('codex：重启会话后加载 grape-kit 的 MCP 工具')
+  console.log('凭据走环境变量（GRAPE_BASE_URL / GRAPE_API_TOKEN），不要写进 config.toml')
+}
+
+/** 卸载决策：预览与执行同源（含「仅剩托管条目则删除整个文件」）。
+ *  action: missing | damaged | absent | remove | removeFile */
+function codexUninstallDecision() {
+  const { config } = codexPaths()
+  if (!existsSync(config)) return { path: config, action: 'missing' }
+  const text = readFileSync(config, 'utf8')
+  const managed = stripCodexManaged(text)
+  if (managed.incomplete) return { path: config, action: 'damaged', text }
+  const next = stripCodexExistingTables(managed.text)
+  if (!codexHasTable(text)) return { path: config, action: 'absent', text, next }
+  if (next.trim() === '') return { path: config, action: 'removeFile', text, next }
+  return { path: config, action: 'remove', text, next }
+}
+
+function uninstallCodex() {
+  const d = codexUninstallDecision()
+  const { path: config } = d
+  if (d.action === 'missing') { console.log(`未找到 ${config}，无需卸载`); return }
+  if (d.action === 'damaged') {
+    console.error(`检测到不完整托管块（有起始标记、缺结束标记），已拒绝卸载：${config}`)
+    process.exit(1)
+  }
+  if (d.action === 'absent') { console.log('未发现 mcp_servers.grape-kit 条目，跳过'); return }
+  if (d.action === 'removeFile') {
+    backupOf(config, d.text)
+    rmSync(config, { force: true })
+    console.log(`已移除 grape-kit 条目，并删除仅剩该条目的文件：${config}`)
+    return
+  }
+  const backup = backupOf(config, d.text)
+  writeFileSync(config, d.next)
+  console.log(`已移除 mcp_servers.grape-kit 条目（备份: ${backup}）`)
+}
+
+const CODEX_COPY = {
+  missing: (s) => `未找到 ${s.path}，无需卸载`,
+  absent: () => '未发现 mcp_servers.grape-kit 条目，跳过',
+  removed: (s, backup) => `已移除 mcp_servers.grape-kit 条目（备份: ${backup}）`,
+  preview: (s) => `将移除 mcp_servers.grape-kit 条目（${s.path}）`,
+}
+function planUninstallCodex() {
+  const d = codexUninstallDecision()
+  if (d.action === 'missing') return [CODEX_COPY.missing(d)]
+  if (d.action === 'damaged') return [`配置损坏（${d.path}）：跳过条目移除，请先修复`]
+  if (d.action === 'absent') return [CODEX_COPY.absent(d)]
+  const lines = [CODEX_COPY.preview(d)]
+  if (d.action === 'removeFile') lines.push(`将删除仅剩该条目的文件 ${d.path}（写前备份）`)
+  return lines
+}
+
+function detectCodex() {
+  const { config } = codexPaths()
+  if (!existsSync(config)) return { ok: false, path: config }
+  try {
+    return { ok: codexHasTable(readFileSync(config, 'utf8')), path: config }
+  } catch (e) {
+    return { ok: false, path: config, error: e.message }
+  }
+}
+
+function doctorCodex(probe) {
+  const checks = baseChecks()
+  const found = detectCodex()
+  checks.push(entryCheck('codex mcp_servers.grape-kit', found, 'npx -y @grape-dev/grape-kit install --target codex'))
+  if (probe) checks.push(['契约连通性', connectivityCheck(getBaseUrl())])
+  printChecks(checks)
+}
+
+/* ---------- openclaw：~/.openclaw/openclaw.json（mcp.servers，兼容 mcpServers） ---------- */
+
+function openclawPaths() {
+  const override = String(process.env.GRAPE_OPENCLAW_CONFIG || '').trim()
+  return { config: override || join(homedir(), '.openclaw', 'openclaw.json') }
+}
+
+function openclawContainer(cfg, create) {
+  const servers = cfg.mcp && typeof cfg.mcp === 'object' && cfg.mcp.servers && typeof cfg.mcp.servers === 'object' ? cfg.mcp.servers : null
+  const legacy = cfg.mcpServers && typeof cfg.mcpServers === 'object' ? cfg.mcpServers : null
+  if (servers && servers['grape-kit']) return servers
+  if (legacy && legacy['grape-kit']) return legacy
+  if (servers) return servers
+  if (legacy) return legacy
+  if (!create) return null
+  if (cfg.mcp && typeof cfg.mcp === 'object') {
+    if (!cfg.mcp.servers || typeof cfg.mcp.servers !== 'object') cfg.mcp.servers = {}
+    return cfg.mcp.servers
+  }
+  if (!cfg.mcp || typeof cfg.mcp !== 'object') cfg.mcp = {}
+  if (!cfg.mcp.servers || typeof cfg.mcp.servers !== 'object') cfg.mcp.servers = {}
+  return cfg.mcp.servers
+}
+
+function installOpenclaw() {
+  const { config } = openclawPaths()
+  const { originalText, cfg } = readJsonHostForWrite(config)
+  mkdirSync(dirname(config), { recursive: true })
+  const container = openclawContainer(cfg, true)
+  container['grape-kit'] = { command: 'npx', args: [...NPX_ARGS] }
+  const backup = writeValidated(config, JSON.stringify(cfg, null, 2) + '\n', originalText)
+  console.log(`已写入 ${config}（mcp.servers.grape-kit，${backup ? `备份: ${backup}` : '新建'}）`)
+  console.log('openclaw：重启会话后加载 grape-kit 的 MCP 工具')
+}
+
+const OPENCLAW_COPY = {
+  missing: (s) => `未找到 ${s.path}，无需卸载`,
+  absent: () => '未发现 mcp.servers.grape-kit 条目，跳过',
+  removed: (s, backup) => `已移除 mcp.servers.grape-kit 条目（备份: ${backup}）`,
+  preview: (s) => `将移除 mcp.servers.grape-kit 条目（${s.path}）`,
+}
+function inspectUninstallOpenclaw() { return inspectJsonContainerUninstall(openclawPaths().config, openclawContainer) }
+function uninstallOpenclaw() { applyUninstallSteps(inspectUninstallOpenclaw(), OPENCLAW_COPY) }
+function planUninstallOpenclaw() { return planUninstallSteps(inspectUninstallOpenclaw(), OPENCLAW_COPY) }
+function detectOpenclaw() { return detectJsonContainer(openclawPaths().config, openclawContainer) }
+
+function doctorOpenclaw(probe) {
+  const checks = baseChecks()
+  const found = detectOpenclaw()
+  checks.push(entryCheck('openclaw mcp.servers.grape-kit', found, 'npx -y @grape-dev/grape-kit install --target openclaw'))
+  if (probe) checks.push(['契约连通性', connectivityCheck(getBaseUrl())])
+  printChecks(checks)
+}
+
+/* ---------- hermes：~/.hermes/config.yaml（mcp_servers 段 + skills 副本） ---------- */
+
+const HERMES_BLOCK_START = '# >>> grape-kit managed block (hermes mcp_servers) >>>'
+const HERMES_BLOCK_END = '# <<< grape-kit managed block (hermes mcp_servers) <<<'
+
+function hermesPaths() {
+  const home = String(process.env.HERMES_HOME || '').trim() || join(homedir(), '.hermes')
+  const override = String(process.env.GRAPE_HERMES_CONFIG || '').trim()
+  return { home, config: override || join(home, 'config.yaml'), skillsDir: join(home, 'skills') }
+}
+
+/** 托管条目：缩进对齐 mcp_servers 下既有条目（默认两空格）；args 用 YAML 单引号标量 */
+function hermesBlockLines(indent = '  ') {
+  return [
+    `${indent}${HERMES_BLOCK_START}`,
+    `${indent}grape-kit:`,
+    `${indent}  command: npx`,
+    `${indent}  args:`,
+    ...NPX_ARGS.map((a) => `${indent}    - ${yamlScalar(a)}`),
+    `${indent}${HERMES_BLOCK_END}`,
+  ]
+}
+
+/** 顶层 mcp_servers 键的两种安全形态：块映射头 / 空 flow map（可无损转为块格式） */
+const HERMES_HEADER_RE = /^mcp_servers:\s*(?:#.*)?$/
+const HERMES_EMPTY_FLOW_RE = /^mcp_servers:\s*\{\s*\}\s*(?:#.*)?$/
+/** 顶层 mcp_servers 键（含 `mcp_servers :` 与引号键）：用于「顶层键唯一」兜底校验 */
+const HERMES_TOP_KEY_RE = /^(?:mcp_servers|["']mcp_servers["'])\s*:/
+
+/** 摘除托管块（含标记行，行首缩进容错） */
+function stripHermesManaged(lines) {
+  const start = lines.findIndex((l) => l.trim() === HERMES_BLOCK_START)
+  if (start < 0) return { lines, removed: false }
+  const end = lines.findIndex((l, i) => i >= start && l.trim() === HERMES_BLOCK_END)
+  if (end < 0) return { lines, removed: false, incomplete: true }
+  return { lines: [...lines.slice(0, start), ...lines.slice(end + 1)], removed: true }
+}
+
+/** mcp_servers 头下允许追加的块映射子键（`  other:` / `  "other server":`），其余形态一律视为不可安全追加 */
+const HERMES_MAPPING_CHILD_RE = /^\s+(?:"[^"]*"|'[^']*'|[^\s#:'"-][^:]*)\s*:(?:\s|$)/
+
+/** 裸 `mcp_servers:` 头下的首个内容行形态：block（块映射子键）/ sequence（`- a`）/ scalar（`  foo`）/ empty。
+ *  只有 block / empty 能无损追加托管条目；sequence / scalar 追加后会变成 mapping+sequence 混层，
+ *  yaml.safe_load 直接抛 ParserError（QA#PR22 P1）。 */
+function hermesSectionShape(lines, header) {
+  for (let i = header + 1; i < lines.length; i++) {
+    const l = lines[i]
+    if (l.trim() === '' || l.trimStart().startsWith('#')) continue
+    if (!/^\s/.test(l)) return { kind: 'empty' }                       // 下一个顶级键 → 段内无子行
+    if (/^\s+-(?:\s|$)/.test(l) || l.trim() === '-') return { kind: 'sequence', line: i + 1, text: l.trim() }
+    if (HERMES_MAPPING_CHILD_RE.test(l)) return { kind: 'block' }
+    return { kind: 'scalar', line: i + 1, text: l.trim() }
+  }
+  return { kind: 'empty' }
+}
+
+/** 无法安全追加的 mcp_servers 形态：inline 非空映射、多行 flow map（`mcp_servers: {`）、空序列，
+ *  以及裸头 + 序列/标量子行。这些形态下追加托管条目会生成第二个顶级 mcp_servers 键（YAML last-wins
+ *  丢弃用户映射），或把序列/标量段扩成 mapping+sequence 混层（YAML 解析报错）。 */
+function hermesMapConflict(lines) {
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i]
+    if (!HERMES_TOP_KEY_RE.test(l)) continue
+    if (HERMES_HEADER_RE.test(l)) {
+      const shape = hermesSectionShape(lines, i)
+      if (shape.kind === 'sequence' || shape.kind === 'scalar') return { line: shape.line, text: shape.text, shape: shape.kind }
+      continue
+    }
+    if (HERMES_EMPTY_FLOW_RE.test(l)) continue
+    return { line: i + 1, text: l.trim() }
+  }
+  return null
+}
+
+/** 顶级 mcp_servers 键个数：写入前兜底校验，任何路径都不得产出两个同级键 */
+function hermesTopLevelKeyCount(text) {
+  return text.split('\n').filter((l) => HERMES_TOP_KEY_RE.test(l)).length
+}
+
+/** mcp_servers 段内既有子条目的缩进（默认两空格），用于托管条目对齐与同层判定 */
+function hermesSectionIndent(lines, header) {
+  for (let i = header + 1; i < lines.length; i++) {
+    const l = lines[i]
+    if (l.trim() === '' || l.trimStart().startsWith('#')) continue
+    const m = l.match(/^(\s+)\S/)
+    return m ? m[1] : '  '
+  }
+  return '  '
+}
+
+/** 摘除用户手工写入的 mcp_servers.grape-kit（只删该键及其缩进子行）。
+ *  必须与段内子条目**同缩进**：`mcp_servers.other.grape-kit` 这类更深层的同名键属于他人配置，不得命中。 */
+function stripHermesExistingEntry(lines) {
+  const header = lines.findIndex((l) => HERMES_HEADER_RE.test(l))
+  if (header < 0) return lines
+  const sectionIndent = hermesSectionIndent(lines, header)
+  let start = -1
+  for (let i = header + 1; i < lines.length; i++) {
+    const l = lines[i]
+    if (l.trim() !== '' && !l.trimStart().startsWith('#') && !/^\s/.test(l)) break
+    const m = l.match(/^(\s+)grape-kit:\s*(?:#.*)?$/)
+    if (m && m[1] === sectionIndent) { start = i; break }
+  }
+  if (start < 0) return lines
+  const indent = sectionIndent.length
+  let end = start + 1
+  while (end < lines.length) {
+    const l = lines[end]
+    if (l.trim() === '') { end++; continue }
+    // 同层（含列 0）一律结束区间：同层注释属于用户内容（README 承诺 comments preserved），
+    // 只有缩进更深的注释才是被替换条目的内部注释。
+    if (l.match(/^ */)[0].length <= indent) break
+    end++
+  }
+  return [...lines.slice(0, start), ...lines.slice(end)]
+}
+
+/** 摘除条目后 mcp_servers 段已无子键 → 连带删段头，避免留下解析为 null 的空容器。
+ *  段内还有子键（或缩进注释）则原样保留。 */
+function hermesDropEmptySection(lines) {
+  const header = lines.findIndex((l) => HERMES_HEADER_RE.test(l))
+  if (header < 0) return { lines, dropped: false }
+  for (let i = header + 1; i < lines.length; i++) {
+    const l = lines[i]
+    if (l.trim() === '' || l.trimStart().startsWith('#')) continue
+    if (/^\s/.test(l)) return { lines, dropped: false }   // 仍缩进 → 段内还有子行
+    break                                                  // 下一个顶级键 → 段已空
+  }
+  return { lines: lines.filter((_, i) => i !== header), dropped: true }
+}
+
+/** 段内同层是否已有 grape-kit 条目（其它 server 下的嵌套同名键不算） */
+function hermesHasEntry(text) {
+  const lines = text.split('\n')
+  if (lines.some((l) => l.trim() === HERMES_BLOCK_START)) return true
+  const header = lines.findIndex((l) => HERMES_HEADER_RE.test(l))
+  if (header < 0) return false
+  const sectionIndent = hermesSectionIndent(lines, header)
+  for (let i = header + 1; i < lines.length; i++) {
+    const l = lines[i]
+    if (l.trim() !== '' && !l.trimStart().startsWith('#') && !/^\s/.test(l)) break
+    const m = l.match(/^(\s+)grape-kit:\s*(?:#.*)?$/)
+    if (m && m[1] === sectionIndent) return true
+  }
+  return false
+}
+
+function installHermes() {
+  const p = hermesPaths()
+  const originalText = existsSync(p.config) ? readFileSync(p.config, 'utf8') : null
+  if (originalText !== null && originalText.includes(HERMES_BLOCK_START) && !originalText.includes(HERMES_BLOCK_END)) {
+    console.error(`检测到不完整托管块（有起始标记、缺结束标记），已拒绝安装：${p.config}`)
+    process.exit(1)
+  }
+  let lines = originalText === null ? [] : originalText.split('\n')
+  const conflict = hermesMapConflict(lines)
+  if (conflict) {
+    const what = conflict.shape === 'sequence' ? '序列' : conflict.shape === 'scalar' ? '标量' : '非块映射取值'
+    console.error(`检测到无法安全追加的 mcp_servers 取值（第 ${conflict.line} 行：${conflict.text}）——inline 非空映射 / 多行 flow map / 序列 / 标量下追加托管条目会生成第二个顶级 mcp_servers 键（YAML last-wins 丢弃你原有的映射），或把${what}段扩成 mapping+sequence 混层（YAML 解析报错）；已拒绝安装。请先改为块映射格式后重跑：`)
+    console.error('  mcp_servers:')
+    console.error('    <宿主条目>')
+    console.error(`  文件：${p.config}`)
+    process.exit(1)
+  }
+  lines = stripHermesManaged(lines).lines
+  lines = stripHermesExistingEntry(lines)
+  const header = lines.findIndex((l) => HERMES_HEADER_RE.test(l))
+  const inlineEmpty = lines.findIndex((l) => HERMES_EMPTY_FLOW_RE.test(l))
+  if (inlineEmpty >= 0) lines[inlineEmpty] = 'mcp_servers:'
+  const h = header >= 0 ? header : inlineEmpty
+  if (h >= 0) {
+    lines.splice(h + 1, 0, ...hermesBlockLines(hermesSectionIndent(lines, h)))
+  } else {
+    if (lines.length && lines[lines.length - 1] === '') lines.pop()
+    if (lines.length) lines.push('')
+    lines.push('mcp_servers:', ...hermesBlockLines())
+  }
+  const next = lines.join('\n').replace(/\n*$/, '\n')
+  const keys = hermesTopLevelKeyCount(next)
+  if (keys !== 1) {
+    console.error(`内部校验失败：生成结果包含 ${keys} 个顶级 mcp_servers 键（预期 1 个，重复键会让 YAML 丢弃用户映射）；已拒绝写入 ${p.config}，原文件保持不变`)
+    process.exit(1)
+  }
+  mkdirSync(dirname(p.config), { recursive: true })
+  const backup = backupOf(p.config, originalText)
+  writeFileSync(p.config, next)
+  copySkillInto(p.skillsDir)
+  console.log(`已写入 ${p.config}（mcp_servers.grape-kit，${backup ? `备份: ${backup}` : '新建'}）`)
+  console.log('hermes：重启会话后加载 grape-kit 的 MCP 工具；grape-remote skill 已复制到 skills/')
+}
+
+/** 卸载决策：dry-run 预览与真实卸载同源（QA#PR22 P1：预览报「将移除」而执行 exit 1 的口径漂移）。
+ *  action: missing | damaged | absent | remove */
+function hermesUninstallDecision() {
+  const p = hermesPaths()
+  if (!existsSync(p.config)) return { path: p.config, skillsDir: p.skillsDir, action: 'missing' }
+  const text = readFileSync(p.config, 'utf8')
+  const stripped = stripHermesManaged(text.split('\n'))
+  if (stripped.incomplete) return { path: p.config, skillsDir: p.skillsDir, action: 'damaged', text }
+  const dropped = hermesDropEmptySection(stripHermesExistingEntry(stripped.lines))
+  const next = dropped.lines.join('\n').replace(/\n*$/, '\n')
+  if (!hermesHasEntry(text) || next === text) return { path: p.config, skillsDir: p.skillsDir, action: 'absent', text, next }
+  // 只剩空 mcp_servers 段 → 文件已无用户内容：删文件（写前备份），不残留解析为 null 的空容器
+  if (next.trim() === '') return { path: p.config, skillsDir: p.skillsDir, action: 'removeFile', text, next }
+  return { path: p.config, skillsDir: p.skillsDir, action: 'remove', text, next }
+}
+
+const HERMES_COPY = {
+  missing: (s) => `未找到 ${s.path}，无需卸载`,
+  absent: () => '未发现 mcp_servers.grape-kit 条目，跳过',
+  removed: (s, backup) => `已移除 mcp_servers.grape-kit 条目（备份: ${backup}）`,
+  preview: (s) => `将移除 mcp_servers.grape-kit 条目（${s.path}）`,
+  removedFile: (s, backup) => `已移除 mcp_servers.grape-kit 条目，并删除仅剩空容器的文件 ${s.path}（备份: ${backup}）`,
+  previewFile: (s) => `将删除仅剩空容器的文件 ${s.path}（写前备份）`,
+}
+
+/** 决策 → 共享卸载步骤：plan 与 apply 都从这里取，判定与动作单源 */
+function hermesUninstallSteps(d) {
+  const steps = { path: d.path, exists: d.action !== 'missing', status: STEP.ABSENT, beforeText: null, nextText: null, ...skillUninstallSteps(d.skillsDir) }
+  if (d.action === 'removeFile') {
+    steps.status = STEP.REMOVE_FILE
+    steps.beforeText = d.text
+  }
+  if (d.action === 'remove') {
+    steps.status = STEP.REMOVE
+    steps.beforeText = d.text
+    steps.nextText = d.next
+    // YAML 不走 writeValidated 的 JSON 结构校验：写前备份 + 原样落盘
+    steps.writeNext = () => {
+      const backup = backupOf(d.path, d.text)
+      writeFileSync(d.path, d.next)
+      return backup
+    }
+  }
+  return steps
+}
+
+/** 不完整托管块的同一句结论：预览与执行共用，避免「预览说移除、执行说拒绝」 */
+const hermesDamagedLine = (path) => `检测到不完整托管块（有起始标记、缺结束标记），已拒绝卸载：${path}`
+
+function planUninstallHermes() {
+  const d = hermesUninstallDecision()
+  if (d.action === 'damaged') return [`${hermesDamagedLine(d.path)}（--dry-run 仅预览，未改动文件；请先补齐结束标记或手工删除该块后重跑）`]
+  return planUninstallSteps(hermesUninstallSteps(d), HERMES_COPY)
+}
+
+function applyUninstallHermes() {
+  const d = hermesUninstallDecision()
+  if (d.action === 'damaged') {
+    console.error(hermesDamagedLine(d.path))
+    process.exit(1)
+  }
+  applyUninstallSteps(hermesUninstallSteps(d), HERMES_COPY)
+}
+function detectHermes() {
+  const p = hermesPaths()
+  if (!existsSync(p.config)) return { ok: false, path: p.config }
+  try { return { ok: hermesHasEntry(readFileSync(p.config, 'utf8')), path: p.config } } catch (e) { return { ok: false, path: p.config, error: e.message } }
+}
+function doctorHermes(probe) {
+  const p = hermesPaths()
+  const checks = baseChecks()
+  const found = detectHermes()
+  checks.push(entryCheck('hermes mcp_servers.grape-kit', found, 'npx -y @grape-dev/grape-kit install --target hermes'))
+  checks.push(['hermes skill 副本', existsSync(join(p.skillsDir, 'grape-remote', 'SKILL.md')) ? 'ok' : '未安装'])
+  if (probe) checks.push(['契约连通性', connectivityCheck(getBaseUrl())])
+  printChecks(checks)
+}
+
+/* ---------- atomcode：$ATOMCODE_HOME/mcp.json（默认 ~/.atomcode） ---------- */
+
+function atomcodePaths() {
+  const root = String(process.env.ATOMCODE_HOME || '').trim() || join(homedir(), '.atomcode')
+  return { root, config: join(root, 'mcp.json') }
+}
+function atomcodeContainer(cfg, create) {
+  if (cfg.mcpServers && typeof cfg.mcpServers === 'object') return cfg.mcpServers
+  if (!create) return null
+  if (!cfg.mcpServers || typeof cfg.mcpServers !== 'object') cfg.mcpServers = {}
+  return cfg.mcpServers
+}
+function installAtomcode() {
+  const { config } = atomcodePaths()
+  const { originalText, cfg } = readJsonHostForWrite(config)
+  mkdirSync(dirname(config), { recursive: true })
+  atomcodeContainer(cfg, true)['grape-kit'] = { command: 'npx', args: [...NPX_ARGS] }
+  const backup = writeValidated(config, JSON.stringify(cfg, null, 2) + '\n', originalText)
+  console.log(`已写入 ${config}（mcpServers.grape-kit，${backup ? `备份: ${backup}` : '新建'}）`)
+  console.log('atomcode：重启会话后加载 grape-kit 的 MCP 工具')
+}
+const ATOMCODE_COPY = {
+  missing: (s) => `未找到 ${s.path}，无需卸载`,
+  absent: () => '未发现 mcpServers.grape-kit 条目，跳过',
+  removed: (s, backup) => `已移除 mcpServers.grape-kit 条目（备份: ${backup}）`,
+  preview: (s) => `将移除 mcpServers.grape-kit 条目（${s.path}）`,
+}
+function inspectUninstallAtomcode() { return inspectJsonContainerUninstall(atomcodePaths().config, atomcodeContainer) }
+function uninstallAtomcode() { applyUninstallSteps(inspectUninstallAtomcode(), ATOMCODE_COPY) }
+function planUninstallAtomcode() { return planUninstallSteps(inspectUninstallAtomcode(), ATOMCODE_COPY) }
+function detectAtomcode() { return detectJsonContainer(atomcodePaths().config, atomcodeContainer) }
+function doctorAtomcode(probe) {
+  const checks = baseChecks()
+  const found = detectAtomcode()
+  checks.push(entryCheck('atomcode mcpServers.grape-kit', found, 'npx -y @grape-dev/grape-kit install --target atomcode'))
+  if (probe) checks.push(['契约连通性', connectivityCheck(getBaseUrl())])
+  printChecks(checks)
+}
+
+/* ---------- trae：项目级 .trae/mcp.json（Spec Out of Scope：不做用户级兜底） ---------- */
+
+/** 路径优先级：GRAPE_TRAE_CONFIG 覆盖 > 当前项目 .trae/mcp.json（Trae 官方入口，项目级语义）。
+ *  userLevel：cwd 与 $HOME 相同——此时「项目级路径」就是用户级路径，等同用户级落盘（Spec Out of Scope）。 */
+function traePaths() {
+  const override = String(process.env.GRAPE_TRAE_CONFIG || '').trim()
+  if (override) return { config: override, userLevel: false }
+  return { config: join(process.cwd(), '.trae', 'mcp.json'), userLevel: resolve(process.cwd()) === resolve(homedir()) }
+}
+
+/** trae 项目级闸门：install / uninstall / --dry-run 三条写路径共用，防「在 $HOME 里悄悄写用户级」 */
+function traeRequireProjectDir(action) {
+  const p = traePaths()
+  if (!p.userLevel) return
+  console.error(`trae 是项目级宿主（.trae/mcp.json 按当前项目目录解析），当前目录与 $HOME 相同——${action}会作用于用户级 ${p.config}，Spec 明确不做用户级落盘，已拒绝。`)
+  if (action === '安装') {
+    console.error('请在你要装配的目标项目目录执行：npx -y @grape-dev/grape-kit install --target trae')
+  } else {
+    // 旧版本可能在 $HOME 里写出过用户级文件：给出去处，不代劳也不装作动过
+    console.error(`如该用户级文件里仍留有 grape-kit 条目，请在目标项目目录执行 uninstall --target trae，或手工删除 ${p.config} 中的 grape-kit 条目`)
+  }
+  process.exit(1)
+}
+function traeContainer(cfg, create) {
+  if (cfg.mcpServers && typeof cfg.mcpServers === 'object') return cfg.mcpServers
+  if (!create) return null
+  if (!cfg.mcpServers || typeof cfg.mcpServers !== 'object') cfg.mcpServers = {}
+  return cfg.mcpServers
+}
+function installTrae() {
+  traeRequireProjectDir('安装')
+  const { config } = traePaths()
+  const { originalText, cfg } = readJsonHostForWrite(config)
+  mkdirSync(dirname(config), { recursive: true })
+  traeContainer(cfg, true)['grape-kit'] = { command: 'npx', args: [...NPX_ARGS] }
+  const backup = writeValidated(config, JSON.stringify(cfg, null, 2) + '\n', originalText)
+  console.log(`已写入 ${config}（mcpServers.grape-kit，${backup ? `备份: ${backup}` : '新建'}）`)
+  console.log('trae：重启会话后加载 grape-kit 的 MCP 工具')
+}
+const TRAE_COPY = {
+  missing: (s) => `未找到 ${s.path}，无需卸载`,
+  absent: () => '未发现 mcpServers.grape-kit 条目，跳过',
+  removed: (s, backup) => `已移除 mcpServers.grape-kit 条目（备份: ${backup}）`,
+  preview: (s) => `将移除 mcpServers.grape-kit 条目（${s.path}）`,
+}
+function inspectUninstallTrae() { return inspectJsonContainerUninstall(traePaths().config, traeContainer) }
+function uninstallTrae() { traeRequireProjectDir('卸载'); applyUninstallSteps(inspectUninstallTrae(), TRAE_COPY) }
+function planUninstallTrae() { traeRequireProjectDir('卸载'); return planUninstallSteps(inspectUninstallTrae(), TRAE_COPY) }
+/** 检出同样只在项目目录成立：cwd==$HOME 时不做「已安装」断言（也不去读用户级文件） */
+function detectTrae() {
+  const p = traePaths()
+  if (p.userLevel) return { ok: false, path: p.config }
+  return detectJsonContainer(p.config, traeContainer)
+}
+function doctorTrae(probe) {
+  const p = traePaths()
+  const checks = baseChecks()
+  const found = detectTrae()
+  checks.push(entryCheck('trae mcpServers.grape-kit', found, 'npx -y @grape-dev/grape-kit install --target trae'))
+  if (p.userLevel) checks.push(['trae 项目级位置', '当前目录与 $HOME 相同：请在目标项目目录执行 --target trae（不做用户级）'])
   if (probe) checks.push(['契约连通性', connectivityCheck(getBaseUrl())])
   printChecks(checks)
 }
@@ -1129,7 +1794,7 @@ function copySkillWorkbuddy() {
 }
 
 /** 卸载步骤状态：具名单源，避免各宿主各写一份字符串字面量后再漂移（QA#PR13 判断项 7） */
-const STEP = Object.freeze({ REMOVE: 'remove', ABSENT: 'absent', DAMAGED: 'damaged' })
+const STEP = Object.freeze({ REMOVE: 'remove', REMOVE_FILE: 'removeFile', ABSENT: 'absent', DAMAGED: 'damaged' })
 
 /** 宿主 skill 卸载的共享步骤判定：dry-run 预览与真实执行同源，防预览/执行漂移。
  *  无 receipt 时沿用历史默认 `grape-remote`（无文件删除为 no-op）。 */
@@ -1159,11 +1824,18 @@ function damagedEntryLine(steps) {
 }
 
 /** 各宿主卸载流程共用的渲染层（QA#PR13 判断项 7：8 处 if/else 复制收敛到这里）。
- *  copy 只提供文案差异，判定与动作单源——预览与执行走同一 steps，不会再出现「预览说 A、执行做 B」。 */
+ *  copy 只提供文案差异，判定与动作单源——预览与执行走同一 steps，不会再出现「预览说 A、执行做 B」。
+ *  `steps.writeNext`：非 JSON 宿主（hermes 的 YAML）自带的落盘钩子——writeValidated 的 JSON 结构校验
+ *  对 YAML/TOML 不适用。钩子返回备份路径；缺省走 writeValidated（JSON 宿主）。 */
 function applyUninstallSteps(steps, copy) {
   if (!steps.exists) console.log(copy.missing(steps))
-  else if (steps.status === STEP.REMOVE) {
-    const backup = writeValidated(steps.path, steps.nextText, steps.beforeText)
+  else if (steps.status === STEP.REMOVE_FILE) {
+    // 仅剩空容器：写前备份 + 删文件（与 codex removeFile 同口径）
+    const backup = backupOf(steps.path, steps.beforeText)
+    rmSync(steps.path, { force: true })
+    console.log(copy.removedFile ? copy.removedFile(steps, backup) : `已移除 grape 条目，并删除仅剩空容器的文件 ${steps.path}（备份: ${backup}）`)
+  } else if (steps.status === STEP.REMOVE) {
+    const backup = steps.writeNext ? steps.writeNext() : writeValidated(steps.path, steps.nextText, steps.beforeText)
     console.log(copy.removed(steps, backup))
   } else if (steps.status === STEP.DAMAGED) console.log(damagedEntryLine(steps))
   else console.log(copy.absent(steps))
@@ -1174,10 +1846,13 @@ function applyUninstallSteps(steps, copy) {
 /** --dry-run 预览渲染层：与 applyUninstallSteps 同一 steps / 同一判定，只列不删 */
 function planUninstallSteps(steps, copy) {
   const lines = []
-  const onRemove = steps.status === STEP.REMOVE
+  const onRemove = steps.status === STEP.REMOVE || steps.status === STEP.REMOVE_FILE
   if (!steps.exists) lines.push(copy.missing(steps))
   else if (onRemove) lines.push(copy.preview(steps))
   else if (steps.status === STEP.DAMAGED) lines.push(damagedEntryLine(steps))
+  if (steps.status === STEP.REMOVE_FILE) {
+    lines.push(copy.previewFile ? copy.previewFile(steps) : `将删除仅剩空容器的文件 ${steps.path}（写前备份）`)
+  }
   if (onRemove && copy.extra) lines.push(...copy.extra(steps))
   for (const s of steps.skills || []) {
     const dir = join(steps.skillsDir, s)
@@ -1351,14 +2026,67 @@ const HOSTS = {
     label: 'dsh（DeepSeek Harness）',
     install: () => installDsh(resolve(String(arg('script', DEFAULT_SCRIPT)))),
     uninstall: uninstallDsh,
+    plan: planUninstallDsh,
     doctor: doctorDsh,
     detect: detectDsh,
   },
+  codex: {
+    label: 'codex（OpenAI Codex CLI）',
+    install: installCodex,
+    uninstall: uninstallCodex,
+    plan: planUninstallCodex,
+    doctor: doctorCodex,
+    detect: detectCodex,
+  },
+  openclaw: {
+    label: 'openclaw',
+    install: installOpenclaw,
+    uninstall: uninstallOpenclaw,
+    plan: planUninstallOpenclaw,
+    doctor: doctorOpenclaw,
+    detect: detectOpenclaw,
+  },
+  hermes: {
+    label: 'hermes',
+    install: installHermes,
+    uninstall: applyUninstallHermes,
+    plan: planUninstallHermes,
+    doctor: doctorHermes,
+    detect: detectHermes,
+  },
+  atomcode: {
+    label: 'atomcode',
+    install: installAtomcode,
+    uninstall: uninstallAtomcode,
+    plan: planUninstallAtomcode,
+    doctor: doctorAtomcode,
+    detect: detectAtomcode,
+  },
+  trae: {
+    label: 'trae（Trae IDE）',
+    install: installTrae,
+    uninstall: uninstallTrae,
+    plan: planUninstallTrae,
+    doctor: doctorTrae,
+    detect: detectTrae,
+  },
 }
 
-/* 受支持宿主以 HOSTS 为唯一来源（hermes 无 MCP client 走 skill 手动复制；dsh 走 MCP 最小路径，
- * 原生 Cordis 插件形态由 grape-dsh 承载，二者并存） */
+/* 受支持宿主以 HOSTS 为唯一来源（hermes 已支持 MCP client：config.yaml 的 mcp_servers 段 + skill 副本；
+ * dsh 走 MCP 最小路径，原生 Cordis 插件形态由 grape-dsh 承载，二者并存） */
 const SUPPORTED_TARGETS = Object.keys(HOSTS)
+
+/** 项目级宿主（路径按当前项目目录解析）：全量模式无法确定项目，一律不进 --target all，
+ *  否则在任意目录 `--target all` 都会静默建出 .trae/（QA#PR22 P2） */
+const PROJECT_LEVEL_TARGETS = new Set(['trae'])
+/** 全量枚举：受支持宿主 - 项目级宿主（install / uninstall / clean-global 共用同一口径） */
+const allTargets = () => SUPPORTED_TARGETS.filter((n) => !PROJECT_LEVEL_TARGETS.has(n))
+/** 全量模式跳过项目级宿主时的一次性披露（不静默跳过） */
+function announceSkippedProjectHosts() {
+  const skipped = SUPPORTED_TARGETS.filter((n) => PROJECT_LEVEL_TARGETS.has(n))
+  if (!skipped.length) return
+  console.log(`跳过项目级宿主 ${skipped.join(' + ')}：.trae/mcp.json 按项目目录解析，全量模式无法确定项目——请在目标项目目录单独执行 --target ${skipped[0]}`)
+}
 
 function detectHosts() {
   const home = homedir()
@@ -1368,6 +2096,12 @@ function detectHosts() {
   if (existsSync(join(home, '.officeace'))) found.push('officeace')
   if (existsSync(dshPaths().home)) found.push('dsh')
   if (existsSync(join(home, '.config', 'opencode'))) found.push('opencode')
+  if (existsSync(join(home, '.codex'))) found.push('codex')
+  if (existsSync(join(home, '.openclaw'))) found.push('openclaw')
+  if (existsSync(hermesPaths().home)) found.push('hermes')   // HERMES_HOME 覆盖时以覆盖路径为准
+  if (existsSync(atomcodePaths().root)) found.push('atomcode')
+  // cwd==$HOME 时项目级路径即用户级路径，不参与「已安装宿主」判定（Spec 不做用户级）
+  if (!traePaths().userLevel && existsSync(traePaths().config)) found.push('trae')
   return found
 }
 
@@ -1888,8 +2622,9 @@ if (cmd === 'intro') {
     if (!found.length) {
       console.log(`未检测到宿主 agent 痕迹，跳过宿主卸载${dryRun ? '（预览）' : ''}，${dryRun ? '直接预览全局清理' : '直接执行全局清理'}`)
     } else {
-      const names = found.length === 1 ? found : SUPPORTED_TARGETS
+      const names = found.length === 1 ? found : allTargets()
       if (names.length > 1) console.log(`检测到多个宿主痕迹，全部${dryRun ? '预览' : '卸载'}: ${names.join(' + ')}`)
+      if (found.length !== 1) announceSkippedProjectHosts()
       for (const n of names) uninstallHostOrPlan(n)
     }
     runCleanGlobal()
@@ -1898,7 +2633,7 @@ if (cmd === 'intro') {
     // Spec 要求默认 uninstall 结束时输出残留项 + 清理命令（提示是只读操作，零痕迹也不得缺席）。
     if (!targetExplicit && cmd === 'uninstall' && !detectHosts().length) {
       console.error('未检测到任何已安装的宿主 agent。')
-      console.error('支持的宿主: opencode / workbuddy / codearts / officeace')
+      console.error(`支持的宿主: ${SUPPORTED_TARGETS.join(' / ')}`)
       console.error('请用 --target <宿主> 指定后重跑（或先安装对应宿主 agent）。')
       printResidualHint()
       process.exit(1)
@@ -1906,8 +2641,9 @@ if (cmd === 'intro') {
     if (!targetExplicit && cmd !== 'doctor') target = await resolveTargetAuto()
     const t = resolveTarget()
     if (t === 'all') {
-      const names = SUPPORTED_TARGETS
+      const names = allTargets()
       console.log(`检测到多个宿主痕迹，全部${cmd === 'uninstall' && dryRun ? '预览' : '安装/自检'}: ${names.join(' + ')}`)
+      announceSkippedProjectHosts()
       for (const n of names) {
         if (cmd === 'install') { console.log(`
 ===== ${n} =====`); HOSTS[n].install() }

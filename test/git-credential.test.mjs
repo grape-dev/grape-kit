@@ -32,8 +32,8 @@ const tmpWs = () => mkdtempSync(join(tmpdir(), 'gk-cred-'))
 const askpassOf = (ws) => join(ws, '.grape', POSIX ? 'git-askpass.sh' : 'git-askpass.cmd')
 const runCred = (args, deps = {}) => findTool('grape_git_credential').run(args, deps)
 
-test('工具面 41：新增 git 写回两工具', () => {
-  assert.equal(TOOLS.length, 41)
+test('工具面 50：新增 git 写回两工具', () => {
+  assert.equal(TOOLS.length, 50)
   for (const name of ['grape_git_credential', 'grape_create_pull']) assert.ok(findTool(name), `缺 ${name}`)
 })
 

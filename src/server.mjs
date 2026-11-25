@@ -13,26 +13,41 @@ import {
 import { runGrape, waitTask, GrapeCliError } from './cli.mjs'
 import { waitTaskNative, GrapeApiError, api } from './api.mjs'
 import { toolDefs, findTool } from './tools.mjs'
+import * as lifecycleModule from './lifecycle.mjs'
 
 const PKG = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
 
 export const INSTRUCTIONS = `Grape DevOps 流水线遥控（多 agent：vod→issue→coding→qa→sre）。
 
-使用纪律：
-1. 只触发、只观察、可推进；节点间交接（A2A）默认由服务端驱动——例外：takeover 交回时 kit 会按场景链确保下一节点被派发（见 7）。
-2. cancel / apply_scene / terminate 属用户决策层——调用前必须向用户确认。
-3. 触发后用 grape_wait_task 等终态（默认 300s 上限）；长任务改用 grape_get_task_status 复查。
-4. token 作用域：当前走用户级 GRAPE_API_TOKEN；git-repo 类会话命令不可用（403 属预期）。
-5. grape_get_issue_events 是云端打回/评论的事件回环入口：PR 被 QA 打回时从这里发现。
-6. 命令面不止这些工具时，优先用已注册工具；未经确认不要构造任何删除/终止类操作。
-7. 接管（takeover）：tko_ 仅 repo_session、不含 git 凭据注入——洁净机器用 grape_git_credential 换一次性本仓券（600s）写 GIT_ASKPASS（0600，过期自检提示重新换券，无静默回退），PR 用 grape_create_pull；finish 必须用用户级凭据且仅在用户对话确认后执行；finish 交回后由 kit 确保下一节点派发（判据是派发指针 next_seq：next_seq>0 已派发不重复；next_seq=0 时按 coding→qa 兜底补发并回填 next_seq；无法派发时返回 pending_dispatch 待派发标记——标记随交回结果返回，平台对已结束会话拒绝 progress 写入（409 not_active），事后经 grape_takeover_status 复查会话记录即可见派发指针缺失，需按提示补发）；takeover_start 只能对准当前活跃节点，409 agent_mismatch 时按 60-120s 轮询再试。`
+角色（先读）：你是流水线**外面**的遥控/观察者。只触发、只观察、可推进；节点间交接（A2A）由服务端驱动。
+- 禁止用 \`--force\` / \`force=true\` 越过任何门禁（pending_review、派发门禁、技能校验）——那是伪造节点流转、冒充决策层。
+- 不替用户决策：建单、触发流水线、应用场景、设默认场景、取消/恢复/终止、上传/升级技能、正式交回（finish）之前，必须先在对话里拿到用户明确同意。
+- 遇到卡点（PR 未合入、审核未过、缺凭据）：停下来把事实和选项交给用户，不要自己想办法绕过。
+
+三条最容易搞错的语义：
+1. 场景三段式：市场模板（数字 id）→ \`grape_apply_scene\` 在仓库内创建副本（custom-xxxxxxxx）→ \`grape_set_repo_scene\` 设为仓库默认。
+   「应用场景」≠「切换场景」：\`POST /api/scenes/apply/{owner}/{repo}\` 只把节点技能与引擎绑定刷进 agent_session，不改仓库归属，响应里也没有 scene_id。
+   **只对新建生效**：已存在的 issue 保留自己的 scene_id 快照，切场景/设默认都不会追溯改动它——要换已建单的链，只能在建单时显式指定或重开一单。
+2. 技能 scope：user 级技能不能绑进 repo 级场景（平台 403 级拦截）。先 \`grape_convert_skill\` 复制成 repo 技能，再改节点 skill_id。
+   上传/升级用 \`grape_upload_skill\` / \`grape_update_skill\`：本地预检 frontmatter 与 ZIP 顶层目录，服务端 errors 全量透出。
+3. 端云接管：\`takeover_start\` 只能对准**当前活跃节点**（409 agent_mismatch 时按 60-120s 轮询再试）。
+   \`tko_\` 只覆盖 repo_session、**不含 git 凭据注入**；洁净机器用 \`grape_git_credential\` 以 tko_ 换一次性本仓券（600s）写 GIT_ASKPASS（0600，过期自检提示重新换券，无静默回退）后 push，PR 用 \`grape_create_pull\`；request-finish 可用 tko_；正式 \`finish\` 必须用**用户级凭据**（\`grape_\`）且只在用户确认后执行；交回派发判据 = \`handoff.seq>0\` 或 \`handoff.reason=already_dispatched\`，\`next_seq\` 恒 0 仅辅助，不据此判未派发。
+
+执行纪律：
+- 触发后用 \`grape_wait_task\` 等终态（默认 300s）；长任务改 \`grape_get_task_status\` 复查，别死等。
+- 写动作一律以**回读**为准：应用场景后列仓库场景；设默认后读 dev_scene；建单后读 issue 详情；交回后看 handoff 与事件。
+- 403 分两类：tk_ 专属端点（review-pass / review-reject / confirm-done）属通道边界，**不要重试**，改用 WebUI 或请用户执行；
+  仓库未纳管导致的 403（无权对该仓库发起 A2A）先用 \`grape_host_repo\` 纳管（需用户确认）。
+- 事件是事实源：QA 打回与评论从 \`grape_get_issue_events\` 读；下一节点是否已派发看 \`handoff.seq\` 与 issue 事件（\`next_seq\` 恒 0 不作判据），别重复派发。
+8. 自管理属用户决策层：grape_kit_version / grape_kit_check_update 只读直执行（check_update 的 dismiss 只写本地忽略状态文件）；grape_kit_upgrade / grape_kit_install / grape_kit_uninstall **只生成命令、工具本身不执行任何变更**——必须先把命令块与影响范围交给用户，获得确认后再由用户（或用户允许的终端）执行。`
 
 /**
  * 创建 server 实例（依赖注入便于测试）。
- * @param {{runGrape?: Function, waitTask?: Function}} [deps]
+ * @param {{runGrape?: Function, waitTask?: Function, apiModule?: object, lifecycleModule?: object}} [deps]
  */
 export function createServer(deps = {}) {
   const apiModule = deps.apiModule || api
+  const lifecycle = deps.lifecycleModule || lifecycleModule
   const _runGrape = deps.runGrape || runGrape
   const _waitTask = deps.waitTask || waitTaskNative   // v0.3.0：原生轮询（无 CLI 冷启动）；测试可注入旧版
 
@@ -55,7 +70,7 @@ export function createServer(deps = {}) {
       if (tool.run) {
         // 多步工具（等待/级联解析/凭据生成）：自持执行逻辑。
         // 契约：waitBased 工具返回 {json,...}；其余 run() 工具直接返回结果值。
-        const r = await tool.run(args, { runGrape: _runGrape, waitTask: _waitTask, apiModule })
+        const r = await tool.run(args, { runGrape: _runGrape, waitTask: _waitTask, apiModule, lifecycle })
         json = tool.waitBased ? { ...r.json, timedOut: !!r.timedOut, polls: r.polls } : r
       } else if (tool.native) {
         // v0.3.0 传输层原生化：优先原生 HTTP（无 Python/CLI 依赖）。
@@ -92,7 +107,12 @@ export function createServer(deps = {}) {
     } catch (err) {
       if (err instanceof GrapeApiError) {
         const hint = err.hint ? `\n\n${err.hint}` : ''
-        return { content: [{ type: 'text', text: `grape API 失败（${err.status}）：${err.message}${hint}` }], isError: true }
+        // 技能上传等校验失败会一次返回多条 detail.errors：全量透出，截断只留第一条
+        // 会让宿主按残缺信息反复试错（测试报告 D3 第四坑）。
+        const errs = Array.isArray(err.detailErrors) && err.detailErrors.length
+          ? `\n\n校验未通过（${err.detailErrors.length} 条，逐条改）：\n- ${err.detailErrors.join('\n- ')}`
+          : ''
+        return { content: [{ type: 'text', text: `grape API 失败（${err.status}）：${err.message}${errs}${hint}` }], isError: true }
       }
       const code = err instanceof GrapeCliError ? err.code : 1
       const hint =

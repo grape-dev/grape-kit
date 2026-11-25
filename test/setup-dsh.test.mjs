@@ -24,14 +24,25 @@ after(() => {
 function run(args, h, extraEnv = {}) {
   return spawnSync(process.execPath, [SETUP, ...args], {
     encoding: 'utf8',
+    cwd: h,
     env: {
       ...process.env,
       HOME: h,
       DSH_HOME: '',
       GRAPE_DSH_PATCH: '',
       GRAPE_DSH_DEP_CMD: process.execPath,
+      // QA#PR22 P1：`--target all` 会遍历全部宿主，继承的路径逃生口必须一并置空（与 setup-hosts-new 对齐）。
+      // 漏置空时 HERMES_HOME 等继承值会把 config.yaml 与 skills/grape-remote 写进真实用户家目录。
       GRAPE_CODEARTS_CONFIG: '',
       GRAPE_OFFICEACE_MANIFEST: '',
+      GRAPE_HOME: '',
+      GRAPE_AUTH_FILE: '',
+      GRAPE_CODEX_CONFIG: '',
+      GRAPE_OPENCLAW_CONFIG: '',
+      GRAPE_HERMES_CONFIG: '',
+      GRAPE_TRAE_CONFIG: '',
+      HERMES_HOME: '',
+      ATOMCODE_HOME: '',
       ...extraEnv,
     },
     timeout: 30_000,
@@ -177,7 +188,8 @@ test('未知 target 报错列出 dsh；help 用法与宿主清单含 dsh；--tar
   assert.match(`${bad.stderr}${bad.stdout}`, /dsh/, '未知 target 报错应列出 dsh')
 
   const help = run(['help'], h)
-  assert.match(help.stdout, /用法: node setup\.mjs install\|uninstall\|doctor \[--target opencode\|workbuddy\|codearts\|officeace\|dsh\] \[--probe\]/)
+  assert.match(help.stdout, /用法: node setup\.mjs install\|uninstall\|doctor \[--target [^\]]+\] \[--probe\]/)
+  for (const t of ['opencode', 'workbuddy', 'codearts', 'officeace', 'dsh', 'codex', 'openclaw', 'hermes', 'atomcode', 'trae']) assert.match(help.stdout, new RegExp(`--target ${t}`), `help 宿主清单应含 ${t}`)
 
   const all = run(['install', '--target', 'all'], h)
   assert.equal(all.status, 0, all.stderr)
@@ -250,4 +262,32 @@ test('dsh 新建文件卸载后不残留空 patch 与仅含托管块的备份', 
   assert.equal(u.status, 0, u.stderr)
   assert.ok(!existsSync(patchPath(h)), '仅剩托管块的文件应在卸载后删除（不留 0 字节 patch）')
   assert.deepEqual(backupsIn(join(h, '.dsh', 'profiles', 'web')), [], '不得残留仅含托管块的备份')
+})
+
+/* ---------- QA 复审（PR #22 · P1）：继承的宿主路径变量不得逃逸临时 HOME ---------- */
+
+test('继承的 HERMES_HOME / 各宿主配置覆盖不影响 --target all：不写真实用户目录', () => {
+  const h = home()
+  const inherited = {
+    HERMES_HOME: join(h, 'inherited', 'hermes'),
+    ATOMCODE_HOME: join(h, 'inherited', 'atomcode'),
+    GRAPE_HERMES_CONFIG: join(h, 'inherited', 'hermes-config.yaml'),
+    GRAPE_CODEX_CONFIG: join(h, 'inherited', 'codex-config.toml'),
+    GRAPE_OPENCLAW_CONFIG: join(h, 'inherited', 'openclaw.json'),
+    GRAPE_TRAE_CONFIG: join(h, 'inherited', 'trae-mcp.json'),
+  }
+  const prev = {}
+  for (const [k, v] of Object.entries(inherited)) { prev[k] = process.env[k]; process.env[k] = v }
+  try {
+    const all = run(['install', '--target', 'all'], h)
+    assert.equal(all.status, 0, all.stderr)
+    for (const [k, v] of Object.entries(inherited)) {
+      assert.ok(!existsSync(v), `继承的 ${k} 必须被 run() 置空，否则会写到 ${v}`)
+    }
+  } finally {
+    for (const [k] of Object.keys(inherited)) {
+      if (prev[k] === undefined) delete process.env[k]
+      else process.env[k] = prev[k]
+    }
+  }
 })

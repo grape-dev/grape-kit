@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { TOOL_NAMES } from '../src/tools.mjs'
 
 /* ── Issue #17 / CONTRIBUTING §7：用户可见变更必须双语 README + CHANGELOG Unreleased 同 PR 同步 ── */
 
@@ -52,7 +53,7 @@ test('README 双语单测计数一致（同一口径，不许一边 136 一边 1
   assert.notEqual(en[1], '136', '旧口径 136 已过期，应更新为当前实际单测数')
 })
 
-test('CHANGELOG 保留 Unreleased 段（下一周期入口），0.4.0 发布节覆盖 #21 dsh 适配', () => {
+test('CHANGELOG 保留 Unreleased 段（下一周期入口），0.5.0 发布节覆盖 #26 五宿主 / #20 场景技能 / #27 自管理工具批', () => {
   const md = read('CHANGELOG.md')
   const at = md.search(/^## Unreleased$/m)
   assert.ok(at >= 0, 'CHANGELOG.md 必须保留 ## Unreleased 段（CONTRIBUTING §7）')
@@ -63,11 +64,29 @@ test('CHANGELOG 保留 Unreleased 段（下一周期入口），0.4.0 发布节�
     !/^- \S/m.test(unreleasedBody) || /### (Added|Changed|Fixed)/.test(unreleasedBody),
     'Unreleased 段有条目时必须按 Added/Changed/Fixed 归类（发版后允许空段）',
   )
-  // #21 dsh 适配已随 0.4.0 发布：首个已发布节断言 0.3.10→0.4.0，dsh 覆盖断言落最新发布节
-  assert.match(md.slice(firstPublished, firstPublished + 30), /^## 0\.4\.0 \(2026-11-23\)/, '首个已发布节应为 0.4.0 (2026-11-23)')
+  // #26 五宿主 + #20 场景/技能 + #27 自管理工具批已随 0.5.0 发布：首个已发布节断言 0.4.0→0.5.0，本批覆盖断言落最新发布节
+  assert.match(md.slice(firstPublished, firstPublished + 30), /^## 0\.5\.0 \(2026-11-25\)/, '首个已发布节应为 0.5.0 (2026-11-25)')
   const next = md.slice(firstPublished + 1).search(/^## /m)
   const body = next === -1 ? md.slice(firstPublished) : md.slice(firstPublished, firstPublished + 1 + next)
-  assert.match(body, /### (Added|Changed|Fixed)/, '0.4.0 发布节必须按 Added/Changed/Fixed 归类')
+  assert.match(body, /### (Added|Changed|Fixed)/, '0.5.0 发布节必须按 Added/Changed/Fixed 归类')
+  for (const [re, what] of [
+    [/`SUPPORTED_TARGETS` 由 5 扩到 10/, '#26 五宿主扩容（--target 全量 10）'],
+    [/`codex` \/ `openclaw` \/ `hermes` \/ `atomcode` \/ `trae`/, '#26 五宿主逐一登记'],
+    [/grape_set_repo_scene/, '#20 仓库默认场景工具'],
+    [/grape_upload_skill/, '#20 技能上传工具'],
+    [/创建场景副本/, '#20 apply_scene 市场副本通道'],
+    [/仅项目级语义/, '#26 trae 项目级闸门'],
+    [/自管理五工具（Issue #27，工具面 39 → 48）/, '#27 自管理五工具'],
+    [/`src\/lifecycle\.mjs` 自管理核心/, '#27 自管理核心模块'],
+  ]) {
+    assert.match(body, re, `0.5.0 发布节应记录 ${what} 变更`)
+  }
+  // 历史发布节的覆盖断言不因新版本上移而丢失：#21 dsh 仍在 0.4.0 发布节
+  const at040 = md.search(/^## 0\.4\.0 \(/m)
+  assert.ok(at040 >= 0, 'CHANGELOG 应有 0.4.0 发布节')
+  const next040 = md.slice(at040 + 1).search(/^## /m)
+  const body040 = next040 === -1 ? md.slice(at040) : md.slice(at040, at040 + 1 + next040)
+  assert.match(body040, /### (Added|Changed|Fixed)/, '0.4.0 发布节必须按 Added/Changed/Fixed 归类')
   for (const [re, what] of [
     [/install --target dsh/, '#21 dsh 托管 patch 安装'],
     [/uninstall --target dsh/, '#21 dsh 卸载（只删托管块 + skill 副本）'],
@@ -79,7 +98,7 @@ test('CHANGELOG 保留 Unreleased 段（下一周期入口），0.4.0 发布节�
     [/映射形状/, '#21 QA 写入安全：映射形状拒写'],
     [/逐字节/, '#21 QA 往返保真：逐字节还原'],
   ]) {
-    assert.match(body, re, `0.4.0 发布节应记录 ${what} 变更`)
+    assert.match(body040, re, `0.4.0 发布节应记录 ${what} 变更`)
   }
   // 历史发布节的覆盖断言不因新版本上移而丢失：#19 仍在 0.3.10 发布节
   const at0310 = md.search(/^## 0\.3\.10 \(/m)
@@ -121,5 +140,78 @@ test('Issue #20 README 双语载明凭据优先级链与 auth init / uninstall -
       /GRAPE_API_TOKEN_ONCE[\s\S]{0,240}GRAPE_API_TOKEN[\s\S]{0,240}(GRAPE_AUTH_FILE|config\.json)/,
       `${name} 应列出 runtime > env > file 完整优先级链`,
     )
+  }
+})
+
+/* ── Issue #27：自管理五工具的三面口径一致（工具面 / README 双语 / CHANGELOG Unreleased） ── */
+
+const LIFECYCLE_TOOL_NAMES = ['grape_kit_version', 'grape_kit_check_update', 'grape_kit_upgrade', 'grape_kit_install', 'grape_kit_uninstall']
+
+test('Issue #27 README 双语：工具数 50 + 自管理五工具逐个点名 + 写操作决策门口径', () => {
+  for (const [name, md] of [['README.md', read('README.md')], ['README.zh.md', read('README.zh.md')]]) {
+    assert.match(md, /50 tools|50 工具/, `${name} 能力总览应为 50 工具（39→50 口径同步）`)
+    for (const tool of LIFECYCLE_TOOL_NAMES) {
+      assert.ok(md.includes(tool), `${name} 应点名 ${tool}`)
+    }
+    assert.match(md, /自管理|Self-management/, `${name} 应有自管理能力条目`)
+    assert.match(md, /只生成命令|command generation|commands only/i, `${name} 应写明写工具只生成命令、不执行`)
+  }
+})
+
+test('Issue #27 CHANGELOG 0.5.0 发布节覆盖自管理五工具（Added/Changed 归类）', () => {
+  // #27 变更已随 0.5.0 发布：按**发布节**取段（发版后 Unreleased 段为空，按 `## Unreleased` 切段会取到空串）
+  const md = read('CHANGELOG.md')
+  const at = md.search(/^## 0\.5\.0 \(/m)
+  assert.ok(at >= 0, 'CHANGELOG 应有 0.5.0 发布节')
+  const next = md.slice(at + 1).search(/^## /m)
+  const body = next === -1 ? md.slice(at) : md.slice(at, at + 1 + next)
+  assert.match(body, /### (Added|Changed)/, '0.5.0 发布节必须按 Added/Changed 归类')
+  for (const [re, what] of [
+    [/grape_kit_version/, 'grape_kit_version'],
+    [/grape_kit_check_update/, 'grape_kit_check_update'],
+    [/grape_kit_upgrade/, 'grape_kit_upgrade'],
+    [/grape_kit_install/, 'grape_kit_install'],
+    [/grape_kit_uninstall/, 'grape_kit_uninstall'],
+    [/39\s*→\s*48|48 工具|48 tools/, '工具面 39→48'],
+    [/dismiss/, 'dismiss 3 天冷却'],
+  ]) {
+    assert.match(body, re, `0.5.0 发布节应记录 ${what}`)
+  }
+})
+
+test('Issue #27 冒烟/巡检脚本的工具数断言同步为 50', () => {
+  assert.match(read('scripts/smoke.mjs'), /!== 50/, 'smoke 应断言 50 个工具')
+  assert.match(read('scripts/sweep-0.2.mjs'), /=== 50/, 'sweep 应断言 50 个工具')
+})
+
+/* ── QA 复审（PR #21）S1：CONTRIBUTING 自身也是工具面口径载体，必须与 TOOL_NAMES 实际数量同源 ──
+ * 39 → 48 时漏改本文件即失真；断言取实际注册数（非硬编码），后续增删工具时同样自动变红。 */
+test('CONTRIBUTING 工具面口径与 TOOL_NAMES 实际数量一致（漏改即失真）', () => {
+  const md = read('CONTRIBUTING.md')
+  const n = String(TOOL_NAMES.size)
+  assert.match(md, new RegExp(`（${n} tools）`), `CONTRIBUTING 开发环境节应写「（${n} tools）」`)
+  assert.match(md, new RegExp(`工具数变化（当前 ${n}）`), `CONTRIBUTING §6 应写「工具数变化（当前 ${n}）」`)
+  assert.doesNotMatch(md, /（39 tools）/, '不得残留旧口径 39 tools')
+  // 同步清单必须把本文件自身算进去，否则「漏改 CONTRIBUTING」永远落在规范文字之外
+  assert.match(md, /工具数变化[\s\S]{0,200}CONTRIBUTING\.md/, 'CONTRIBUTING §6 同步清单应包含本文件自身')
+})
+
+/* ── QA 第 3 轮（PR #21）S2：贡献流程模板也是工具面口径载体 ──
+ * 贡献者照着 PR/Bug 模板跑验证，模板写「期望 39 tools / 136 单测」会让他们把成功运行误判为失败；
+ * 单测数不写死（会随每个 PR 漂移），工具数按 TOOL_NAMES 实际数量断言。 */
+test('S2 贡献流程模板工具面口径与 TOOL_NAMES 同源（PR 模板 / Bug 模板）', () => {
+  const n = String(TOOL_NAMES.size)
+  const files = ['.github/PULL_REQUEST_TEMPLATE.md', '.github/ISSUE_TEMPLATE/bug_report.md']
+  for (const f of files) {
+    const md = read(f)
+    assert.match(md, new RegExp(`${n} tools`), `${f} 应写「${n} tools」`)
+    assert.doesNotMatch(md, /\b39 tools\b/, `${f} 不得残留旧口径 39 tools`)
+  }
+  const pr = read('.github/PULL_REQUEST_TEMPLATE.md')
+  assert.match(pr, /npm ci && npm test/, 'PR 模板仍应给出验证命令')
+  assert.doesNotMatch(pr, /期望\s*\d+\s*\/\s*\d+/, 'PR 模板不得写死单测数（按错误期望跑验证会误判失败）')
+  const contributing = read('CONTRIBUTING.md')
+  for (const f of files) {
+    assert.ok(contributing.includes(f), `CONTRIBUTING §6 同步清单应列出 ${f}（否则下次照样漏改）`)
   }
 })

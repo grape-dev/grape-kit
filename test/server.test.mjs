@@ -33,10 +33,10 @@ test('initialize 返回 instructions（零调用自举）', async () => {
   await client.close()
 })
 
-test('tools/list 返回 41 个精选工具', async () => {
+test('tools/list 返回 50 个精选工具', async () => {
   const client = await pair()
   const { tools } = await client.listTools()
-  assert.equal(tools.length, 41)
+  assert.equal(tools.length, 50)
   assert.ok(tools.some((t) => t.name === 'grape_wait_task'))
   await client.close()
 })
@@ -184,4 +184,65 @@ test('URL 不可达（status 0）不回退 CLI，原错误上抛', async () => {
     assert.match(res.content[0].text, /网络可达/)
     await client.close()
   })
+})
+
+/* ── Issue #27：自管理五工具的服务端面（INSTRUCTIONS 纪律 + 零执行派发） ── */
+
+const stubLifecycle = () => ({
+  readKitVersion: () => '0.4.0',
+  async aggregateVersion() {
+    return {
+      kitVersion: '0.4.0', latestVersion: '0.5.0', updateAvailable: true, updateState: 'newer',
+      updateNotice: '有新版本 0.4.0 → 0.5.0',
+      grapeCli: { status: 'ok', bin: 'grape', version: 'grape 0.3.4' },
+      server: { baseUrl: 'https://grape.test', reachable: true, contractVersion: '2.1.0' },
+      credentials: { configured: true, sourceKind: 'env', source: '环境变量 GRAPE_API_TOKEN' },
+    }
+  },
+  async checkForUpdate() {
+    return { currentVersion: '0.4.0', latestVersion: '0.5.0', state: 'newer', updateAvailable: true, updateNotice: '有新版本 0.4.0 → 0.5.0' }
+  },
+  detectInstallForm() {
+    return {
+      form: 'global', evidence: '包路径位于全局前缀下',
+      upgradeCommand: 'npm i -g @grape-dev/grape-kit', guidance: '全局安装形态', restartHint: '需重启宿主会话',
+    }
+  },
+  detectHostStatus() {
+    return [
+      { host: 'opencode', label: 'opencode', state: 'installed', installed: true, path: '/h/.config/opencode/opencode.jsonc', entry: 'mcp.grape', skillsDir: '/h/.config/opencode/skills' },
+      { host: 'workbuddy', label: 'workbuddy', state: 'missing', installed: false, path: '/h/.workbuddy/mcp.json', entry: 'mcpServers.grape-kit', skillsDir: '/h/.workbuddy/skills' },
+    ]
+  },
+})
+
+test('INSTRUCTIONS 第 8 条：自管理工具属用户决策层，只生成命令不执行', () => {
+  assert.match(INSTRUCTIONS, /8\.\s*自管理/)
+  assert.match(INSTRUCTIONS, /grape_kit_version/)
+  assert.match(INSTRUCTIONS, /grape_kit_check_update/)
+  for (const name of ['grape_kit_upgrade', 'grape_kit_install', 'grape_kit_uninstall']) {
+    assert.ok(INSTRUCTIONS.includes(name), `INSTRUCTIONS 应点名 ${name}`)
+  }
+  assert.match(INSTRUCTIONS, /只生成命令|不执行/, '纪律必须写明写工具只生成命令')
+  assert.match(INSTRUCTIONS, /用户确认|用户同意/, '纪律必须写明执行前需用户确认')
+})
+
+test('自管理五工具经 server 派发：返回 Markdown，且不触碰 CLI / API 执行通道', async () => {
+  let execCount = 0
+  const forbidden = async () => { execCount++; throw new Error('写工具不得走执行通道') }
+  const client = await pair({ runGrape: forbidden, lifecycleModule: stubLifecycle() })
+  const cases = [
+    ['grape_kit_version', {}, /版本全景/],
+    ['grape_kit_check_update', {}, /更新检查/],
+    ['grape_kit_upgrade', {}, /npm i -g @grape-dev\/grape-kit/],
+    ['grape_kit_install', { target: 'workbuddy' }, /install --target workbuddy/],
+    ['grape_kit_uninstall', { target: 'opencode' }, /uninstall --target opencode/],
+  ]
+  for (const [name, args, re] of cases) {
+    const res = await client.callTool({ name, arguments: args })
+    assert.equal(res.isError, undefined, `${name} 不应报错：${res.content?.[0]?.text?.slice(0, 200)}`)
+    assert.match(res.content[0].text, re, `${name} 渲染`)
+  }
+  assert.equal(execCount, 0, '五个自管理工具都不得触发 runGrape/执行通道')
+  await client.close()
 })

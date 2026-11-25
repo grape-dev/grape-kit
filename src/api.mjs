@@ -225,7 +225,57 @@ export async function health(opts = {}) {
   }
 }
 
-/* ── 端点封装：与 tools.mjs 的工具面一一对应 ─────────────── */
+
+/**
+ * multipart 上传（技能 ZIP）。apiRequest 只发 JSON，这条通道单独走 FormData：
+ * Content-Type 必须交给 fetch 自动生成 boundary（手写 application/json 会 422）。
+ * 错误体解析与 apiRequest 同源（401/403 hint 一致），但 detail.errors 原样保留——
+ * 技能校验失败时服务端一次返回多条 errors，截断第一条正是宿主反复试错的根因。
+ */
+export async function apiUpload(path, formData, opts = {}) {
+  const env = opts.env || process.env
+  const { token, baseUrl } = resolveCredentials(env)
+  if (!token) {
+    throw new GrapeApiError('Missing token: 请设置 GRAPE_API_TOKEN，或写入 ~/.grape/config.json {"token":"grape_xxx","base_url":"..."}', { status: 401 })
+  }
+  const ctrl = new AbortController()
+  const t = setTimeout(() => ctrl.abort(), opts.timeoutMs ?? 120_000)
+  let resp
+  try {
+    resp = await fetch(new URL(baseUrl.replace(/\/$/, '') + path), {
+      method: 'POST',
+      headers: { Authorization: 'Bea' + 'rer ' + token },
+      body: formData,
+      signal: ctrl.signal,
+    })
+  } catch (e) {
+    const msg = e.name === 'AbortError'
+      ? `上传超时（>${Math.round((opts.timeoutMs ?? 120000) / 1000)}s）`
+      : `无法连接 ${baseUrl}（${e.message}）`
+    throw new GrapeApiError(msg, { status: 0, hint: '检查 GRAPE_BASE_URL / 网络' })
+  } finally {
+    clearTimeout(t)
+  }
+  const text = await resp.text()
+  let json
+  try { json = text ? JSON.parse(text) : null } catch { json = undefined }
+  if (!resp.ok) {
+    const code = json && typeof json.code === 'string' ? json.code : ''
+    const d = json && json.detail
+    const message = (d && typeof d === 'object')
+      ? String(d.message ?? JSON.stringify(d))
+      : String(d ?? json?.message ?? text).slice(0, 400)
+    const errors = (d && typeof d === 'object' && Array.isArray(d.errors)) ? d.errors : []
+    const err = new GrapeApiError(`grape API ${resp.status}: ${message}`, {
+      status: resp.status, code, hint: hintFor(resp.status, { path, detail: message, baseUrl, code }),
+    })
+    err.detailErrors = errors
+    throw err
+  }
+  return json
+}
+
+/* ── 端点封装：与 tools.mjs 的 31 个工具一一对应 ─────────────── */
 
 /** A2A 节点枚举：与平台 pipelines.json 的 agent tag 对齐 */
 export const AGENT_TYPES = ['vod', 'issue', 'coding', 'qa', 'sre']
@@ -280,7 +330,30 @@ export const api = {
   startIssue: (issueId) => apiRequest('POST', `/api/issues/${issueId}/start`),
 
   // 场景
-  scenesMarket: (q) => apiRequest('GET', '/api/scenes/market', { query: q ? { q } : {} }),
+//
+  // 三条通道语义不同，别再混用（grape-kit 测试报告 P3/P4/P5 实锤）：
+  // - POST /api/scenes/market/{market_id}/apply?owner=&repo=  → 在仓库内“创建”场景副本
+  //   （返回新 scene_id=custom-xxxx；同模板重复应用幂等复用）。这是“应用场景”。
+  // - POST /api/scenes/apply/{owner}/{repo}                   → 只把场景节点的技能/引擎绑定
+  //   刷进 devops_agent_session，**不改仓库场景归属**，响应里也没有 scene_id。
+  // - PUT  /api/repos/{owner}/{repo}/default-scene             → 写 managed_repos.dev_scene，
+  //   这才是“新建 issue 默认走哪个场景”。（平台此前没有这个通用端点，kit 只能靠猜）
+  scenesMarket: (q) => apiRequest('GET', '/api/scenes/market', { query: { ...(q ? { q } : {}), limit: 200 } }),
+  /** 仓库内场景列表（id 形如 custom-xxxxxxxx）——判断“应到/应用了”的唯一事实源 */
+  repoScenes: (owner, repo) => apiRequest('GET', '/api/scenes', { query: { repo: `${owner}/${repo}` } }),
+  /** 应用市场场景到仓库：创建场景副本，返回 {scene_id, reused} */
+  marketApply: (owner, repo, marketId, displayName) =>
+    apiRequest('POST', `/api/scenes/market/${marketId}/apply`, {
+      query: { owner, repo },
+      body: displayName ? { display_name: displayName } : {},
+    }),
+  /** 设为仓库默认场景（写 dev_scene；空串=清空回智能推荐）。写后由服务端回读验证 */
+  setDefaultScene: (owner, repo, sceneId) =>
+    apiRequest('PUT', `/api/repos/${owner}/${repo}/default-scene`, { body: { scene_id: sceneId || '' } }),
+  sceneRecommendConfig: (owner, repo) => apiRequest('GET', `/api/repos/${owner}/${repo}/scene-recommend-config`),
+  setSceneRecommendFallback: (owner, repo, fallbackScene, rules = []) =>
+    apiRequest('PUT', `/api/repos/${owner}/${repo}/scene-recommend-config`,
+      { body: { fallback_scene: fallbackScene, rules } }),
   /** 场景详情：节点链的权威来源（每节点带 next），客户端兜底派发据此推导下一节点 */
   scenesDetail: (sceneId) => apiRequest('GET', `/api/scenes/${encodeURIComponent(String(sceneId ?? '').trim())}`),
   applyScene: (owner, repo, sceneId) => apiRequest('POST', `/api/scenes/apply/${owner}/${repo}`, { body: { scene_id: sceneId } }),
@@ -298,6 +371,34 @@ export const api = {
   skillsList: () => apiRequest('GET', '/api/skills'),
   skillsSearch: (q) => apiRequest('GET', '/api/skills/search', { query: { q } }),
   skillDetail: (skillId) => apiRequest('GET', `/api/skills/by-id/${skillId}`),
+  /**
+   * 上传技能 ZIP。scope=user 个人技能；scope=repo 需 repo + agent_type（必填）。
+   * 服务端校验失败返回 detail.errors 列表（apiUpload 会保留全部错误）。
+   */
+  skillUpload: (zipBuffer, filename, fields = {}) => {
+    const fd = new FormData()
+    fd.append('file', new Blob([zipBuffer], { type: 'application/zip' }), filename || 'skill.zip')
+    fd.append('scope', fields.scope || 'user')
+    if (fields.repo) fd.append('repo', fields.repo)
+    fd.append('agent_type', fields.agent_type || '')
+    if (fields.tags) fd.append('tags', fields.tags)
+    if (fields.summary) fd.append('summary', fields.summary)
+    if (fields.change_note) fd.append('change_note', fields.change_note)
+    return apiUpload('/api/skills/upload', fd)
+  },
+  /** 按 skill_id 覆盖既有技能包（= 技能升级，保留 id/场景引用/点赞） */
+  skillUpdate: (zipBuffer, skillId, fields = {}) => {
+    const fd = new FormData()
+    fd.append('file', new Blob([zipBuffer], { type: 'application/zip' }), fields.filename || 'skill.zip')
+    if (fields.agent_type) fd.append('agent_type', fields.agent_type)
+    if (fields.tags) fd.append('tags', fields.tags)
+    if (fields.summary) fd.append('summary', fields.summary)
+    if (fields.change_note) fd.append('change_note', fields.change_note)
+    return apiUpload(`/api/skills/by-id/${skillId}/update`, fd)
+  },
+  /** 跨 scope 复制技能（user ↔ repo；原记录保留，不是移动） */
+  skillConvert: (skillName, repoKey, sourceScope = 'user') =>
+    apiRequest('POST', '/api/skills/convert', { body: { skill_name: skillName, repo: repoKey, source_scope: sourceScope } }),
   knowledgeList: (repo, q) => apiRequest('GET', '/api/knowledge', { query: { repo, ...(q ? { q } : {}) } }),
   knowledgeDetail: (id) => apiRequest('GET', `/api/knowledge/${id}`),
   templatesList: () => apiRequest('GET', '/api/project-templates'),

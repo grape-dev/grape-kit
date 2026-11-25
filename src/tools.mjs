@@ -12,14 +12,16 @@
  *   render(json)    -> string     Markdown（无 UI 补偿层）
  */
 import * as R from './render.mjs'
+import * as lifecycleModule from './lifecycle.mjs'
 import { hostname, tmpdir } from 'node:os'
 import {
   existsSync, mkdirSync, mkdtempSync, writeFileSync, chmodSync, rmSync, rmdirSync,
-  readdirSync, readFileSync, lstatSync, realpathSync,
+  readdirSync, readFileSync, lstatSync, realpathSync, statSync,
 } from 'node:fs'
 import { execFileSync } from 'node:child_process'
-import { join, resolve, sep, dirname } from 'node:path'
+import { join, resolve, sep, dirname, basename, resolve as resolvePath } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { zipDirectory } from './zip.mjs'
 import { api, apiRequest, getBaseUrl, AGENT_TYPES, normalizeTriggerAgent, GrapeApiError } from './api.mjs'
 import { getServerCapabilities, normalizeSkills, evaluateTakeoverGate } from './capabilities.mjs'
 import { materializeSkillAssets, SKILL_ROOT_DIRNAME } from './skill-materialize.mjs'
@@ -609,6 +611,26 @@ function resolveDispatchTarget(json = {}, args = {}) {
   return { owner, repo, issue_number: Number.isFinite(issue) && issue > 0 ? issue : 0 }
 }
 
+/** 补发前的平台事实核查：issue 事件里是否已有下一节点的 a2a 派发事件（seq 门槛避免拿历史事件当本次派发） */
+async function findDispatchedSeq(apiMod, target, agent, sinceSeq) {
+  if (!agent || !target?.owner || !target?.repo || !target?.issue_number) return 0
+  if (typeof apiMod?.issueEvents !== 'function') return 0
+  try {
+    const d = await apiMod.issueEvents(target.owner, target.repo, target.issue_number)
+    const evs = Array.isArray(d?.events) ? d.events : (Array.isArray(d) ? d : [])
+    const floor = Number(sinceSeq) || 0
+    const hits = evs
+      .filter((e) => asAgentType(e?.agent_type ?? e?.agent) === agent)
+      .filter((e) => String(e?.event_type ?? '').includes('a2a'))
+      .filter((e) => Number(e?.seq) >= floor)
+      .map((e) => Number(e?.seq) || 0)
+      .filter((s) => s > 0)
+    return hits.length ? Math.max(...hits) : 0
+  } catch {
+    return 0
+  }
+}
+
 /** 补发时的 A2A context：说清上一节点已完成，避免下一节点重复实现 */
 function dispatchContext(json, nextAgent) {
   const sid = String(json.session?.id || json.session_id || '').trim()
@@ -638,15 +660,28 @@ function dispatchContext(json, nextAgent) {
  * - 兜底目标按场景接口节点 `next` 推导（响应未带链时取 scenes detail），部署类节点保留用户确认门。
  */
 async function ensureNextNodeDispatched(json, args = {}, apiMod = api) {
-  const base = json && typeof json === 'object' ? json : { raw: json }
-  const sess = base.session || {}
+let base = json && typeof json === 'object' ? json : { raw: json }
+  let sess = base.session || {}
+  let target = resolveDispatchTarget(base, args)
+  // 交回响应常常不带仓库/issue 标识（实测 shape：next_agent + handoff_seq，无 repo_key），
+  // 于是兜底派发误判「缺少仓库/issue 标识」→ 假警报 pending_dispatch（测试报告 P6）。
+  // 会话记录里 repo_key/issue_number 是权威的：缺标识时回读一次会话再解析，不靠猜测。
+  const sid = String(base.session?.id || base.session_id || args.session_id || '').trim()
+  if ((!target.owner || !target.repo || !target.issue_number) && sid && typeof apiMod?.takeoverGet === 'function') {
+    try {
+      const fresh = await apiMod.takeoverGet(sid)
+      const s = fresh?.session || fresh || {}
+      base = { ...base, session: { ...sess, ...s } }
+      sess = base.session
+    } catch { /* 读不到会话就保留原判：仍按 no_target 显式告警 */ }
+    target = resolveDispatchTarget(base, args)
+  }
   const scene = await resolveSceneChain(base, args, apiMod)
   const chain = scene.chain
   const { agent: nextAgent, unknown: unknownNextAgent, derived, tail, notInChain } = resolveNextTarget(base, chain, scene.nextMap)
   const chainLabel = chain.length ? chain.join('→') : '未知（场景接口未返回节点链）'
   const evidence = dispatchEvidenceOf(base)
   const roundFloor = seqOf(base, 'handoff_seq')
-  const target = resolveDispatchTarget(base, args)
   // 无法派发时一律落到「待派发」：显式告警；标记随交回结果返回，事后经会话记录可查（见 pending 注释）。
   // `cause` 只用于渲染分支（交回未成功 / 节点名不认识 / 派发未证实 的处置动作各不相同）。
   const pending = (reason, cause = 'blocked') => ({
@@ -728,7 +763,7 @@ async function ensureNextNodeDispatched(json, args = {}, apiMod = api) {
   if (!target.owner || !target.repo || !target.issue_number) {
     return pending(`next_node_pending_dispatch: 缺少仓库/issue 标识，无法派发 ${nextAgent}；可用 owner/repo/issue_number 入参重试`, 'no_target')
   }
-  // 双判据缺失：以本轮交回事件序号为下界回读 issue 事件，确认本轮无下一节点 a2a_event 才补发。
+// 双判据缺失：以本轮交回事件序号为下界回读 issue 事件，确认本轮无下一节点 a2a_event 才补发。
   // 回读失败/被截断时落 pending，不盲目补发。
   if (typeof apiMod.issueEvents !== 'function') {
     return pending(`next_node_pending_dispatch: 当前 api 模块缺少 issueEvents，无法回读事件确认 ${nextAgent} 是否已派发；先核实事件再补发`, 'readback_failed')
@@ -793,10 +828,275 @@ async function reviewPost(path, body) {
   }
 }
 
+/* ── 技能上传：本地预检 + ZIP 打包（对齐服务端 validate_skill 口径） ── */
+
+/** 系统标签（与 Agent 类型同名会被服务端 400「标签不能与系统标签重名」拦掉） */
+const SYSTEM_SKILL_TAGS = new Set([...AGENT_TYPES, 'chat', 'auto'])
+
+/** 解析 SKILL.md 的 YAML frontmatter（只取顶层 `key: value`，够校验用，不引 yaml 依赖） */
+export function parseSkillFrontmatter(md) {
+  const m = /^\s*---\r?\n([\s\S]*?)\r?\n---/.exec(String(md || ''))
+  if (!m) return null
+  const out = {}
+  for (const raw of m[1].split(/\r?\n/)) {
+    const line = raw.trim()
+    if (!line || line.startsWith('#') || /^\s/.test(raw)) continue
+    const idx = line.indexOf(':')
+    if (idx <= 0) continue
+    const key = line.slice(0, idx).trim()
+    let val = line.slice(idx + 1).trim()
+    val = val.replace(/\s+#.*$/, '')  // 行内注释
+    if (val.startsWith('#')) val = ''
+    const clean = val.replace(/^['"]|['"]$/g, '').trim()
+    if (clean) out[key] = clean   // 空值不落键（与缺字段同义，preflight 用 ?? '' 取值）
+  }
+  return out
+}
+
+/**
+ * 技能目录本地预检：服务端 validate_skill 的硬性要求前置到本地，
+ * 一次把所有问题列出来（服务端只会 400 + errors 列表，宿主侧常只看到第一条）。
+ * 返回 { rootName, name, version, description, errors[] }
+ */
+export function preflightSkillDir(dir, overrideName = '') {
+  const abs = resolvePath(String(dir || '').trim())
+  if (!dir || !existsSync(abs) || !statSync(abs).isDirectory()) {
+    return { rootName: '', name: '', version: '', description: '', errors: [`目录不存在或不是目录：${dir || '（空）'}`] }
+  }
+  const dirName = basename(abs)
+  const rootName = String(overrideName || dirName)
+  const mdPath = `${abs}/SKILL.md`
+  if (!existsSync(mdPath)) {
+    return { rootName, name: '', version: '', description: '', errors: [`缺少 ${mdPath}（技能根目录必须直接包含 SKILL.md）`] }
+  }
+  const errors = []
+  const fm = parseSkillFrontmatter(readFileSync(mdPath, 'utf8'))
+  if (!fm) errors.push('SKILL.md 缺少 YAML Front Matter（首行 ---、字段区、再一行 ---）')
+  const name = String(fm?.name ?? '').trim()
+  const version = String(fm?.version ?? '').trim()
+  const description = String(fm?.description ?? '').trim()
+  if (!name) errors.push('frontmatter 缺 name（只允许小写字母/数字/连字符，且必须等于目录名）')
+  else if (!/^[a-z0-9-]+$/.test(name)) errors.push(`frontmatter name='${name}' 只允许小写字母、数字、连字符`)
+  else if (name !== rootName) errors.push(`frontmatter name='${name}' 必须与技能目录名（${rootName}）一致；改名或改目录后再传`)
+  if (version && !/^v?\d+(\.\d+){0,2}$/.test(version)) errors.push(`frontmatter version='${version}' 需为 x / x.y / x.y.z（可带 v 前缀）`)
+  if (!description) errors.push('frontmatter description 不能为空（技能列表靠它展示）')
+  else if (description.length > 2048) errors.push('frontmatter description 不超过 2048 字')
+  return { rootName, name, version, description, errors }
+}
+
+/** 标签预检：≤5 个、≤12 字、不与系统标签重名（服务端同名规则） */
+export function preflightSkillTags(tags) {
+  const list = String(tags || '').split(',').map((t) => t.trim()).filter(Boolean)
+  const errors = []
+  if (list.length > 5) errors.push(`标签最多 5 个（当前 ${list.length} 个）`)
+  const long = list.filter((t) => t.length > 12)
+  if (long.length) errors.push(`单个标签最多 12 字，超出：${long.join('、')}`)
+  const conflicts = list.filter((t) => SYSTEM_SKILL_TAGS.has(t.toLowerCase()))
+  if (conflicts.length) errors.push(`标签不能与系统标签（Agent 类型）重名：${conflicts.join('、')}——改用业务词，如 deploy-playbook、obs-site`)
+  return { list, errors }
+}
+
+async function uploadSkillNative(a) {
+  const scope = String(a.scope || 'user')
+  if (!['user', 'repo'].includes(scope)) {
+    throw new GrapeApiError(`scope 只能是 user 或 repo（收到 '${scope}'）`, { status: 400 })
+  }
+  if (!AGENT_TYPES.includes('chat')) { /* schema 已枚举，防御未来变更 */ }
+  if (!a.agent_type) {
+    throw new GrapeApiError('缺少 agent_type（技能类型）：vod / issue / coding / qa / sre / chat / auto', { status: 400 })
+  }
+  const repoFull = a.owner && a.repo ? `${a.owner}/${a.repo}` : ''
+  if (scope === 'repo' && !repoFull) {
+    throw new GrapeApiError('scope=repo 必须同时给 owner + repo（仓库技能要落到具体仓库）', { status: 400 })
+  }
+  const pf = preflightSkillDir(a.path, a.skill_name)
+  const tagCheck = preflightSkillTags(a.tags)
+  const errors = [...pf.errors, ...tagCheck.errors]
+  if (errors.length) {
+    throw new GrapeApiError(`技能本地预检未通过（未发起上传，共 ${errors.length} 条）：\n- ${errors.join('\n- ')}`, { status: 400 })
+  }
+  const { buffer, rootName, files } = zipDirectory(resolvePath(a.path), { rootName: pf.rootName })
+  const json = await api.skillUpload(buffer, `${rootName}.zip`, {
+    scope,
+    repo: repoFull,
+    agent_type: a.agent_type,
+    tags: a.tags || '',
+    summary: a.summary || pf.description.slice(0, 200),
+    change_note: a.change_note || '',
+  })
+  return {
+    ...json,
+    root_name: rootName,
+    files_count: files.length,
+    bytes: buffer.length,
+    version: pf.version || '1.0.0',
+    scope,
+    repo: repoFull,
+  }
+}
+
+function renderSkillWrite(json, verb) {
+  if (!json || typeof json !== 'object') return R.fallbackJson(json)
+  if (json.detail) {
+    return `技能${verb}失败：${typeof json.detail === 'string' ? json.detail : JSON.stringify(json.detail)}`
+  }
+  const sid = json.skill_id ?? json.id ?? json.data?.skill_id ?? ''
+  const lines = [`### 技能已${verb}`, '']
+  lines.push(`- 技能名: \`${json.root_name ?? json.skill_name ?? json.name ?? ''}\`${json.version ? ` · v${json.version}` : ''}`)
+  if (sid) lines.push(`- skill id: \`${sid}\``)
+  if (json.scope) lines.push(`- scope: ${json.scope}${json.repo ? ` · 仓库 ${json.repo}` : ''}`)
+  if (json.bytes) lines.push(`- 包大小: ${json.bytes} B（${json.files_count ?? '?'} 个文件）`)
+  if (json.message) lines.push(`- ${json.message}`)
+  lines.push('', `_下一步（绑到场景节点）：grape_list_scenes(owner, repo) 取场景副本 → 读场景详情拿 nodes → 把目标节点的 \`skill_id\` 改成 \`${sid || '新 id'}\` → 整场景 PUT 回去。平台目前**没有节点级写端点**（D5 缺口），只能整场景提交；repo 级场景不能引用 user 级技能，个人技能先用 grape_convert_skill 复制成 repo 技能。_`)
+  return lines.join('\n')
+}
+
 const OWNER_REPO_NUM = {
   owner: str('仓库归属（owner）'),
   repo: str('仓库名（repo）'),
   number: num('issue 编号'),
+}
+
+/* ── Issue #27 写工具公共层：只读检出 → 生成命令 → 决策门渲染（零执行） ── */
+
+const HOST_TARGETS = lifecycleModule.HOST_NAMES
+/** 状态词表与更新状态词表的唯一来源（lifecycle 导出）：判定与渲染共用常量，改名不会静默失效 */
+const { HOST_STATE, UPDATE_STATE } = lifecycleModule
+
+/** 检出状态的人类可读标签（damaged 必须显式「先修复」，否则用户会照装一遍再踩同样的坑） */
+const STATE_LABEL = {
+  [HOST_STATE.INSTALLED]: '已装配',
+  [HOST_STATE.ABSENT]: '未装配（文件在、无条目）',
+  [HOST_STATE.MISSING]: '未装配（无配置文件）',
+  [HOST_STATE.DAMAGED]: '配置损坏（先修复）',
+}
+
+const WRITE_GATE = '⚠️ 决策门：以上命令只生成、未执行。请先把命令块与影响范围交给用户确认，确认后再执行（可随时 Ctrl-C 打断）。'
+const NO_TERMINAL_HINT = '无终端工具的宿主：把命令与需要编辑的文件路径原样给用户，由用户手动执行/编辑。'
+
+/**
+ * install / uninstall 共用的计划构建：逐宿主只读检出 → 需要动作的宿主才生成命令。
+ * damaged 宿主（配置解析失败）**一律不生成命令**：CLI 侧的 install/uninstall 对解析失败的
+ * 配置直接 `exit 1`（「请先修复或移走该文件后重试」），照给命令等于给一条必失败的动作；
+ * 它们单列进 `blocked`，带出解析错误，让用户先修配置。
+ * @param {'install'|'uninstall'} action
+ * @param {string} targetArg 宿主名或 all（缺省 all）
+ */
+function buildHostPlan(action, targetArg, L) {
+  const target = String(targetArg || 'all').trim()
+  if (target !== 'all' && !HOST_TARGETS.includes(target)) {
+    return { action, target, error: `不支持的宿主：${target}（可用：${HOST_TARGETS.join(' / ')} / all）` }
+  }
+  const rows = L.detectHostStatus({})
+  const targets = target === 'all' ? HOST_TARGETS : [target]
+  const hosts = targets.map((host) => {
+    const r = rows.find((x) => x.host === host) || { host, state: HOST_STATE.MISSING, installed: false, path: '', skillsDir: '', entry: '' }
+    const blocked = r.state === HOST_STATE.DAMAGED
+    const needsAction = blocked ? false : action === 'install' ? !r.installed : !!r.installed
+    return {
+      host,
+      state: r.state || HOST_STATE.MISSING,
+      path: r.path || '',
+      entry: r.entry || '',
+      skillsDir: r.skillsDir || '',
+      installed: !!r.installed,
+      blocked,
+      evidence: r.evidence || r.error || '',
+      error: r.error || '',
+      // 修复指引不给可执行命令：配置坏着跑 install/uninstall 必被 CLI 拒，只说明「改什么、改完怎么办」
+      repair: blocked ? `先修复或移走 ${r.path}（${r.error || '配置解析失败'}），修好后重跑本工具即可生成${action === 'install' ? '装配' : '卸载'}命令` : '',
+      command: needsAction ? `npx -y @grape-dev/grape-kit ${action} --target ${host}` : '',
+    }
+  })
+  const active = hosts.filter((h) => h.command)
+  const blocked = hosts.filter((h) => h.blocked)
+  const plan = {
+    action,
+    target,
+    hosts,
+    commands: active.map((h) => h.command),
+    skipped: hosts.filter((h) => !h.command && !h.blocked).map((h) => h.host),
+    blocked: blocked.map((h) => ({ host: h.host, path: h.path, error: h.error, repair: h.repair })),
+  }
+  if (action === 'uninstall') {
+    // 影响预览：只列不删。条目 + skill 副本 + （officeace）客户端侧手动删除提示
+    plan.effects = active.flatMap((h) => {
+      const out = [`移除 ${h.entry || 'grape-kit'} 条目（${h.path}）`]
+      if (h.skillsDir) out.push(`删除 skill 副本（${h.skillsDir}/grape-remote/）`)
+      if (h.host === 'officeace') out.push('果办OfficeAce 侧还需在「扩展 → 连接器 → 我的连接器」手动删除该连接器')
+      return out
+    })
+    plan.dryRun = active.map((h) => `npx -y @grape-dev/grape-kit uninstall --target ${h.host} --dry-run`).join('\n')
+  }
+  return plan
+}
+
+/** 写工具渲染：状态表格 + 待执行命令 + 决策门（uninstall 追加影响预览与 --dry-run） */
+function renderHostPlan(json) {
+  if (!json || typeof json !== 'object') return R.fallbackJson(json)
+  if (json.error) return `### ${json.action === 'uninstall' ? '卸载' : '装配'} grape-kit\n\n${json.error}`
+  const isUninstall = json.action === 'uninstall'
+  const lines = [
+    `### ${isUninstall ? '卸载' : '装配'} grape-kit（命令生成，未执行）`, '',
+    R.mdTable(json.hosts || [], [
+      { h: '宿主', v: 'host' },
+      { h: '状态', v: (r) => STATE_LABEL[r.state] || r.state || '-' },
+      { h: '依据文件', v: (r) => `${r.path || '-'}${r.entry ? `（${r.entry}）` : ''}` },
+    ]),
+  ]
+  if (json.skipped?.length) {
+    lines.push('', `已${isUninstall ? '跳过' : '装配'}的宿主本次不生成命令：${json.skipped.join(' / ')}`)
+  }
+  // damaged 宿主单列：表内既已写「配置损坏（先修复）」，命令块就不能照给（CLI 会 exit 1）
+  if (json.blocked?.length) {
+    lines.push('', '**⚠️ 配置损坏的宿主本次不生成命令（照着执行必被 CLI 拒绝，先修复）：**')
+    for (const b of json.blocked) {
+      lines.push(`- ${b.host} — ${b.repair || `${b.path}（${b.error || '配置解析失败'}）`}`)
+    }
+  }
+  if (isUninstall && json.effects?.length) {
+    lines.push('', '**将移除的内容（只列不删，执行前请逐条确认）**', '')
+    for (const e of json.effects) lines.push(`- ${e}`)
+  }
+  if (json.commands?.length) {
+    lines.push('', `**待执行命令（逐宿主复制执行）**`, '', '```bash', ...json.commands, '```')
+    if (isUninstall && json.dryRun) {
+      lines.push('', '**先预览（--dry-run 只列不删，推荐先跑一遍）**', '', '```bash', json.dryRun, '```')
+    }
+  } else {
+    // 空命令有两种真实原因：全 blocked（配置损坏待修）vs 全为相反状态——混说会让用户去查错方向（QA SJ5）
+    lines.push('', json.blocked?.length
+      ? '_本次没有可生成的命令：目标宿主配置均损坏（先按上方「先修复」逐条处理，修好后重跑本工具）。_'
+      : '_本次没有需要生成的命令（目标宿主均为相反状态）。_')
+  }
+  lines.push('', isUninstall
+    ? '⚠️ 强决策门：卸载会移除宿主配置条目与 skill 副本（不可自动回滚），以上命令只生成、未执行——执行前必须向用户逐条确认影响范围。'
+    : '⚠️ 决策门：安装会改写宿主 MCP 配置（installer 自带备份），以上命令只生成、未执行——执行前必须向用户确认目标宿主。',
+  NO_TERMINAL_HINT)
+  return lines.join('\n')
+}
+
+/**
+ * 版本全景「服务端」一行：值列与备注列由同一组分支决定（三分支：未探测 / 不可达 / 可达）。
+ * 抽成函数的原因：原先内联四层三元链，改一个分支要看穿整行才能确认其余分支没被带歪。
+ * @returns {{v: string, note: string}}
+ */
+function serverRow(srv = {}) {
+  const url = srv.baseUrl || ''
+  const contract = srv.contractVersion ? `契约版本 ${srv.contractVersion}` : ''
+  if (srv.probe === 'skipped') {
+    return {
+      v: `未探测（缺凭据）${url}`,
+      note: `${srv.reason || '未配置凭据'}${contract ? `；${contract}` : ''}`,
+    }
+  }
+  if (srv.reachable) {
+    return { v: `可达 ${url}`, note: contract || '契约版本未取到（404/不可达时省略）' }
+  }
+  return {
+    v: `不可达 ${url}`,
+    note: `${srv.error || ''}${srv.hint ? `（${srv.hint}）` : ''}${contract ? `；${contract}` : ''}`,
+  }
 }
 
 export const TOOLS = [
@@ -934,16 +1234,17 @@ export const TOOLS = [
     name: 'grape_create_issue',
     description: '⚠️ 用户决策层动作：建单前必须向用户确认标题与描述。' +
       '在托管仓库创建 issue（可选同时触发流水线——由服务端场景配置决定）。' +
-      'body 支持 title 与 markdown 正文 description（字段名以服务端契约为准，实测为 description 而非 body）。',
+      '`description` 是**必填**：服务端缺正文直接 400「任务描述必填」，只有标题会建单失败。' +
+      '正文请写清目标、验收标准、涉及模块；字段名是 description（不是 body）。',
     schema: {
       type: 'object',
       properties: {
         owner: str('owner'),
         repo: str('repo'),
         title: str('issue 标题'),
-        description: str('issue 正文（markdown，可选）'),
+        description: str('issue 正文（markdown，必填：目标 + 验收标准 + 涉及模块）'),
       },
-      required: ['owner', 'repo', 'title'],
+      required: ['owner', 'repo', 'title', 'description'],
     },
     buildArgs(a) {
       const body = { title: a.title }
@@ -960,41 +1261,190 @@ export const TOOLS = [
   },
   {
     name: 'grape_list_scenes',
-    description: '列出场景市场可用的流水线场景（agent-dev / cloud-native / iac 等）。',
+    description:
+      '列场景，两种用法：① 不传 owner/repo → 场景市场（`id` 是应用场景用的数字标识，`name` 是场景名）；' +
+      '② 传 owner/repo → 该仓库已落地的场景副本（id 形如 custom-xxxxxxxx，是 grape_set_repo_scene 唯一合法入参）。' +
+      '市场模板 ≠ 仓库场景：仓库必须先应用（grape_apply_scene）生成副本，副本才能被设为默认。',
     schema: {
       type: 'object',
-      properties: { q: str('关键字过滤（可选）') },
+      properties: {
+        owner: str('owner（可选；与 repo 同传则列仓库场景）'),
+        repo: str('仓库名（可选）'),
+        q: str('关键字过滤（仅市场列表，可选）'),
+      },
     },
     buildArgs(a) {
+      if (a.owner && a.repo) return ['scenes', 'list', '--repo', `${a.owner}/${a.repo}`]
       const args = ['scenes', 'market', 'list']
       if (a.q) args.push('--q', String(a.q))
       return args
     },
-    async native(a) { return api.scenesMarket(a.q) },
-    render: R.renderScenes,
+    async native(a) {
+      if (a.owner && a.repo) return api.repoScenes(a.owner, a.repo)
+      return api.scenesMarket(a.q)
+    },
+    render(json) {
+      const rows = R.asArray(json?.scenes ?? json?.items ?? json)
+      const isRepo = rows.some((r) => String(r.id ?? r.scene_id ?? '').startsWith('custom-') || r.scope === 'repo')
+      if (!rows.length) {
+        return isRepo
+          ? '仓库内还没有场景副本：先用 grape_apply_scene(owner, repo, scene=市场数字id或场景名) 应用。'
+          : '场景市场为空（或 token 无读权限）。'
+      }
+      const table = isRepo
+        ? R.mdTable(rows, [
+            { h: '场景 ID（设默认用）', v: (r) => r.id ?? r.scene_id ?? '' },
+            { h: '名称', v: (r) => r.display_name ?? r.name ?? '' },
+            { h: '节点链', v: (r) => (Array.isArray(r.nodes) ? r.nodes.map((n) => n.id || n.tag).join('→') : '') },
+          ])
+        : R.mdTable(rows, [
+            { h: '市场 ID（应用用）', v: (r) => r.id ?? '' },
+            { h: '场景名', v: (r) => r.name ?? '' },
+            { h: '标题', v: (r) => r.display_name ?? '' },
+            { h: '范围', v: (r) => r.scope ?? '' },
+          ])
+      return `${isRepo ? '#### 仓库场景副本' : '#### 场景市场'}\n\n${table}`
+    },
   },
   {
     name: 'grape_apply_scene',
     description:
-      '为仓库切换流水线场景。⚠️ 属用户决策层动作：调用前必须向用户确认目标场景。',
+      '把市场场景应用到仓库（在仓库内创建场景副本），可选同时设为仓库默认场景。三步语义，别记错：' +
+      '① POST /api/scenes/market/{市场数字id}/apply?owner=&repo= 创建仓库副本，返回 scene_id=custom-xxxxxxxx（同模板重复应用幂等复用）；' +
+      '② 回读 GET /api/scenes?repo=owner/repo 确认副本真的存在（不信回执）；' +
+      '③ set_default=true 时再调 PUT /api/repos/{owner}/{repo}/default-scene —— 只有这一步决定「新建 issue 默认走哪条流水线」。' +
+      '入参 scene 只认市场数字 id 或场景名（先用 grape_list_scenes 不传 owner/repo 获取）；custom- 开头的副本 id 不属于应用入参。' +
+      '⚠️ 不要拿 POST /api/scenes/apply/{owner}/{repo} 当切场景：它只把节点技能与引擎绑定刷进 agent_session，不改场景归属、响应也没有 scene_id（历史 P0：返回成功但什么都没切）。' +
+      '⚠️ 用户决策层动作：调用前必须向用户确认目标场景；set_default=true 会改变该仓库后续新建需求的默认流水线。',
     schema: {
       type: 'object',
       properties: {
         owner: str('owner'),
-        repo: str('repo'),
-        scene_id: str('场景 ID（从 grape_list_scenes 获取）'),
+        repo: str('仓库名'),
+        scene: str('市场数字 id（如 10）或场景名（如 huawei-skill）'),
+        display_name: str('仓库内场景显示名（可选；与仓库已有场景重名会 409，换名重试）'),
+        set_default: bool('是否同时设为仓库默认场景（默认 false）'),
       },
-      required: ['owner', 'repo', 'scene_id'],
+      required: ['owner', 'repo', 'scene'],
     },
-    buildArgs(a) {
-      return ['scenes', 'apply', '--owner', a.owner, '--repo', a.repo, '--json', JSON.stringify({ scene_id: a.scene_id })]
-    },
-    async native(a) { return api.applyScene(a.owner, a.repo, a.scene_id) },
-    render(json) {
-      if (json && typeof json === 'object' && (json.ok ?? json.scene_id)) {
-        return `场景已应用：${json.scene_id ?? ''} ${json.message ?? ''}`.trim()
+    async native(a) {
+      const owner = a.owner
+      const repo = a.repo
+      const wanted = String(a.scene ?? a.scene_id ?? '').trim()
+      if (!wanted) {
+        throw new GrapeApiError('缺少场景标识：传市场数字 id（grape_list_scenes 的 id 列）或场景名', { status: 400 })
       }
-      return R.fallbackJson(json)
+      if (/^custom-/i.test(wanted)) {
+        throw new GrapeApiError(
+          `'${wanted}' 是仓库内已有的场景副本 id，不是市场场景。要把它设为默认请用 grape_set_repo_scene；要重新应用市场模板请传市场数字 id 或场景名。`,
+          { status: 400 })
+      }
+      const marketJson = await api.scenesMarket()
+      const scenes = R.asArray(marketJson?.scenes ?? marketJson?.items ?? marketJson)
+      let market = null
+      if (/^\d+$/.test(wanted)) market = scenes.find((s) => String(s.id) === wanted) || null
+      else market = scenes.find((s) => String(s.name) === wanted || String(s.display_name) === wanted) || null
+      if (!market) {
+        // 数字 id 在列表里找不到时不盲发请求：服务端会把未命中的场景静默回落成 default
+        const hint = /^\d+$/.test(wanted)
+          ? `市场里没有 id=${wanted} 的场景`
+          : `市场里没有名为 '${wanted}' 的场景`
+        const avail = scenes.slice(0, 20).map((s) => `${s.id}:${s.name}`).join('、')
+        throw new GrapeApiError(`${hint}。可用（id:name）：${avail || '（市场为空，先确认 token 是否有权读市场）'}`, { status: 404 })
+      }
+      const applied = await api.marketApply(owner, repo, market.id, a.display_name || '')
+      // 回读：副本必须能在仓库场景列表里查到，否则“已应用”只是回执
+      const repoJson = await api.repoScenes(owner, repo)
+      const rows = R.asArray(repoJson?.scenes ?? repoJson?.items ?? repoJson)
+      const sceneId = applied?.scene_id || ''
+      const verified = Boolean(sceneId && rows.some((r) => String(r.id ?? r.scene_id ?? '') === sceneId))
+      let defaultResult = null
+      if (a.set_default && sceneId && verified) {
+        defaultResult = await api.setDefaultScene(owner, repo, sceneId)
+      }
+      return {
+        market_id: market.id,
+        market_name: market.name,
+        market_display: market.display_name ?? market.name,
+        applied,
+        scene_id: sceneId,
+        verified,
+        set_default: Boolean(a.set_default),
+        default_result: defaultResult,
+        repo_scenes: rows.map((r) => ({ id: r.id ?? r.scene_id ?? '', name: r.display_name ?? r.name ?? '' })),
+      }
+    },
+    render(json) {
+      if (!json || typeof json !== 'object') return R.fallbackJson(json)
+      const ap = json.applied || {}
+      const lines = ['### 场景已应用到仓库', '']
+      lines.push(`- 市场模板: ${json.market_id} · ${json.market_display ?? json.market_name ?? ''}`)
+      lines.push(`- 仓库场景副本: \`${json.scene_id || '（响应未给 scene_id）'}\`${ap.reused ? '（幂等复用既有副本）' : ''}`)
+      if (!json.verified) {
+        lines.push('', '**⚠️ 回读未在仓库场景列表里找到该副本**', '')
+        lines.push(`- 用 \`grape_list_scenes(owner, repo)\` 复核；列表现有：${(json.repo_scenes || []).map((s) => `${s.id}(${s.name})`).join('、') || '（空）'}`)
+        lines.push('', '_未确认副本存在前不要宣称“已应用”，也不要继续设默认场景。_')
+        return lines.join('\n')
+      }
+      lines.push(`- 回读确认: ✅ 副本已在仓库场景列表（现有 ${(json.repo_scenes || []).length} 个）`)
+      if (json.set_default) {
+        const dr = json.default_result || {}
+        lines.push('', '**仓库默认场景**', '')
+        lines.push(dr.dev_scene
+          ? `- ✅ dev_scene = \`${dr.dev_scene}\`（新建 issue 未显式选场景时走它）`
+          : '- ⚠️ 默认场景写入未确认（响应缺 dev_scene），用 `grape_get_repo_dashboard` 复核 dev_scene')
+      } else {
+        lines.push('', '_副本已建，但**仓库默认场景没变**：新建 issue 仍走旧场景。要让它成为默认，再调 `grape_set_repo_scene(owner, repo, scene_id="' + (json.scene_id || '') + '")`（需用户确认）。_')
+      }
+      return lines.join('\n')
+    },
+  },
+  {
+    name: 'grape_set_repo_scene',
+    description:
+      '把仓库默认场景设为某个仓库场景副本（写 managed_repos.dev_scene），或 clear=true 清空（回落智能推荐）。' +
+      '这是「新建 issue 走哪条流水线」的唯一开关：只影响后续新建且未显式选场景的 issue，不改已存在 issue 的 scene_id 快照。' +
+      'scene_id 必须是本仓库场景（grape_list_scenes 传 owner/repo 拿到的 custom-xxxxxxxx）；市场数字 id、模板名会被 404 拒绝。' +
+      '⚠️ 用户决策层动作：调用前必须向用户确认。',
+    schema: {
+      type: 'object',
+      properties: {
+        owner: str('owner'),
+        repo: str('仓库名'),
+        scene_id: str('仓库场景 id（custom-xxxxxxxx）；clear=true 时可省略'),
+        clear: bool('true=清空默认场景（新建 issue 回落智能推荐）'),
+      },
+      required: ['owner', 'repo'],
+    },
+    async native(a) {
+      const sceneId = a.clear ? '' : String(a.scene_id || '').trim()
+      if (!a.clear && !sceneId) {
+        throw new GrapeApiError('缺少 scene_id：传仓库场景 id，或 clear=true 清空默认场景', { status: 400 })
+      }
+      const r = await api.setDefaultScene(a.owner, a.repo, sceneId)
+      let devScene = r?.dev_scene
+      if (devScene === undefined) {
+        // 旧平台没有 default-scene 端点时 sdk 会 404；若平台接受但没回读值，这里再读一次 dashboard
+        try {
+          const dash = await api.repoDashboard(a.owner, a.repo)
+          devScene = dash?.dev_scene
+        } catch { /* 读不到就如实说未确认 */ }
+      }
+      return { ...r, dev_scene: devScene, requested: sceneId }
+    },
+    render(json) {
+      if (!json || typeof json !== 'object') return R.fallbackJson(json)
+      if (json.detail) return `设置失败：${typeof json.detail === 'string' ? json.detail : JSON.stringify(json.detail)}`
+      const dev = json.dev_scene ?? ''
+      const ok = json.requested === undefined ? Boolean(dev) : String(dev) === String(json.requested)
+      if (!ok) {
+        return ['### ⚠️ 默认场景未确认', '',
+          `- 期望: \`${json.requested ?? ''}\` · 回读 dev_scene: \`${dev || '（空）'}\``,
+          '- 用 `grape_get_repo_dashboard` 复核；未确认前不要宣称已切换。'].join('\n')
+      }
+      return ['### 仓库默认场景已更新', '',
+        `- dev_scene: \`${dev || '（已清空 → 回落智能推荐）'}\``,
+        '- 生效范围：后续新建且未显式选场景的 issue；已存在 issue 保留自身 scene_id 快照。'].join('\n')
     },
   },
   {
@@ -1246,6 +1696,98 @@ export const TOOLS = [
         return `${title}${body.slice(0, SKILL_DETAIL_PREVIEW_CHARS)}\n\n> 已截断，全文在 ${path}（共 ${bytes} 字节）`
       }
       return R.fallbackJson(json)
+    },
+  },
+
+  /* ── 技能上传 / 升级 / 跨 scope（测试报告 D2-D4：此前 kit 没有工具面，只能手搓 HTTP） ── */
+
+  {
+    name: 'grape_upload_skill',
+    description:
+      '把本地技能目录打包成 ZIP 上传到技能库（scope=user 个人 / scope=repo 仓库）。' +
+      '本地先做与服务端同口径的预检（SKILL.md 存在、frontmatter name/description/version、name 与目录名一致、标签不与 Agent 类型重名），' +
+      '预检不过**不发请求**并把全部问题一次列出；服务端校验失败时把 detail.errors 全部透出（不截断）。' +
+      'ZIP 顶层目录由本工具自动生成（=目录名），不用手搓打包——「ZIP 缺顶层目录」是上传失败最常见原因。' +
+      '同名同 scope 再上传即升级内容；要保留 skill id 与场景引用请用 grape_update_skill。' +
+      '⚠️ 用户决策层动作：上传会进入仓库/个人技能库，调用前向用户确认技能名与 scope。',
+    schema: {
+      type: 'object',
+      properties: {
+        path: str('本地技能目录（必须含 SKILL.md）'),
+        scope: { type: 'string', enum: ['user', 'repo'], description: 'user=个人技能；repo=仓库技能（需 owner+repo）' },
+        owner: str('scope=repo 时的仓库 owner'),
+        repo: str('scope=repo 时的仓库名'),
+        agent_type: { type: 'string', enum: ['vod', 'issue', 'coding', 'qa', 'sre', 'chat', 'auto'], description: '技能类型（必填）' },
+        tags: str('标签，逗号分隔（≤5 个、每个 ≤12 字、不得与 vod/issue/coding/qa/sre/chat/auto 重名）'),
+        summary: str('一句话摘要（可选，缺省用 frontmatter description）'),
+        change_note: str('变更说明（升级时写清改了什么）'),
+        skill_name: str('覆盖 ZIP 顶层目录名（默认取目录名）'),
+      },
+      required: ['path', 'scope', 'agent_type'],
+    },
+    async native(a) { return uploadSkillNative(a) },
+    render: (json) => renderSkillWrite(json, '上传'),
+  },
+  {
+    name: 'grape_update_skill',
+    description:
+      '按 skill_id 覆盖既有技能包（= 技能升级）：保留 id/scope/owner/场景引用/点赞，刷新内容与缓存。' +
+      'ZIP 顶层目录名必须与既有技能名一致（本工具默认取目录名，目录名不一致会先本地报错）。' +
+      'official 技能不可更新；user scope 需本人；repo scope 需托管该仓库。' +
+      '⚠️ 用户决策层动作：升级会立即影响所有引用该技能的节点，调用前向用户确认。',
+    schema: {
+      type: 'object',
+      properties: {
+        skill_id: num('要升级的 skill id（grape_list_skills / grape_get_skill_detail 获取）'),
+        path: str('本地技能目录（必须含 SKILL.md，目录名 = 既有技能名）'),
+        agent_type: str('技能类型（可选，缺省沿用原记录）'),
+        tags: str('标签，逗号分隔（可选）'),
+        summary: str('摘要（可选）'),
+        change_note: str('变更说明（建议写清本次改了什么）'),
+      },
+      required: ['skill_id', 'path'],
+    },
+    async native(a) {
+      const pf = preflightSkillDir(a.path, a.skill_name)
+      if (pf.errors.length) {
+        throw new GrapeApiError(`技能本地预检未通过（未发起升级）：\n- ${pf.errors.join('\n- ')}`, { status: 400 })
+      }
+      const { buffer, rootName } = zipDirectory(resolvePath(a.path), { rootName: pf.rootName })
+      const json = await api.skillUpdate(buffer, a.skill_id, {
+        filename: `${rootName}.zip`,
+        agent_type: a.agent_type || '', tags: a.tags || '',
+        summary: a.summary || pf.description.slice(0, 200), change_note: a.change_note || '',
+      })
+      return { ...json, skill_id: a.skill_id, root_name: rootName, bytes: buffer.length }
+    },
+    render: (json) => renderSkillWrite(json, '升级'),
+  },
+  {
+    name: 'grape_convert_skill',
+    description:
+      '跨 scope 复制技能（user ↔ repo）：原记录保留，是复制不是移动。' +
+      '当场景节点只能用 repo 技能、而你手上是个人技能时用它——repo 级场景引用 user 技能会被平台拒绝（skill scope 校验）。' +
+      '⚠️ 用户决策层动作：调用前向用户确认目标仓库与技能名。',
+    schema: {
+      type: 'object',
+      properties: {
+        skill_name: str('技能名（frontmatter name / 目录名）'),
+        owner: str('目标仓库 owner'),
+        repo: str('目标仓库名'),
+        source_scope: { type: 'string', enum: ['user', 'repo'], description: '源 scope（默认 user）' },
+      },
+      required: ['skill_name', 'owner', 'repo'],
+    },
+    async native(a) {
+      return api.skillConvert(a.skill_name, `${a.owner}/${a.repo}`, a.source_scope || 'user')
+    },
+    render(json) {
+      if (!json || typeof json !== 'object') return R.fallbackJson(json)
+      if (json.detail) return `复制失败：${typeof json.detail === 'string' ? json.detail : JSON.stringify(json.detail)}`
+      return ['### 技能已复制', '',
+        `- 技能: ${json.skill_name ?? json.name ?? ''}`,
+        `- 新 skill id: ${json.skill_id ?? json.new_skill_id ?? '-'} · scope: ${json.scope ?? '-'}`,
+        json.message ? `- ${json.message}` : ''].filter(Boolean).join('\n')
     },
   },
 
@@ -1762,7 +2304,7 @@ if (json.incomplete_override?.allowed) {
           lines.push('', '_链不断：下一节点已收到派发事件，无需手动 trigger。_')
         } else if (d.status === 'already_dispatched') {
           const how = d.seq > 0 ? `seq=${d.seq}` : `handoff.reason=${d.reason || 'already_dispatched'}`
-          lines.push(`- 下一节点 ${d.agent || '-'} 已派发（${how}），未重复派发`)
+          lines.push(`- 下一节点 ${d.agent || '-'} 已由平台派发（${how}），未重复派发`)
           lines.push('', '_链不断：下一节点已被派发，无需手动 trigger。_')
         } else if (d.status === 'out_of_scope') {
           lines.push(`- 下一节点 ${d.agent || '-'} 的派发不由本工具兜底，保持平台原行为`)
@@ -2160,6 +2702,187 @@ curl -sSL ${base}/api/runtime/install | bash -s -- --token <TOKEN> --server ${ba
       }
       return R.fallbackJson(json)
     },
+  },
+
+  
+/* ── Issue #27：自管理五工具（读直执行 / 写只生成命令） ──
+   * 公共红线（Spec §3.6）：三个写工具**绝不**执行任何变更，只返回可复制命令块 + 决策门文案；
+   * run() 不触碰 runGrape / api 通道（无静默执行路径），服务端契约与 CLI 红线都不受影响。 */
+
+  {
+    name: 'grape_kit_version',
+    description:
+      '查询 grape-kit 自身的版本全景（只读直执行）：本地 kit 版本 / npm 最新版与是否可升级 / grape CLI 回退通道是否可用 / ' +
+      '服务端连通性与契约版本 / 当前生效的凭据来源。各通道均为 best-effort：单一通道失败只降级该字段，不阻塞其余字段。' +
+      '只输出诊断信息，不做任何变更。',
+    schema: { type: 'object', properties: {} },
+    async run(a, { lifecycle: L = lifecycleModule } = {}) {
+      return L.aggregateVersion({})
+    },
+    render(json) {
+      if (!json || typeof json !== 'object') return R.fallbackJson(json)
+      const cli = json.grapeCli || {}
+      const srv = json.server || {}
+      const cred = json.credentials || {}
+      const rows = [
+        { k: '本地 kit 版本', v: json.kitVersion || '-', note: '包根 package.json（与 server.mjs 同源）' },
+        { k: 'npm 最新版', v: json.latestVersion || 'unavailable', note: 'registry.npmjs.org 直查，5s 超时' },
+        {
+          k: '更新',
+          // 四态各有独立结论（dismissed ≠ latest ≠ newer），映射而非三元链，避免把「已忽略」说成「已是最新」（QA Q6）
+          v: {
+            [UPDATE_STATE.NEWER]: '⬆️ 有可用更新',
+            [UPDATE_STATE.LATEST]: '✅ 已是最新',
+            [UPDATE_STATE.DISMISSED]: '🙈 已忽略（冷却中）',
+            [UPDATE_STATE.UNAVAILABLE]: '检测不可用',
+          }[json.updateState] || (json.updateState || '-'),
+          note: json.updateNotice || '',
+        },
+        {
+          k: 'grape CLI',
+          v: cli.status === 'ok' ? `ok（${cli.version || cli.bin || ''}）` : '未安装',
+          note: cli.status === 'ok' ? '可选回退通道（v0.3.0 起原生 HTTP 直连，CLI 仅 401 回退用）' : (cli.hint || ''),
+        },
+        {
+          k: '服务端',
+          ...serverRow(srv),
+        },
+        {
+          k: '凭据来源',
+          v: cred.configured ? (cred.source || '已配置') : '未配置',
+          note: cred.configured ? '按优先级链判定，不回显 token 明文' : (cred.hint || ''),
+        },
+      ]
+      return [
+        '### grape-kit 版本全景（只读）', '',
+        R.mdTable(rows, [{ h: '项', v: 'k' }, { h: '值', v: 'v' }, { h: '备注', v: 'note' }]), '',
+        '_只读诊断：不改任何配置、不执行任何命令。升级请用 grape_kit_upgrade（只生成命令）。_',
+      ].join('\n')
+    },
+  },
+
+  {
+    name: 'grape_kit_check_update',
+    description:
+      '主动检查 grape-kit 是否有新版本（只读）：npm 直查 latest 并与本地版本做 semver 比较。' +
+      'dismiss=true 时把该版本记为「已忽略」（写本地 ~/.grape/grape-kit-dismiss.json），3 天内同版本不再提示，新版本出现会重新提醒。' +
+      '与启动期被动提醒（24h 缓存）语义解耦；除 dismiss 状态外不产生任何变更。',
+    schema: {
+      type: 'object',
+      properties: {
+        dismiss: bool('true = 把该版本记为已忽略（3 天冷却）；缺省 false 只查询'),
+        dismissVersion: str('要忽略的版本号（缺省取 npm latest；dismiss=false 时忽略该参数）'),
+      },
+    },
+    async run(a, { lifecycle: L = lifecycleModule } = {}) {
+      return L.checkForUpdate({ dismiss: a?.dismiss === true, dismissVersion: a?.dismissVersion })
+    },
+    render(json) {
+      if (!json || typeof json !== 'object') return R.fallbackJson(json)
+      const conclusion = {
+        [UPDATE_STATE.NEWER]: '⬆️ 有新版本',
+        [UPDATE_STATE.LATEST]: '✅ 已是最新',
+        [UPDATE_STATE.DISMISSED]: '🙈 已按用户要求忽略（冷却中）',
+        [UPDATE_STATE.UNAVAILABLE]: '❔ 检测不可用（npm registry 不可达或响应异常）',
+      }[json.state] || (json.state || '-')
+      const lines = [
+        '### grape-kit 更新检查', '',
+        R.mdTable([
+          { k: '当前版本', v: json.currentVersion || '-' },
+          { k: 'npm 最新', v: json.latestVersion || 'unavailable' },
+          { k: '结论', v: conclusion },
+        ], [{ h: '项', v: 'k' }, { h: '值', v: 'v' }]),
+      ]
+      if (json.updateNotice) lines.push('', json.updateNotice)
+      // 三项互斥且必须如实：落盘成功才说「已记录」，失败说失败，没版本可记说没记（QA Q4/Q5）
+      if (json.dismiss && json.dismiss.ok === false) {
+        lines.push('', `**⚠️ 记录失败（路径不可写）**：未能写入 \`${json.dismiss.file || '~/.grape/grape-kit-dismiss.json'}\`（${json.dismiss.error || '落盘失败'}）。`
+          + `该版本**未被忽略**，下次检查仍会提示——请修好该路径权限（或 \`GRAPE_HOME\`）后重试。`)
+      } else if (json.dismiss) {
+        lines.push('', `已记录忽略版本 \`${json.dismiss.version}\`：3 天内不再提示，出现新版本会重新提醒。`)
+      } else if (json.dismissSkipped) {
+        lines.push('', `**未记录忽略版本**：${json.dismissSkipped}——本次查询结论不受影响。`)
+      }
+      return lines.join('\n')
+    },
+  },
+
+  {
+    name: 'grape_kit_upgrade',
+    description:
+      '升级 grape-kit 自身：只读检出安装形态（全局 npm / npx 缓存 / ClawHub / 项目本地依赖 / 未知）并生成对应升级命令。' +
+      '⚠️ 用户决策层：执行前必须向用户确认（征得同意后方可执行）；本工具只生成命令、不执行。升级完成后需重启宿主会话才加载新版本。',
+    schema: { type: 'object', properties: {} },
+    async run(a, { lifecycle: L = lifecycleModule } = {}) {
+      const plan = L.detectInstallForm({})
+      return { action: 'upgrade', kitVersion: L.readKitVersion(), ...plan }
+    },
+    render(json) {
+      if (!json || typeof json !== 'object') return R.fallbackJson(json)
+      const FORM_LABEL = {
+        global: '全局 npm 安装', npx: 'npx 缓存运行', clawhub: 'ClawHub 市场安装', local: '项目本地依赖', unknown: '未知形态',
+      }
+      const lines = [
+        '### 升级 grape-kit（命令生成，未执行）', '',
+        R.mdTable([
+          { k: '当前版本', v: json.kitVersion || '-' },
+          { k: '安装形态', v: FORM_LABEL[json.form] || json.form || '-' },
+          { k: '检出依据', v: json.evidence || '-' },
+        ], [{ h: '项', v: 'k' }, { h: '值', v: 'v' }]),
+      ]
+      if (json.upgradeCommand) {
+        lines.push('', '**升级命令（复制到终端执行）**', '', '```bash', json.upgradeCommand, '```')
+      }
+      if (json.guidance) lines.push('', json.guidance)
+      if (json.restartHint) lines.push('', `- ${json.restartHint}`)
+      lines.push('', WRITE_GATE, NO_TERMINAL_HINT)
+      return lines.join('\n')
+    },
+  },
+
+  {
+    name: 'grape_kit_install',
+    description:
+      '装配 grape-kit 到本机宿主（opencode / workbuddy / codearts / officeace / dsh）：先只读检出各宿主当前装配状态，' +
+      '已装配的跳过，只为未装配的生成 npx 安装命令。⚠️ 用户决策层：执行前必须向用户确认；本工具只生成命令、不执行。' +
+      '实际装配命令形如 npx -y @grape-dev/grape-kit install --target <宿主>。',
+    schema: {
+      type: 'object',
+      properties: {
+        target: {
+          type: 'string',
+          enum: [...HOST_TARGETS, 'all'],
+          description: '目标宿主（缺省 all = 五宿主逐个处理）',
+          default: 'all',
+        },
+      },
+    },
+    async run(a, { lifecycle: L = lifecycleModule } = {}) {
+      return buildHostPlan('install', a?.target, L)
+    },
+    render: renderHostPlan,
+  },
+
+  {
+    name: 'grape_kit_uninstall',
+    description:
+      '卸载本机宿主上的 grape-kit 装配：先只读检出，列出将被移除的配置条目与 skill 副本（只列不删），再生成卸载命令并附 --dry-run 预览指引。' +
+      '⚠️ 用户决策层（强决策门）：卸载会移除宿主配置条目与 skill 副本，执行前必须向用户逐条确认影响范围；本工具只生成命令、不执行。',
+    schema: {
+      type: 'object',
+      properties: {
+        target: {
+          type: 'string',
+          enum: [...HOST_TARGETS, 'all'],
+          description: '目标宿主（缺省 all = 五宿主逐个处理）',
+          default: 'all',
+        },
+      },
+    },
+    async run(a, { lifecycle: L = lifecycleModule } = {}) {
+      return buildHostPlan('uninstall', a?.target, L)
+    },
+    render: renderHostPlan,
   },
 ]
 

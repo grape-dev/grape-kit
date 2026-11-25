@@ -30,7 +30,8 @@ after(() => {
 function run(args, h, extraEnv = {}) {
   return spawnSync(process.execPath, [SETUP, ...args], {
     encoding: 'utf8',
-    // 每个用例隔离 HOME，杜绝污染真实宿主配置；显式清掉路径逃生口
+    // 每个用例隔离 HOME 与 cwd（trae 项目级 .trae 按 cwd 解析），杜绝污染真实宿主配置；显式清掉路径逃生口
+    cwd: h,
     env: {
       ...process.env,
       HOME: h,
@@ -38,6 +39,17 @@ function run(args, h, extraEnv = {}) {
       GRAPE_OFFICEACE_MANIFEST: '',
       GRAPE_HOME: '',
       GRAPE_AUTH_FILE: '',
+      GRAPE_CODEX_CONFIG: '',
+      GRAPE_OPENCLAW_CONFIG: '',
+      GRAPE_HERMES_CONFIG: '',
+      GRAPE_TRAE_CONFIG: '',
+      HERMES_HOME: '',
+      ATOMCODE_HOME: '',
+      // dsh 是第 6 个已支持宿主（#21）：缺 DSH_HOME 隔离时子进程会走真实 ~/.dsh，
+      // 使「零宿主痕迹」用例假绿（反而命中真实 dsh），并对真实宿主配置执行卸载；
+      // 宿主运行环境若导出 DSH_HOME（如 AI Shell 的 ~/.aishell），零痕迹夹具同样会被检出幽灵 dsh 宿主
+      DSH_HOME: '',
+      GRAPE_DSH_PATCH: '',
       ...extraEnv,
     },
     timeout: 30_000,

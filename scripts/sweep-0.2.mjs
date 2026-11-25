@@ -65,10 +65,12 @@ const listCount = await new Promise((res) => {
   pending.set(listId, (msg) => res(msg.result.tools.length))
   proc.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: listId, method: 'tools/list' }) + '\n')
 })
-results.push(['tools/list 数量', listCount === 41 ? 'PASS' : 'FAIL', `${listCount} tools`])
+results.push(['tools/list 数量', listCount === 50 ? 'PASS' : 'FAIL', `${listCount} tools`])
 proc.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n')
 
-// 2 只读组
+// 2 只读组（自管理只读工具 Issue #27：本地诊断，不依赖服务端状态）
+await probe('kit.version', 'grape_kit_version', {}, (t) => /版本全景/.test(t))
+await probe('kit.check_update', 'grape_kit_check_update', {}, (t) => /更新检查/.test(t))
 await probe('roadmap', 'grape_get_pipeline_roadmap', { owner, repo })
 await probe('repos.managed', 'grape_list_managed_repos', {})
 await probe('repos.member', 'grape_list_repos_member', {})

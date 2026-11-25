@@ -23,11 +23,11 @@
 
 ```
 agent 宿主（MCP stdio：opencode / CodeArts / WorkBuddy / dsh…；其他 MCP 能力宿主可手动接线）
-  → grape-kit（41 工具 · 原生 HTTP 直连 · Markdown 渲染 · initialize instructions 自举）
+  → grape-kit（50 工具 · 原生 HTTP 直连 · Markdown 渲染 · initialize instructions 自举）
     → grape 服务端（流水线 / events / takeover 会话 API；CLI 仅 401 回退用）
 ```
 
-## 能力总览（41 工具）
+## 能力总览（50 工具）
 
 - **流水线遥控**：触发（唯一 A2A 入口）· 等待任务 · 任务状态 · 取消/恢复（带决策门）
 - **需求与事件**：列表/详情/事件流/我的需求 · 建单 · 结构化交回模板
@@ -35,12 +35,10 @@ agent 宿主（MCP stdio：opencode / CodeArts / WorkBuddy / dsh…；其他 MCP
   - **凭据语义**：`tko_` 仅 repo_session 能力（继续节点工作 / 回报进度，**不含 git 凭据注入**）——`request-finish` 用 tko_ 即可，但**最终 `finish` 必须用用户级凭据（`grape_`）**，tko_ 调 finish 会 403 属预期边界。平台不提供 UI 确认按钮，确认只发生在你与 Agent 的对话里。
   - **技能物化**：接管建立时把平台下发的 `assets.skill` 落到本地工作区 `<cwd>/.grape-takeover-skills/<skill>/`（`SKILL.md` + `references/*`），渲染直接给出落盘路径（`技能已物化：<path>` + 文件数 + 是否含 references）——接管 prompt 里「技能已物化，直接读 SKILL.md」由指引变成事实。内联 `files` 与 `zip_url` 两种下发都支持（zip 走 Node 原生 `zlib` 零依赖解压，仅 store/deflate）；旧平台未下发技能包时显式提示「本次未物化技能」，物化失败只告警、不作废已建立的会话。技能名过白名单、条目拒路径穿越/绝对路径/盘符/符号链接，恒不写 `.skills/`（worker 会清理该目录）。
   - 平台要求 weekly-11+；旧平台自动回退只读上下文。完整时序：[docs/20261114-takeover-architecture.md](docs/20261114-takeover-architecture.md)
-- **能力握手与多技能 fail-closed**（Issue #32）：接管前先握手 `GET /api/health` 读取服务端 `version` + `capabilities[]`（进程内缓存 300s；`GRAPE_CAPABILITIES_TTL_MS` 可覆盖，`GRAPE_CAPABILITIES_REFRESH=1` 强制刷新）。节点 required 技能数 > 1 且服务端未声明 `skills.multi` 时，`grape_takeover_start` **拒绝接管**并返回稳定错误码 `E_CAP_UNSUPPORTED_MULTI_SKILL`，附 required 技能、服务端版本、已声明能力、能力来源、握手时间与三条升级指引——绝不静默只跑第一个技能。旧服务端（404 / 缺字段）视同仅支持单技能，单技能路径行为不变。`takeover_bundle.v2` **不隐含** `skills.multi`，客户端唯一判据是 `skills.multi`。握手请求同时声明 `client_capabilities`（`skills.multi=true`），供新服务端拦截旧客户端。
-  - **git 写回**（Issue #31，干净机器无 PAT/SSH/CLI）：`grape_git_credential` 用接管凭据换一次性本仓券（600s）并在工作区写 `GIT_ASKPASS`（`0600`，内嵌到期 epoch；过期脚本非零退出并提示重新换券，**无静默回退**本机 git/CLI 凭据）；`grape_create_pull` 薄代理 PR 端点（只建 PR、不评审不合并）。凭据绑定会话仓库与工作区：非本仓/工作区外一律拒绝且不落盘；`.grape` 目录/askpass 文件为符号链接时拒绝（不写到工作区外）；写盘前把 `/.grape/` 写入 `.git/info/exclude` 并用 `git check-ignore` 复核，无法确认已排除即拒绝写盘（600s 券不得进远端历史）；`finish`/`abort` 自动清理 askpass，校验通过的 branch/commit/PR 会写入交回 `artifacts` 留痕。
-- **场景与仓库**：场景列表 · 应用场景 · 托管仓库 · 同步仓库 · 项目模板 · 项目信息
-- **搜索、知识与技能**：全局搜索 · 技能 ×3 · 知识库 ×2 · 看板
-  - `grape_get_skill_detail` 返回 **SKILL.md 全文**（去掉旧的 3000 字截断）；超过 **64KB（UTF-8 字节）** 时把正文**逐字节**写入临时文件，只返回 2000 字预览并显式标注「已截断，全文在 <path>」（含字节数）。
+- **场景与仓库**：场景列表（市场 / 仓库副本）· 应用场景（建仓库副本，可选设默认）· 设仓库默认场景（决定新建需求走哪条流水线）· 托管仓库 · 同步仓库 · 项目模板 · 项目信息
+- **搜索、知识与技能**：全局搜索（all/event/repo/agent）· 技能 ×6（列表/搜索/详情 + **上传/升级/跨 scope 复制**：本地预检、自动打 ZIP 带顶层目录、服务端 errors 全量透出）· 知识 ×2 · 仪表盘
 - **Worker 接入**：把本机注册为 grape 执行引擎（`grape_worker_onboard`）
+- **自管理**（v0.4.1+）：`grape_kit_version`（版本全景：本地 kit 版本 / npm 最新版 / grape CLI / 服务端连通性与契约版本 / 凭据来源）与 `grape_kit_check_update`（更新检查，支持 `dismiss` 3 天冷却）进程内只读直执行；`grape_kit_upgrade` / `grape_kit_install` / `grape_kit_uninstall` **只生成可复制命令**（自动识别安装形态：全局 npm / npx 缓存 / ClawHub / 项目本地依赖）——工具本身不执行任何变更，由用户确认后手动执行。只生成命令，无静默执行。
 
 ## 快速开始
 
@@ -49,6 +47,22 @@ agent 宿主（MCP stdio：opencode / CodeArts / WorkBuddy / dsh…；其他 MCP
 > - **未检测到**：交互终端弹出宿主选择菜单；非交互环境报错并列出受支持宿主。
 > - **检测到一个**：直接装它。
 > - **检测到多个**：全部安装（等价 `--target all`）；要装单个用 `--target <宿主>`。
+> - `trae` 是**项目级**宿主：不进 `--target all`（全量模式无法确定项目），需在目标项目目录单独 `--target trae`；当前目录与 `$HOME` 相同时安装/卸载会被拒绝（不做用户级落盘）。
+
+### 受支持宿主（10 个 --target）
+
+| `--target` | 配置路径 | 格式 / 说明 |
+|---|---|---|
+| `opencode` | `~/.config/opencode/opencode.json(c)` | JSONC `mcp.grape` + skill 副本 |
+| `workbuddy` | `~/.workbuddy/mcp.json` | JSON `mcpServers.grape-kit` + skill 副本 |
+| `codearts` | `~/.codeartsdoer/codearts_cli.jsonc` | JSONC `mcp.grape-kit`，需在 IDE 内重启条目 |
+| `officeace` | `~/.officeace/mcp.json` | 仅导入用清单（`mcpServers.grape-kit`） |
+| `dsh` | `$DSH_HOME/profiles/web/cordis.patch.yml` | YAML 托管块 + skill 副本 |
+| `codex` | `~/.codex/config.toml` | TOML `[mcp_servers.grape-kit]` + `[mcp_servers.grape-kit.env]` |
+| `openclaw` | `~/.openclaw/openclaw.json` | JSON `mcp.servers`（兼容旧 `mcpServers`） |
+| `hermes` | `~/.hermes/config.yaml` | YAML `mcp_servers` + skill 副本 |
+| `atomcode` | `~/.atomcode/mcp.json`（`ATOMCODE_HOME` 可覆盖） | JSON `mcpServers` |
+| `trae` | `<项目>/.trae/mcp.json`（`GRAPE_TRAE_CONFIG` 覆盖） | JSON `mcpServers`；仅项目级，路径对齐 Trae 官方 MCP 入口 |
 
 前提：**Node ≥ 20**（无需 Python——v0.3.0 起原生 HTTP 直连）。凭据走环境变量：
 
@@ -80,6 +94,8 @@ npx -y @grape-dev/grape-kit doctor     # 展示完整 runtime > env > file 优�
 npx -y @grape-dev/grape-kit uninstall --clean-global --dry-run   # 先预览
 npx -y @grape-dev/grape-kit uninstall --clean-global
 ```
+
+> 卸载口径：各宿主只删自己写的条目；若配置里只剩本次写入的空容器（如 hermes 的空 `mcp_servers`、JSON 宿主的空 `mcpServers`），则连同该文件一起删除（写前备份，`--dry-run` 同样披露）。
 
 ### OpenCode
 
@@ -144,7 +160,59 @@ npx -y @grape-dev/grape-kit install --target dsh          # 升级后重新装�
 npx -y @grape-dev/grape-kit uninstall --target dsh        # 只删托管块 + skill 副本
 ```
 
-> dsh 走 **MCP 最小路径**（41 工具零改动复用）；完整形态的原生 Cordis 插件由 [grape-dsh](https://gitcode.com/grape-dev/grape-dsh) 承载，二者并存。
+> dsh 走 **MCP 最小路径**（50 工具）*零改动复用）；完整形态的原生 Cordis 插件由 [grape-dsh](https://gitcode.com/grape-dev/grape-dsh) 承载，二者并存。
+
+### Codex CLI
+
+```bash
+npx -y @grape-dev/grape-kit install --target codex
+```
+
+写入 `~/.codex/config.toml` 的带标记托管块：`[mcp_servers.grape-kit]`（`command` / `args`，走 npx）加 `[mcp_servers.grape-kit.env]` 子表。只动托管块与 `grape-kit` 相关表，其它表与注释原样保留，每次写入先备份，重复安装逐字节幂等。装完**重启会话**。
+
+```bash
+npx -y @grape-dev/grape-kit doctor --target codex --probe
+npx -y @grape-dev/grape-kit uninstall --target codex   # 只删托管块 / grape-kit 表
+```
+
+### Hermes
+
+```bash
+npx -y @grape-dev/grape-kit install --target hermes
+```
+
+写入 `~/.hermes/config.yaml` 的 `mcp_servers.grape-kit`（YAML，保注释与其它条目），并把 `grape-remote` skill 复制到 `~/.hermes/skills/`。Hermes 自带 MCP client，重启会话后条目即加载（旧「hermes 无 MCP client」说明已修正）。
+
+```bash
+npx -y @grape-dev/grape-kit doctor --target hermes --probe
+npx -y @grape-dev/grape-kit uninstall --target hermes   # 删条目 + skill 副本
+```
+
+### Atomcode
+
+```bash
+npx -y @grape-dev/grape-kit install --target atomcode
+```
+
+写入 `~/.atomcode/mcp.json` 的 `mcpServers.grape-kit`；根路径可用 `ATOMCODE_HOME` 覆盖。其它连接器保留，每次写入先备份。
+
+```bash
+npx -y @grape-dev/grape-kit doctor --target atomcode --probe
+npx -y @grape-dev/grape-kit uninstall --target atomcode
+```
+
+### Trae
+
+```bash
+npx -y @grape-dev/grape-kit install --target trae
+```
+
+写入项目级 `.trae/mcp.json` 的 `mcpServers.grape-kit`（Trae 官方 MCP 入口，需在项目根目录执行）；`GRAPE_TRAE_CONFIG` 可覆盖路径。按设计不触碰用户级 `~/.trae/mcp.json`：当前目录与 `$HOME` 相同时（此时项目级路径就是用户级路径）安装/卸载直接拒绝并提示到目标项目目录执行，`--target all` 也不包含 trae。其它 MCP server 保留，每次写入先备份。
+
+```bash
+npx -y @grape-dev/grape-kit doctor --target trae --probe
+npx -y @grape-dev/grape-kit uninstall --target trae
+```
 
 ### openclaw（ClawHub 市场）
 
@@ -152,7 +220,14 @@ npx -y @grape-dev/grape-kit uninstall --target dsh        # 只删托管块 + sk
 openclaw plugins install clawhub:grape-kit@latest
 ```
 
-`clawhub:` 为来源前缀（与 devkit 上架同款）。装后用插件 MCP 工具列表验证（41 工具）。市场页：https://clawhub.ai/grape-dev/plugins/grape-kit
+`clawhub:` 为来源前缀（与 devkit 上架同款）。装后用插件 MCP 工具列表验证（50 工具）*。市场页：https://clawhub.ai/grape-dev/plugins/grape-kit
+
+也可不经市场，直接用文件注册（与其它宿主同一套四件套）：
+
+```bash
+npx -y @grape-dev/grape-kit install --target openclaw   # ~/.openclaw/openclaw.json：mcp.servers.grape-kit（兼容旧 mcpServers）
+npx -y @grape-dev/grape-kit uninstall --target openclaw # 加 --dry-run 预览
+```
 
 ### 版本查询与更新（全宿主通用）
 
@@ -189,6 +264,7 @@ npx -y @grape-dev/grape-kit intro     # 随时重看能力地图
 
 | 版本 | 日期 | 要点 |
 |---|---|---|
+| 0.5.0 | 2026-11-25 | 场景市场副本通道 + 技能上传批（#20）：`grape_apply_scene` 改走市场 apply 端点在仓库内创建场景副本（id/名未命中本地拒绝、不再静默回落 `default`，应用后回读确认，`set_default` 拆为第二步调用）· 新增 `grape_set_repo_scene`（写 `managed_repos.dev_scene`、写后回读，`clear=true` 清空回落智能推荐）· `grape_list_scenes` 仓库视角列 `custom-` 副本 · `grape_upload_skill` / `grape_update_skill` / `grape_convert_skill`（与服务端同口径本地预检 + 内置 ZIP 打包）· `grape_create_issue` 把 `description` 标为必填。新增 5 个安装目标（#26，`--target` 5→10）：`codex`（TOML 托管块、保注释）· `openclaw`（JSON、兼容旧 `mcpServers`）· `hermes`（YAML 保注释/保序 + `grape-remote` skill 副本）· `atomcode`（`ATOMCODE_HOME`）· `trae`（严格项目级、`$HOME` 闸门、不做用户级兜底）——均提供 install / uninstall（`--dry-run`）/ doctor（`--probe`）/ detect 四件套并纳入自动检测与 `--target all`；裸 doctor 汇总覆盖全部 10 宿主。自管理五工具（#27，工具面 39→48）：`grape_kit_version` 版本全景（本地 kit / npm latest / CLI 回退 / 服务端契约 / 凭据档位，各通道 best-effort 降级）· `grape_kit_check_update` 主动更新检查 + `dismiss` 3 天冷却（与启动期 24h 缓存解耦）· `grape_kit_upgrade` / `grape_kit_install` / `grape_kit_uninstall` 只生成可复制命令、绝不执行（安装形态自动识别：全局 npm / npx 缓存 / ClawHub / 项目本地 / 未知；`damaged` 宿主单列 blocked 并带出解析错误）；`takeover_finish` 只在平台确漏派发时补发（消除 `pending_dispatch` 假警报）；单测 270→395 |
 | 0.4.0 | 2026-11-23 | DeepSeek Harness（dsh）适配（#21）：`install --target dsh` 以 **MCP stdio 托管 patch** 模式接入 dsh web profile —— 在 `$DSH_HOME/profiles/web/cordis.patch.yml` 写入带标记的 `insert` 托管块（`id: grape-kit` / `name: '@deepseek-ai/dsh-mcp-client'` / 本地脚本优先、`npx` 回退），`grape-remote` skill 落 `$DSH_HOME/skills/`，39 工具零改动复用；`uninstall --target dsh` 只删托管块 + skill 副本 · `doctor --target dsh` 三项检查（托管块 / skill 副本 / `dsh-mcp-client`）· `detect` 把 `~/.dsh` 纳入自动检测；依赖安装 best-effort（失败只给手动指引、退出码 0）。QA 硬化（PR #12）：托管块不完整或 patch 顶层为映射形状时拒绝写入（不静默删用户行、不写非法 YAML）· install→uninstall 逐字节往返保真 · 空文件与仅含托管块的备份清理；单测 257→270 |
 | 0.3.10 | 2026-11-23 | 接管交回派发收口（#19）：派发指针只认 `next_seq`（`handoff_seq` 只是交回事件序号，不作派发证据）· 平台漏派时客户端兜底补发 coding→qa（与 trigger 同源 A2A 通道）并回填 `next_seq` · 受阻（`remote_may_still_run`／缺仓库-issue 标识／补发失败）落 `pending_dispatch` 待派发标记 + 可读告警，不再静默 grace；三处「未证实当成功」收口：交回未成功（`ok=false`／`changed=false`）不派发下一节点 · 白名单外节点名（如 `reviewer`）按「未知」上报不改写为 qa · 补发响应缺事件 `seq` 判未证实；#20 凭据/卸载批：`auth init` 唯一写入入口 · `uninstall --clean-global`（`--dry-run`、rc 备份不留凭据行、`_npx` 收窄到 grape-kit）· doctor 完整凭据优先级视图；单测 156→257 |
 | 0.3.9 | 2026-11-23 | 端云接管全链路硬化（#12）：takeover_start 分支/MR 前置检查 · warnings 全量透出 · Node 跨平台接管三脚本（report/request-finish/finish）· 409 agent_mismatch 友好提示 · bundle 脚本 {{CWD}} 渲染 · doctor 凭据来源行；#17 修复批：intro 子命令 + 能力地图（无凭据先给 3 步 API Key 指引）· trigger_pipeline agent 参数（可从指定节点续跑）· doctor base_url 双通道并标注生效来源 · 审核三工具 native 崩溃修复；单测 136→156 |
@@ -203,7 +279,7 @@ npx -y @grape-dev/grape-kit intro     # 随时重看能力地图
 | 0.3.0 | 2026-11-11 | 传输层原生化：原生 HTTP 直连，grape CLI/Python 变可选（401 回退通道） |
 | 0.2.x | 2026-11-09 前 | 13→31 工具扩展 · worker_onboard · B1 接管闭环 |
 
-逐版本完整记录（发布日期、工具面变化、行为修复，覆盖 npm 全部 21 条发布记录——含 `0.0.0-stage` 占位包，0.2.3 从未发布）：[CHANGELOG.md](CHANGELOG.md)
+逐版本完整记录（发布日期、工具面变化、行为修复，覆盖 npm 全部 22 条发布记录——含 `0.0.0-stage` 占位包，0.2.3 从未发布）：[CHANGELOG.md](CHANGELOG.md)
 
 ## 设计原则
 
@@ -222,7 +298,7 @@ npx -y @grape-dev/grape-kit intro     # 随时重看能力地图
 ```bash
 npm install
 
-npm test        # 348 个单测（fake-grape 替身，不依赖真实服务端）
+npm test        # 395 个单测（fake-grape 替身，不依赖真实服务端）
 
 npm run smoke   # 真实 stdio JSON-RPC 往返：initialize → tools/list → tools/call
 ```

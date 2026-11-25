@@ -23,11 +23,11 @@ Grape-kit helps **mainstream agents** (opencode / CodeArts / WorkBuddy / dsh / o
 
 ```
 agent (MCP stdio: opencode / CodeArts / WorkBuddy / dsh…; other MCP-capable agents wire up manually)
-  → grape-kit (41 tools · native HTTP · Markdown rendering · initialize-instruction bootstrap)
+  → grape-kit (50 tools · native HTTP · Markdown rendering · initialize-instruction bootstrap)
     → grape server (pipelines / events / takeover session API; CLI only as 401 fallback)
 ```
 
-## Capabilities (41 tools)
+## Capabilities (50 tools)
 
 - **Pipeline control**: trigger (the only A2A entry) · wait_task · task status · cancel/resume with decision gates
 - **Issues & events**: list/detail/events/my-issues · create · structured hand-back templates
@@ -35,12 +35,10 @@ agent (MCP stdio: opencode / CodeArts / WorkBuddy / dsh…; other MCP-capable ag
   - **Credential semantics**: `tko_` is repo_session-only (keep working the node / report progress, **no git credential injection**). `request-finish` works with `tko_`, but the final `finish` **requires a user-level credential (`grape_`)**; calling `finish` with `tko_` returns 403 by design. There is no UI confirm button — confirmation happens only in your chat with the agent.
   - **Skill materialization**: on takeover the platform-supplied `assets.skill` is materialized into your local workspace at `<cwd>/.grape-takeover-skills/<skill>/` (`SKILL.md` + `references/*`), and the render prints the on-disk path (`技能已物化：<path>` plus file count and whether references are included) — the takeover prompt's "skills are already materialized, read SKILL.md" stops being a promise. Both inline `files` and a `zip_url` bundle are supported (zip is extracted with Node's built-in `zlib`, zero new dependencies, store/deflate only); older platforms send no skill bundle, so the render states "not materialized" explicitly, and a failed materialization only warns — it never invalidates the established session. Skill names go through a whitelist, entries reject path traversal / absolute paths / drive letters / symlinks, and `.skills/` is never written (the worker rmtree's that directory).
   - Platform requirement: weekly-11+; older platforms fall back to the legacy read-only context automatically. Full sequence: [docs/20261114-takeover-architecture.md](docs/20261114-takeover-architecture.md)
-- **Capability handshake & multi-skill fail-closed** (Issue #32): before a takeover the client handshakes `GET /api/health` for the server `version` + `capabilities[]` (cached in-process for 300s; `GRAPE_CAPABILITIES_TTL_MS` overrides, `GRAPE_CAPABILITIES_REFRESH=1` forces a refresh). When a node requires more than one skill and the server does not declare `skills.multi`, `grape_takeover_start` **refuses** with the stable code `E_CAP_UNSUPPORTED_MULTI_SKILL` plus required skills, server version, supported capabilities, capability source, handshake time and three remediation steps — it never silently runs only the first skill. Old servers (404 / missing fields) are treated as single-skill only; the single-skill path is unchanged. `takeover_bundle.v2` does **not** imply `skills.multi`; the only client criterion is `skills.multi`. The handshake also declares `client_capabilities` (`skills.multi=true`) so newer servers can reject old clients.
-  - **Git write-back** (Issue #31, clean machines with no PAT/SSH/CLI): `grape_git_credential` exchanges the takeover credential for a one-shot repo-scoped credential (600s) and writes `GIT_ASKPASS` in the workspace (`0600`, embedded expiry epoch; an expired script exits non-zero and tells you to re-exchange, with **no silent fallback** to local git/CLI credentials). `grape_create_pull` is a thin proxy over the PR endpoint (create only — no review, no merge). The credential is bound to the session repo and workspace: cross-repo or out-of-workspace paths are refused with no file written, symlinked `.grape` dirs / askpass files are rejected (no write outside the workspace), and the tool writes `/.grape/` into `.git/info/exclude` + verifies with `git check-ignore` before writing (refuses if exclusion cannot be confirmed — the 600s token must never reach remote history). `finish`/`abort` clean the askpass file up, and validated branch/commit/PR are carried into the hand-back `artifacts`.
-- **Scenes & repos**: list_scenes · apply_scene · host_repo · sync_repos · managed/member repos · project templates · project-info
-- **Search, knowledge & skills**: search (all/event/repo/agent) · skills ×3 · knowledge ×2 · dashboard
-  - `grape_get_skill_detail` returns the **full** SKILL.md (the old 3000-char cut is gone); above **64KB (UTF-8 bytes)** the body is written **byte-for-byte** to a temp file and only a 2000-char preview plus an explicit `已截断，全文在 <path>` notice (with the byte count) comes back.
+- **Scenes & repos**: list_scenes (market / repo copies) · apply_scene (creates the repo copy, optional set-default) · set_repo_scene (repo default = which pipeline new issues take) · host_repo · sync_repos · managed/member repos · project templates · project-info
+- **Search, knowledge & skills**: search (all/event/repo/agent) · skills ×6 (list/search/detail + **upload/update/convert**: local preflight, auto ZIP with top-level dir, full server `errors`) · knowledge ×2 · dashboard
 - **Worker onboarding**: register this machine as a grape execution engine (`grape_worker_onboard`)
+- **Self-management** (v0.4.1+): `grape_kit_version` (version panorama: local kit / npm latest / grape CLI / server reachability + contract version / credential source) and `grape_kit_check_update` (update check with a 3-day `dismiss` cooldown) run read-only in-process; `grape_kit_upgrade`, `grape_kit_install` and `grape_kit_uninstall` only **generate copy-pasteable commands** (install form detection: global npm / npx cache / ClawHub / local dependency) — the tools never execute anything, the user confirms and runs them. Command generation only, no silent execution.
 
 ## Quick Start
 
@@ -49,6 +47,22 @@ agent (MCP stdio: opencode / CodeArts / WorkBuddy / dsh…; other MCP-capable ag
 > - **None detected**: interactive terminals show an agent picker; non-interactive shells error out with the supported target list.
 > - **One detected**: installs directly to it.
 > - **Multiple detected**: installs to all detected agents (`--target all` equivalent); pass `--target <agent>` to pick one.
+> - `trae` is **project-level**: it is not part of `--target all` (an all-target run cannot know the project), so install it separately with `--target trae` from the target project directory; install/uninstall is refused when the current directory equals `$HOME` (no user-level writes).
+
+### Supported hosts (10 targets)
+
+| `--target` | Config path | Format / notes |
+|---|---|---|
+| `opencode` | `~/.config/opencode/opencode.json(c)` | JSONC `mcp.grape` + skill copy |
+| `workbuddy` | `~/.workbuddy/mcp.json` | JSON `mcpServers.grape-kit` + skill copy |
+| `codearts` | `~/.codeartsdoer/codearts_cli.jsonc` | JSONC `mcp.grape-kit`, restart the entry in the IDE |
+| `officeace` | `~/.officeace/mcp.json` | import-only manifest (`mcpServers.grape-kit`) |
+| `dsh` | `$DSH_HOME/profiles/web/cordis.patch.yml` | YAML managed block + skill copy |
+| `codex` | `~/.codex/config.toml` | TOML `[mcp_servers.grape-kit]` + `[mcp_servers.grape-kit.env]` |
+| `openclaw` | `~/.openclaw/openclaw.json` | JSON `mcp.servers` (legacy `mcpServers` compatible) |
+| `hermes` | `~/.hermes/config.yaml` | YAML `mcp_servers` + skill copy |
+| `atomcode` | `~/.atomcode/mcp.json` (`ATOMCODE_HOME` override) | JSON `mcpServers` |
+| `trae` | `<project>/.trae/mcp.json` (`GRAPE_TRAE_CONFIG` override) | JSON `mcpServers`; project-level only, aligned with the official Trae MCP entry |
 
 Prerequisites: **Node >= 20** (no Python needed — native HTTP since v0.3.0). Credentials go through environment variables:
 
@@ -80,6 +94,8 @@ A plain `uninstall` removes only the host entry and reports any leftover credent
 npx -y @grape-dev/grape-kit uninstall --clean-global --dry-run   # preview first
 npx -y @grape-dev/grape-kit uninstall --clean-global
 ```
+
+> Uninstall scope: each host removes only the entry it wrote; when the config is left with nothing but the empty container it created (hermes' empty `mcp_servers`, JSON hosts' empty `mcpServers`), the file itself is removed too (backed up first, disclosed by `--dry-run` as well).
 
 ### OpenCode
 
@@ -144,7 +160,59 @@ npx -y @grape-dev/grape-kit install --target dsh          # re-assembly after up
 npx -y @grape-dev/grape-kit uninstall --target dsh        # removes the managed block + skill copy only
 ```
 
-> dsh uses the **MCP minimal path** (all 41 tools reused unchanged). The full native Cordis plugin lives in [grape-dsh](https://gitcode.com/grape-dev/grape-dsh); the two coexist.
+> dsh uses the **MCP minimal path** (all 50 tools reused unchanged). The full native Cordis plugin lives in [grape-dsh](https://gitcode.com/grape-dev/grape-dsh); the two coexist.
+
+### Codex CLI
+
+```bash
+npx -y @grape-dev/grape-kit install --target codex
+```
+
+Writes a marker-delimited block into `~/.codex/config.toml`: `[mcp_servers.grape-kit]` (`command` / `args`, npx) plus the `[mcp_servers.grape-kit.env]` sub-table. Only the managed block and the `grape-kit` tables are touched — other tables and comments stay intact, every write is backed up first, and re-installing is byte-for-byte idempotent. **Restart the session** afterwards.
+
+```bash
+npx -y @grape-dev/grape-kit doctor --target codex --probe
+npx -y @grape-dev/grape-kit uninstall --target codex   # removes the managed block / grape-kit tables only
+```
+
+### Hermes
+
+```bash
+npx -y @grape-dev/grape-kit install --target hermes
+```
+
+Writes `mcp_servers.grape-kit` into `~/.hermes/config.yaml` (YAML, comments and other entries preserved) and copies the `grape-remote` skill to `~/.hermes/skills/`. Hermes ships an MCP client, so the entry loads directly after a session restart.
+
+```bash
+npx -y @grape-dev/grape-kit doctor --target hermes --probe
+npx -y @grape-dev/grape-kit uninstall --target hermes   # removes the entry + skill copy
+```
+
+### Atomcode
+
+```bash
+npx -y @grape-dev/grape-kit install --target atomcode
+```
+
+Writes `mcpServers.grape-kit` into `~/.atomcode/mcp.json`; the root can be overridden with `ATOMCODE_HOME`. Other connectors are preserved and every write is backed up.
+
+```bash
+npx -y @grape-dev/grape-kit doctor --target atomcode --probe
+npx -y @grape-dev/grape-kit uninstall --target atomcode
+```
+
+### Trae
+
+```bash
+npx -y @grape-dev/grape-kit install --target trae
+```
+
+Writes `mcpServers.grape-kit` into the project-level `.trae/mcp.json` (Trae's official MCP entry, run from the project root); `GRAPE_TRAE_CONFIG` overrides the path. User-level `~/.trae/mcp.json` is intentionally not touched: when the current directory equals `$HOME` (where the project-level path *is* the user-level path) install/uninstall is refused with a pointer to run from the target project, and `--target all` excludes trae. Other servers are preserved and every write is backed up.
+
+```bash
+npx -y @grape-dev/grape-kit doctor --target trae --probe
+npx -y @grape-dev/grape-kit uninstall --target trae
+```
 
 ### openclaw (ClawHub marketplace)
 
@@ -152,7 +220,14 @@ npx -y @grape-dev/grape-kit uninstall --target dsh        # removes the managed 
 openclaw plugins install clawhub:grape-kit@latest
 ```
 
-The `clawhub:` prefix is the source (matching devkit's listing form). Verify with the plugin's MCP tools list (41 tools). Marketplace page: https://clawhub.ai/grape-dev/plugins/grape-kit
+The `clawhub:` prefix is the source (matching devkit's listing form). Verify with the plugin's MCP tools list (50 tools). Marketplace page: https://clawhub.ai/grape-dev/plugins/grape-kit
+
+Alternatively, register the MCP server directly with the file-based installer (no marketplace needed):
+
+```bash
+npx -y @grape-dev/grape-kit install --target openclaw   # ~/.openclaw/openclaw.json: mcp.servers.grape-kit (legacy mcpServers compatible)
+npx -y @grape-dev/grape-kit uninstall --target openclaw # dry-run with --dry-run
+```
 
 ### Version check & update (all targets)
 
@@ -187,10 +262,11 @@ npx -y @grape-dev/grape-kit intro     # reprint the capability map at any time
 
 ## Version history
 
-Full release notes: [CHANGELOG.md](CHANGELOG.md) — 21 条发布记录（含 0.0.0-stage 占位包）
+Full release notes: [CHANGELOG.md](CHANGELOG.md) — 22 条发布记录（含 0.0.0-stage 占位包）
 
 | Version | Date | Highlights |
 |---|---|---|
+| 0.5.0 | 2026-11-25 | Scene market-copy channel + skill upload batch (#20): `grape_apply_scene` creates a per-repo scene copy via the market apply endpoint (unmatched id/name rejected locally instead of silent `default` fallback, read-back verify, `set_default` as a second call); new `grape_set_repo_scene` (writes `managed_repos.dev_scene`, read-back verified, `clear=true`), `grape_list_scenes` repo view for `custom-` copies, `grape_upload_skill` / `grape_update_skill` / `grape_convert_skill` (server-parity local preflight + in-tree ZIP); `grape_create_issue` marks `description` required. Five new install targets (#26, `--target` 5→10): `codex` (TOML managed block, comments preserved), `openclaw` (JSON, legacy `mcpServers` compat), `hermes` (YAML comment-preserving + `grape-remote` skill copy), `atomcode` (`ATOMCODE_HOME`), `trae` (project-level only, `$HOME` guard, no user-level fallback) — each with install / uninstall (`--dry-run`) / doctor (`--probe`) / detect, wired into auto-detection and `--target all`; bare doctor covers all 10 hosts. Self-management five tools (#27, tools 39→48): `grape_kit_version` version panorama (local kit / npm latest / CLI fallback / server contract / credential tier, best-effort per channel), `grape_kit_check_update` with 3-day dismiss cooldown (decoupled from the 24h startup cache), `grape_kit_upgrade` / `grape_kit_install` / `grape_kit_uninstall` generate copy-paste commands only — never execute; install form auto-detected (global npm / npx cache / ClawHub / local dependency / unknown), `damaged` hosts listed as blocked with the parse error; `takeover_finish` re-dispatches only when the platform actually missed the node; unit tests 270→395 |
 | 0.4.0 | 2026-11-23 | DeepSeek Harness (dsh) support (#21): `install --target dsh` wires grape-kit into the dsh web profile via an **MCP stdio managed patch** — a marker-delimited `insert` block in `$DSH_HOME/profiles/web/cordis.patch.yml` (`id: grape-kit` / `name: '@deepseek-ai/dsh-mcp-client'` / local script first, `npx` fallback), `grape-remote` skill copied to `$DSH_HOME/skills/`, all 39 tools reused unchanged; `uninstall --target dsh` removes only the managed block + skill copy, `doctor --target dsh` checks block / skill copy / `dsh-mcp-client`, `detect` picks up `~/.dsh`; best-effort dependency install (failure prints manual guidance, exit 0). QA hardening (PR #12): refuse to write on incomplete managed blocks or map-shaped patches (no silent deletion of user lines, no invalid YAML), byte-exact install→uninstall round-trip, empty-patch/backup cleanup; unit tests 257→270 |
 | 0.3.10 | 2026-11-23 | Takeover hand-back dispatch closed (#19): the dispatch pointer is `next_seq` only (`handoff_seq` is the hand-back event seq, never evidence of dispatch); when the platform misses the dispatch the client falls back to re-dispatching coding→qa over the same A2A channel as trigger and backfills `next_seq`; blocked (`remote_may_still_run` / missing repo or issue / failed fallback) yields an explicit `pending_dispatch` marker plus readable warnings instead of silent grace. Three "unproven read as success" paths closed: a hand-back that did not succeed (`ok=false` / `changed=false`) never dispatches the next node, a node name outside the whitelist (e.g. `reviewer`) is reported as unknown instead of being silently rewritten to qa, and a fallback response without an event `seq` counts as unproven. #20 credential/uninstall batch: `auth init` as the single credential write entry, `uninstall --clean-global` (with `--dry-run`, rc backups keeping no credential lines, `_npx` narrowed to grape-kit), doctor's full credential-precedence view; unit tests 156→257 |
 | 0.3.9 | 2026-11-23 | Takeover full-chain hardening (#12): takeover_start branch/MR preflight checks + warnings fully surfaced, cross-platform Node takeover scripts (report / request-finish / finish), 409 agent_mismatch hints, bundle {{CWD}} rendering, doctor credential-source line; #17 fix batch: `intro` subcommand + post-install capability map (3-step API Key guide when no credentials), trigger_pipeline `agent` param (resume from a given node), doctor base_url dual-channel with source annotated, review tools native-channel crash fixed; unit tests 136→156 |
@@ -222,7 +298,7 @@ Full release notes: [CHANGELOG.md](CHANGELOG.md) — 21 条发布记录（含 0.
 ```bash
 npm install
 
-npm test        # 348 unit tests (fake-grape stand-in, no real server needed)
+npm test        # 395 unit tests (fake-grape stand-in, no real server needed)
 
 npm run smoke   # real stdio JSON-RPC round-trip: initialize → tools/list → tools/call
 ```
