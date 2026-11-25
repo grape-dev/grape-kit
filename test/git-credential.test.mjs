@@ -197,7 +197,7 @@ test('finish：补齐 branch/commit/PR 通过；allow_incomplete 覆写留痕', 
   const t = findTool('grape_takeover_finish')
   const orig = api.takeoverFinish
   let payload = null
-  api.takeoverFinish = async (_sid, p) => { payload = p; return { ok: true, changed: true, next_agent: 'qa', next_seq: 9 } }
+  api.takeoverFinish = async (_sid, p) => { payload = p; return { ok: true, changed: true, next_agent: 'qa', next_seq: 9, handoff: { seq: 9, reason: 'dispatched' } } }
   try {
     const ok = await t.native({ session_id: 'tkos_1', summary: '完成', agent_type: 'coding', branch: 'feat/issue-31', commit: 'abc1234', pr_number: '7' })
     assert.equal(payload.branch, undefined, 'branch 是本地校验入参，不塞进平台 body')
