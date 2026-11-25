@@ -123,13 +123,25 @@ test('hintFor 409 同时认 code 与 detail（兼容旧平台只给散文）', (
 
 const finishTool = () => findTool('grape_takeover_finish')
 
+/** 真实场景接口形状（`grape scenes detail`）：节点带 next 链接。测试默认给通用开发链。 */
+const SCENE_DEFAULT = {
+  id: 'custom-test-scene',
+  nodes: [
+    { id: 'vod', tag: 'vod', next: 'issue' },
+    { id: 'issue', tag: 'issue', next: 'coding' },
+    { id: 'coding', tag: 'coding', next: 'qa' },
+    { id: 'qa', tag: 'qa', next: 'sre' },
+    { id: 'sre', tag: 'sre', next: 'done' },
+  ],
+}
+
 /** 挂起 api.takeoverFinish / api.triggerPipeline / api.takeoverProgress：记录调用顺序、注入平台响应 */
-async function stubFinish({ finish, trigger, progress, events, dispatch }) {
+async function stubFinish({ finish, trigger, progress, events, dispatch, scenes = SCENE_DEFAULT }) {
   const mod = await import('../src/api.mjs')
   const calls = []
   const orig = {
     finish: mod.api.takeoverFinish, trigger: mod.api.triggerPipeline, progress: mod.api.takeoverProgress,
-    events: mod.api.issueEvents, dispatch: mod.api.dispatchPipeline,
+    events: mod.api.issueEvents, dispatch: mod.api.dispatchPipeline, scenes: mod.api.scenesDetail,
   }
   mod.api.takeoverFinish = async (...a) => { calls.push(['finish', ...a]); return finish }
   mod.api.triggerPipeline = async (...a) => {
@@ -147,6 +159,11 @@ async function stubFinish({ finish, trigger, progress, events, dispatch }) {
     if (events instanceof Error) throw events
     return events ?? []
   }
+  mod.api.scenesDetail = async (...a) => {
+    calls.push(['scenes', ...a])
+    if (scenes instanceof Error) throw scenes
+    return scenes
+  }
   mod.api.takeoverProgress = async (...a) => {
     calls.push(['progress', ...a])
     if (progress instanceof Error) throw progress
@@ -156,6 +173,7 @@ async function stubFinish({ finish, trigger, progress, events, dispatch }) {
     calls,
     triggers: () => calls.filter((c) => c[0] === 'trigger' || c[0] === 'dispatch'),
     readbacks: () => calls.filter((c) => c[0] === 'events'),
+    sceneLookups: () => calls.filter((c) => c[0] === 'scenes'),
     progresses: () => calls.filter((c) => c[0] === 'progress'),
     restore: () => {
       mod.api.takeoverFinish = orig.finish
@@ -163,6 +181,7 @@ async function stubFinish({ finish, trigger, progress, events, dispatch }) {
       mod.api.takeoverProgress = orig.progress
       mod.api.issueEvents = orig.events
       mod.api.dispatchPipeline = orig.dispatch
+      mod.api.scenesDetail = orig.scenes
     },
   }
 }
@@ -296,7 +315,7 @@ test('#19 工具描述与行为一致：兜底补发 / 不重复 / 待派发告�
   assert.match(d, /remote_may_still_run/)
 })
 
-test('#19 平台已派发（handoff_seq>0）：不重复派发', async () => {
+test('#19 仅 handoff_seq>0：回读本轮事件命中才判已派发，不重复派发', async () => {
   const t = finishTool()
   const stub = await stubFinish({
     finish: {
@@ -306,12 +325,14 @@ test('#19 平台已派发（handoff_seq>0）：不重复派发', async () => {
       },
     },
     trigger: { seq: 99, agent: 'qa', status: 'running' },
+    events: [{ seq: 42, event_type: 'a2a_event', agent_type: 'qa', status: 'running' }],
   })
   try {
     const j = await t.native({ session_id: 'tkos_19', summary: '完成' })
-    assert.equal(stub.triggers().length, 0, '平台已写入指向 qa 的事件，不得重复派发')
+    assert.equal(stub.readbacks().length, 1, '仅 handoff_seq 时必须回读本轮事件核实')
+    assert.equal(stub.triggers().length, 0, '本轮事件已命中 qa 派发，不得重复派发')
     assert.equal(j.dispatch.status, 'already_dispatched')
-    assert.equal(j.next_seq, 42, '已派发时 next_seq 应沿用平台事件 seq')
+    assert.equal(j.next_seq, 42, '已派发时 next_seq 应沿用事件 seq')
     const out = t.render(j)
     assert.match(out, /未重复派发/)
     assert.match(out, /seq=42/)
@@ -353,10 +374,10 @@ const sessOf = (over = {}) => ({
   id: 'tkos_19', agent_type: 'coding', repo_key: 'gitcode:acme/demo', issue_number: 62, handoff_seq: 0, ...over,
 })
 
-test('#30 handoff.seq>0 且 next_seq=0：以 handoff.seq 判已派发，不补发', async () => {
+test('#30 结构化 handoff.seq>0 且 next_seq=0：以 handoff.seq 判已派发，不补发', async () => {
   const t = finishTool()
   const stub = await stubFinish({
-    finish: { ok: true, changed: true, next_agent: 'qa', session: sessOf({ handoff_seq: 42, next_seq: 0 }) },
+    finish: { ok: true, changed: true, next_agent: 'qa', session: sessOf({ handoff: { seq: 42 }, next_seq: 0 }) },
     trigger: { seq: 71, agent: 'qa', status: 'running' },
   })
   try {
@@ -387,19 +408,20 @@ test('#30 next_seq>0 但 handoff.seq=0：next_seq 不作证据，回读事件无
   } finally { stub.restore() }
 })
 
-test('#30 四组合契约：next_seq 有/无 × handoff.seq 有/无 的派发判定', async () => {
+test('#30 判据组合契约：结构化 handoff.seq × handoff_seq 下界 × 本轮事件', async () => {
   const cases = [
-    { name: 'next_seq>0 + handoff.seq>0', next_seq: 77, handoff_seq: 42, status: 'already_dispatched', triggers: 0, readbacks: 0 },
-    { name: 'next_seq=0 + handoff.seq>0', next_seq: 0, handoff_seq: 42, status: 'already_dispatched', triggers: 0, readbacks: 0 },
-    { name: 'next_seq>0 + handoff.seq=0', next_seq: 77, handoff_seq: 0, status: 'dispatched', triggers: 1, readbacks: 1 },
-    { name: 'next_seq=0 + handoff.seq=0', next_seq: 0, handoff_seq: 0, status: 'dispatched', triggers: 1, readbacks: 1 },
+    { name: 'handoff.seq>0 + next_seq>0', session: { handoff: { seq: 42 }, next_seq: 77 }, events: [], status: 'already_dispatched', triggers: 0, readbacks: 0 },
+    { name: 'handoff.seq>0 + next_seq=0', session: { handoff: { seq: 42 }, next_seq: 0 }, events: [], status: 'already_dispatched', triggers: 0, readbacks: 0 },
+    { name: '无结构化证据 + 无 handoff_seq 下界', session: { next_seq: 77, handoff_seq: 0 }, events: [], status: 'dispatched', triggers: 1, readbacks: 1 },
+    { name: '无结构化证据 + 本轮事件已命中下一节点', session: { next_seq: 0, handoff_seq: 50 }, events: [{ seq: 60, event_type: 'a2a_event', agent_type: 'qa', status: 'running' }], status: 'already_dispatched', triggers: 0, readbacks: 1 },
+    { name: '无结构化证据 + 仅历史事件', session: { next_seq: 0, handoff_seq: 50 }, events: [{ seq: 20, event_type: 'a2a_event', agent_type: 'qa', status: 'running' }], status: 'dispatched', triggers: 1, readbacks: 1 },
   ]
   for (const c of cases) {
     const t = finishTool()
     const stub = await stubFinish({
-      finish: { ok: true, changed: true, next_agent: 'qa', session: sessOf({ next_seq: c.next_seq, handoff_seq: c.handoff_seq }) },
+      finish: { ok: true, changed: true, next_agent: 'qa', session: sessOf(c.session) },
       trigger: { seq: 71, agent: 'qa', status: 'running' },
-      events: [],
+      events: c.events,
     })
     try {
       const j = await t.native({ session_id: 'tkos_19', summary: '完成' })
@@ -410,36 +432,131 @@ test('#30 四组合契约：next_seq 有/无 × handoff.seq 有/无 的派发判
   }
 })
 
-test('#30 负向用例：事件回读已命中下一节点 a2a_event 时补发次数为 0', async () => {
+test('#30 Critical 回归：历史 a2a_event 存在但本轮无派发 → 仍补发', async () => {
   const t = finishTool()
   const stub = await stubFinish({
-    finish: { ok: true, changed: true, next_agent: 'qa', session: sessOf({ next_seq: 0, handoff_seq: 0 }) },
+    finish: { ok: true, changed: true, next_agent: 'qa', session: sessOf({ next_seq: 0, handoff_seq: 100 }) },
+    trigger: { seq: 120, agent: 'qa', status: 'running' },
+    events: [
+      { seq: 40, event_type: 'a2a_event', agent_type: 'qa', status: 'completed' },
+      { seq: 80, event_type: 'a2a_event', agent_type: 'qa', status: 'running' },
+      { seq: 99, event_type: 'a2a_event', agent_type: 'coding', status: 'completed' },
+    ],
+  })
+  try {
+    const j = await t.native({ session_id: 'tkos_19', summary: '完成' })
+    assert.equal(stub.triggers().length, 1, '本轮（seq>=100）无 qa 派发事件，必须补发')
+    assert.equal(j.dispatch.status, 'dispatched')
+    assert.equal(j.next_seq, 120)
+  } finally { stub.restore() }
+})
+
+test('#30 Critical 回归：仅 failed 的 a2a_event 不算已派发 → 仍补发', async () => {
+  const t = finishTool()
+  const stub = await stubFinish({
+    finish: { ok: true, changed: true, next_agent: 'qa', session: sessOf({ next_seq: 0, handoff_seq: 50 }) },
+    trigger: { seq: 70, agent: 'qa', status: 'running' },
+    events: [
+      { seq: 60, event_type: 'a2a_event', agent_type: 'qa', status: 'failed' },
+    ],
+  })
+  try {
+    const j = await t.native({ session_id: 'tkos_19', summary: '完成' })
+    assert.equal(stub.triggers().length, 1, 'failed 的 a2a_event 不得当成功证据')
+    assert.equal(j.dispatch.status, 'dispatched')
+  } finally { stub.restore() }
+})
+
+test('#30 负向用例：本轮事件回读命中下一节点 a2a_event 时补发次数为 0', async () => {
+  const t = finishTool()
+  const stub = await stubFinish({
+    finish: { ok: true, changed: true, next_agent: 'qa', session: sessOf({ next_seq: 0, handoff_seq: 50 }) },
     trigger: { seq: 99, agent: 'qa', status: 'running' },
     events: [{ seq: 88, event_type: 'a2a_event', agent_type: 'qa', status: 'running' }],
   })
   try {
     const j = await t.native({ session_id: 'tkos_19', summary: '完成' })
-    assert.equal(j.dispatch.status, 'already_dispatched', '事件回读命中即已派发')
+    assert.equal(j.dispatch.status, 'already_dispatched', '本轮事件回读命中即已派发')
     assert.equal(j.next_seq, 88, '已派发应沿用事件 seq')
     assert.equal(stub.triggers().length, 0, '已派发时补发次数必须为 0')
   } finally { stub.restore() }
 })
 
-test('#30 自定义场景链 coding→review→sre：交回后按场景链 next 派发 review', async () => {
+test('#30 Optional 回归：事件回读被分页截断（total>返回条数）不判无事件、落 pending', async () => {
   const t = finishTool()
   const stub = await stubFinish({
-    finish: { ok: true, changed: true, next_agent: '', session: sessOf({ scene_agents: ['coding', 'review', 'sre'] }) },
-    dispatch: { seq: 88, agent: 'review', status: 'running' },
-    events: [],
+    finish: { ok: true, changed: true, next_agent: 'qa', session: sessOf({ next_seq: 0, handoff_seq: 50 }) },
+    trigger: { seq: 70, agent: 'qa', status: 'running' },
+    events: { events: [{ seq: 10, event_type: 'a2a_event', agent_type: 'coding', status: 'completed' }], total: 5 },
   })
   try {
     const j = await t.native({ session_id: 'tkos_19', summary: '完成' })
+    assert.equal(stub.triggers().length, 0, '窗口被截断时不得判「无事件」重复派发')
+    assert.equal(j.dispatch.status, 'pending')
+    assert.equal(j.dispatch.cause, 'readback_incomplete')
+  } finally { stub.restore() }
+})
+
+test('#30 Optional 回归：api 模块缺 issueEvents 时不崩、落 pending', async () => {
+  const t = finishTool()
+  const stub = await stubFinish({
+    finish: { ok: true, changed: true, next_agent: 'qa', session: sessOf({ next_seq: 0, handoff_seq: 0 }) },
+    trigger: { seq: 70, agent: 'qa', status: 'running' },
+  })
+  const mod = await import('../src/api.mjs')
+  const saved = mod.api.issueEvents
+  try {
+    mod.api.issueEvents = undefined
+    const j = await t.native({ session_id: 'tkos_19', summary: '完成' })
+    assert.equal(stub.triggers().length, 0, '无法回读事件时不得盲目补发')
+    assert.equal(j.dispatch.status, 'pending')
+    assert.equal(j.dispatch.cause, 'readback_failed')
+  } finally {
+    mod.api.issueEvents = saved
+    stub.restore()
+  }
+})
+
+test('#30 自定义场景链 coding→review→sre：按场景接口节点 next 派发 review', async () => {
+  const t = finishTool()
+  const stub = await stubFinish({
+    finish: { ok: true, changed: true, next_agent: '', session: sessOf({ agent_type: 'coding' }) },
+    dispatch: { seq: 88, agent: 'review', status: 'running' },
+    events: [],
+    scenes: {
+      id: 'custom-review-chain',
+      nodes: [
+        { id: 'coding', tag: 'coding', next: 'review' },
+        { id: 'review', tag: 'review', next: 'sre' },
+        { id: 'sre', tag: 'sre', next: 'done' },
+      ],
+    },
+  })
+  try {
+    const j = await t.native({ session_id: 'tkos_19', summary: '完成' })
+    assert.equal(stub.sceneLookups().length, 1, '响应未带链时应查场景接口取节点链')
     const dispatched = stub.calls.filter((c) => c[0] === 'dispatch')
     assert.equal(dispatched.length, 1, '场景链外置节点 review 应走 dispatchPipeline 派发')
-    assert.equal(dispatched[0][5], 'review', '目标必须是场景链 next')
+    assert.equal(dispatched[0][5], 'review', '目标必须是场景节点 next')
     assert.equal(j.next_agent, 'review')
     assert.equal(j.dispatch.status, 'dispatched')
     assert.equal(j.next_seq, 88)
+  } finally { stub.restore() }
+})
+
+test('#30 场景链不可用且响应未带链：不猜默认链，落 pending', async () => {
+  const t = finishTool()
+  const stub = await stubFinish({
+    finish: { ok: true, changed: true, next_agent: '', session: sessOf({ agent_type: 'coding' }) },
+    trigger: { seq: 99, agent: 'qa', status: 'running' },
+    scenes: null,
+  })
+  try {
+    const j = await t.native({ session_id: 'tkos_19', summary: '完成' })
+    assert.equal(stub.triggers().length, 0, '场景链不可用时不得猜默认链派发')
+    assert.equal(j.dispatch.status, 'pending')
+    assert.equal(j.dispatch.cause, 'no_scene_chain')
+    assert.match(t.render(j), /未派发/)
   } finally { stub.restore() }
 })
 
@@ -485,7 +602,7 @@ test('#19 派发目标取 issue_number（19）而非 issue_id（18808）', async
   } finally { stub.restore() }
 })
 
-test('#30 兜底按场景链 next 推导：qa 交回派发 sre（不再硬编码 coding→qa）', async () => {
+test('#30 场景链 qa→sre：部署类节点保留用户确认门，不自动派发', async () => {
   const t = finishTool()
   const stub = await stubFinish({
     finish: { ok: true, changed: true, next_agent: 'sre', session: sessOf({ agent_type: 'qa' }) },
@@ -493,9 +610,14 @@ test('#30 兜底按场景链 next 推导：qa 交回派发 sre（不再硬编码
   })
   try {
     const j = await t.native({ session_id: 'tkos_19', summary: '完成' })
-    assert.equal(stub.triggers().length, 1, '场景链 qa→sre 应被推导并派发')
-    assert.equal(stub.triggers()[0][5], 'sre')
-    assert.equal(j.dispatch.status, 'dispatched')
+    assert.equal(stub.triggers().length, 0, '部署类节点不得无确认自动派发')
+    assert.equal(j.dispatch.status, 'pending')
+    assert.equal(j.dispatch.cause, 'confirmation_required')
+    assert.equal(j.pending_dispatch.agent, 'sre')
+    const out = t.render(j)
+    assert.match(out, /部署/)
+    assert.match(out, /确认/)
+    assert.match(out, /grape_trigger_pipeline\(agent=sre\)/)
   } finally { stub.restore() }
 })
 
@@ -555,13 +677,13 @@ test('#30 takeover_status 从会话记录派生待派发标记：finished+next_a
   assert.match(out, /grape_get_issue_events/, '补发前必须先核实事件，防止兜底已成功时重复派发')
 })
 
-test('#30 takeover_status：handoff.seq>0 判已派发（next_seq 不作唯一判据）', () => {
+test('#30 takeover_status：结构化 handoff.seq>0 判已派发（next_seq 不作唯一判据）', () => {
   const t = findTool('grape_takeover_status')
   const out = t.render({
     ok: true,
     session: {
       id: 'tkos_19', status: 'finished', agent_type: 'coding', next_agent: 'qa',
-      next_seq: 42, handoff_seq: 37, repo_key: 'gitcode:acme/demo', issue_number: 62,
+      next_seq: 42, handoff: { seq: 37 }, handoff_seq: 0, repo_key: 'gitcode:acme/demo', issue_number: 62,
     },
   })
   assert.doesNotMatch(out, /待派发/, 'handoff.seq=37 成立即已派发，不得再告待派发')
@@ -624,7 +746,7 @@ test('#19 takeover_status：skipped_dispatches 与已派发会话不误告警', 
   const t = findTool('grape_takeover_status')
   const skipped = t.render({ ok: true, session: { id: 'tkos_19', status: 'finished', next_agent: 'qa', handoff_seq: 0, repo_key: 'gitcode:acme/demo', issue_id: '#62', skipped_dispatches: 2 } })
   assert.match(skipped, /skipped_dispatches=2/, '平台跳过派发的会话必须渲染为待派发')
-  const dispatched = t.render({ ok: true, session: { id: 'tkos_19', status: 'finished', next_agent: 'qa', next_seq: 37, handoff_seq: 37, repo_key: 'gitcode:acme/demo', issue_id: '#62' } })
+  const dispatched = t.render({ ok: true, session: { id: 'tkos_19', status: 'finished', next_agent: 'qa', next_seq: 37, handoff: { seq: 37 }, handoff_seq: 0, repo_key: 'gitcode:acme/demo', issue_id: '#62' } })
   assert.doesNotMatch(dispatched, /待派发/, '派发指针 next_seq>0 不得再告待派发')
   const active = t.render({ ok: true, session: { id: 'tkos_19', status: 'active', next_agent: '', handoff_seq: 0 } })
   assert.doesNotMatch(active, /待派发/, '进行中会话不适用待派发标记')
@@ -682,13 +804,12 @@ test('#19 阻塞判据只认稳定告警码：散文「远端无冲突」不误�
   } finally { stub2.restore() }
 })
 
-test('#30 判据取值单一口径：session handoff.seq 优先，顶层 0 不遮蔽，判据与渲染一致', async () => {
+test('#30 判据取值单一口径：session 结构化 handoff.seq 优先，顶层 0 不遮蔽，判据与渲染一致', async () => {
   const t = finishTool()
-  // 顶层 next_seq=0/handoff_seq=0 + session handoff_seq=42：session 是会话记录权威值，判 0 会重复补发
   const stub = await stubFinish({
     finish: {
       ok: true, changed: true, next_agent: 'qa', next_seq: 0, handoff_seq: 0,
-      session: sessOf({ handoff_seq: 42, next_seq: 77 }),
+      session: sessOf({ handoff: { seq: 42 }, next_seq: 77 }),
     },
     trigger: { seq: 99, agent: 'qa', status: 'running' },
   })
