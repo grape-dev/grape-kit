@@ -23,11 +23,11 @@
 
 ```
 agent 宿主（MCP stdio：opencode / CodeArts / WorkBuddy / dsh…；其他 MCP 能力宿主可手动接线）
-  → grape-kit（48 工具 · 原生 HTTP 直连 · Markdown 渲染 · initialize instructions 自举）
+  → grape-kit（50 工具 · 原生 HTTP 直连 · Markdown 渲染 · initialize instructions 自举）
     → grape 服务端（流水线 / events / takeover 会话 API；CLI 仅 401 回退用）
 ```
 
-## 能力总览（48 工具）
+## 能力总览（50 工具）
 
 - **流水线遥控**：触发（唯一 A2A 入口）· 等待任务 · 任务状态 · 取消/恢复（带决策门）
 - **需求与事件**：列表/详情/事件流/我的需求 · 建单 · 结构化交回模板
@@ -161,7 +161,7 @@ npx -y @grape-dev/grape-kit install --target dsh          # 升级后重新装�
 npx -y @grape-dev/grape-kit uninstall --target dsh        # 只删托管块 + skill 副本
 ```
 
-> dsh 走 **MCP 最小路径**（48 工具）*零改动复用）；完整形态的原生 Cordis 插件由 [grape-dsh](https://gitcode.com/grape-dev/grape-dsh) 承载，二者并存。
+> dsh 走 **MCP 最小路径**（50 工具）*零改动复用）；完整形态的原生 Cordis 插件由 [grape-dsh](https://gitcode.com/grape-dev/grape-dsh) 承载，二者并存。
 
 ### Codex CLI
 
@@ -221,7 +221,7 @@ npx -y @grape-dev/grape-kit uninstall --target trae
 openclaw plugins install clawhub:grape-kit@latest
 ```
 
-`clawhub:` 为来源前缀（与 devkit 上架同款）。装后用插件 MCP 工具列表验证（48 工具）*。市场页：https://clawhub.ai/grape-dev/plugins/grape-kit
+`clawhub:` 为来源前缀（与 devkit 上架同款）。装后用插件 MCP 工具列表验证（50 工具）*。市场页：https://clawhub.ai/grape-dev/plugins/grape-kit
 
 也可不经市场，直接用文件注册（与其它宿主同一套四件套）：
 

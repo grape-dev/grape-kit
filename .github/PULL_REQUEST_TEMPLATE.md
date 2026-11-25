@@ -8,9 +8,10 @@
 
 ## 验证
 
-- [ ] `npm ci && npm test` 全绿（单测数以实际输出为准，不写死）
-- [ ] `npm run smoke` 通过（期望 48 tools）
-- [ ] 涉及工具面变化 → 已同步 `README.md` / `README.zh.md` / `CHANGELOG.md` / `CONTRIBUTING.md` / 本模板 / `.github/ISSUE_TEMPLATE/bug_report.md`
+- [ ] `npm ci && npm test` 全绿（期望 136/136）
+- [ ] `npm run smoke` 通过（期望 41 tools）
+- [ ] 涉及工具面变化 → 已同步 `README.md` / `README.zh.md` / `CHANGELOG.md`
+0c1ec3f (feat(#31): git 写回受控工具（换券+GIT_ASKPASS）与 coding 交回校验（工具面 39→41）)
 - [ ] 未提交任何真实凭据、内网地址或个人敏感信息
 
 ## 风险与回滚

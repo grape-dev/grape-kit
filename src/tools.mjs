@@ -17,7 +17,12 @@ import { hostname, tmpdir } from 'node:os'
 import { existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { basename, join, resolve as resolvePath } from 'node:path'
 import { fileURLToPath } from 'node:url'
+<<<<<<< HEAD
 import { zipDirectory } from './zip.mjs'
+=======
+import { existsSync, mkdirSync, writeFileSync, chmodSync, rmSync, rmdirSync, readdirSync, lstatSync, realpathSync } from 'node:fs'
+import { join, resolve, sep, dirname } from 'node:path'
+>>>>>>> 0c1ec3f (feat(#31): git 写回受控工具（换券+GIT_ASKPASS）与 coding 交回校验（工具面 39→41）)
 import { api, apiRequest, getBaseUrl, AGENT_TYPES, normalizeTriggerAgent, GrapeApiError } from './api.mjs'
 import { materializeSkillAssets, SKILL_ROOT_DIRNAME } from './skill-materialize.mjs'
 
@@ -96,6 +101,173 @@ async function attachSkillMaterialization(json) {
 const str = (desc) => ({ type: 'string', description: desc })
 const num = (desc) => ({ type: 'number', description: desc })
 const bool = (desc) => ({ type: 'boolean', description: desc })
+
+
+/* ── Issue #31：git 写回（tko_ 换一次性本仓券 → GIT_ASKPASS → push → PR） ── */
+
+const ASKPASS_DIR = '.grape'
+const ASKPASS_POSIX = 'git-askpass.sh'
+const ASKPASS_WIN = 'git-askpass.cmd'
+const REPO_SEG_RE = /^[A-Za-z0-9._-]+$/
+const CODING_EVIDENCE_LABELS = { branch: 'branch', commit: 'commit sha', pr: 'PR 编号/链接' }
+
+/**
+ * 本进程内写出的 askpass（session_id → 绝对路径）：finish/abort 只清理自己写过的文件，
+ * 不凭 session_id 猜测/遍历其它工作区的同名文件（防止误删）。
+ */
+const ASKPASS_REGISTRY = new Map()
+
+const safeRealpath = (p) => {
+  try { return realpathSync(p) } catch { return resolve(String(p ?? '')) }
+}
+
+/** 路径包含判定（归一后比较；按分隔符边界，避免 /a/bc 命中 /a/b 前缀） */
+function insideRoot(root, target) {
+  const r = resolve(root)
+  const t = resolve(target)
+  return t === r || t.startsWith(r + sep)
+}
+
+function assertRepoSeg(owner, repo) {
+  if (!REPO_SEG_RE.test(String(owner ?? '')) || !REPO_SEG_RE.test(String(repo ?? ''))) {
+    throw new GrapeApiError(`非法仓库标识：${owner}/${repo}`, {
+      status: 400,
+      hint: 'owner/repo 只允许字母数字与 ._-（拒绝路径注入）；非本仓请求一律拒绝且不落盘。',
+    })
+  }
+}
+
+/** 接管会话的仓库绑定：repo_key（gitcode:o/r）> repo_full_name/repository > owner+repo */
+function sessionRepoOf(session) {
+  const s = session?.session || session || {}
+  const rk = String(s.repo_key ?? s.repoKey ?? '').trim()
+  if (rk.includes('/')) {
+    const [o, r] = rk.split(':').pop().split('/')
+    if (o && r) return { owner: o, repo: r }
+  }
+  const full = String(s.repo_full_name ?? s.full_name ?? s.repository ?? '').trim()
+  if (full.includes('/')) {
+    const [o, r] = full.split('/')
+    if (o && r) return { owner: o, repo: r }
+  }
+  return { owner: String(s.owner ?? '').trim(), repo: String(s.repo ?? '').trim() }
+}
+
+/** 接管会话工作区：bundle.workspace.cwd_hint > workspace（对象/字符串）> cwd_hint */
+function sessionWorkspaceOf(session) {
+  const root = session?.session || session || {}
+  const ws = root.bundle?.workspace ?? root.workspace
+  if (typeof ws === 'string') return ws.trim()
+  return String(ws?.cwd_hint ?? ws?.cwd ?? root.cwd_hint ?? root.cwd ?? '').trim()
+}
+
+/** 凭据到期 epoch：显式 expires_at 优先；否则 now + expires_in（平台实测只给 expires_in="600"） */
+function credentialExpiry(cred, now) {
+  const at = Number(cred?.expires_at ?? cred?.expiresAt ?? 0)
+  if (Number.isFinite(at) && at > 0) return at
+  const ttl = Number(cred?.expires_in ?? cred?.expiresIn ?? 0)
+  if (Number.isFinite(ttl) && ttl > 0) return now + ttl
+  return 0
+}
+
+const shSingleQuote = (v) => `'${String(v).replace(/'/g, `'\\''`)}'`
+
+/**
+ * POSIX askpass：git 以 `<prompt>` 作为 $1 调用；先自检到期 epoch，
+ * 过期 → stderr 提示「重新换券」并 exit 1（不存在 native git / CLI 静默回退分支）。
+ */
+function askpassPosix({ username, password, expiresAt }) {
+  return [
+    '#!/bin/sh',
+    '# grape-kit 一次性 git askpass（Issue #31）——请勿提交/外传',
+    `GRAPE_ASKPASS_EXPIRES=${Number(expiresAt)}`,
+    `GRAPE_ASKPASS_USERNAME=${shSingleQuote(username)}`,
+    `GRAPE_ASKPASS_PASSWORD=${shSingleQuote(password)}`,
+    'NOW=$(date +%s 2>/dev/null || echo 0)',
+    'if [ "$NOW" -ge "$GRAPE_ASKPASS_EXPIRES" ]; then',
+    '  echo "[grape] git 凭据已过期（epoch ${GRAPE_ASKPASS_EXPIRES}），请重新换券：再次调用 grape_git_credential 换新券后重试；本脚本不静默回退本机 git/CLI 凭据。" >&2',
+    '  exit 1',
+    'fi',
+    'case "$1" in',
+    '  *[Uu]sername*) printf "%s\\n" "$GRAPE_ASKPASS_USERNAME" ;;',
+    '  *) printf "%s\\n" "$GRAPE_ASKPASS_PASSWORD" ;;',
+    'esac',
+    'exit 0',
+    '',
+  ].join('\n')
+}
+
+/** Windows askpass（.cmd）：epoch 由 PowerShell 取；平台 token 为字母数字，cmd 元字符风险低（注释已声明） */
+function askpassCmd({ username, password, expiresAt }) {
+  return [
+    '@echo off',
+    'rem grape-kit one-shot git askpass (Issue #31) - do not commit/share',
+    `set GRAPE_ASKPASS_EXPIRES=${Number(expiresAt)}`,
+    `set GRAPE_ASKPASS_USERNAME=${username}`,
+    `set GRAPE_ASKPASS_PASSWORD=${password}`,
+    'for /f "usebackq delims=" %%e in (`powershell -NoProfile -Command "[int][double]::Parse((Get-Date -UFormat %%s))"`) do set NOW=%%e',
+    'if %NOW% GEQ %GRAPE_ASKPASS_EXPIRES% (',
+    '  echo [grape] git 凭据已过期，请重新换券：再次调用 grape_git_credential 换新券后重试；不静默回退。 1>&2',
+    '  exit /b 1',
+    ')',
+    'echo %1 | findstr /i "sername" >nul',
+    'if errorlevel 1 (echo %GRAPE_ASKPASS_PASSWORD%) else (echo %GRAPE_ASKPASS_USERNAME%)',
+    'exit /b 0',
+    '',
+  ].join('\r\n')
+}
+
+function askpassFiles(ws) {
+  return [join(ws, ASKPASS_DIR, ASKPASS_POSIX), join(ws, ASKPASS_DIR, ASKPASS_WIN)]
+}
+
+/** askpass 所在目录（空则移除；非空/被占用不动，不影响清理结果） */
+function pruneAskpassDir(file) {
+  const dir = dirname(file)
+  try {
+    if (existsSync(dir) && readdirSync(dir).length === 0) rmdirSync(dir)
+  } catch { /* 目录非空/被占用：保留 */ }
+}
+
+/** 删除指定工作区的 askpass（幂等）；只碰本工具的两份固定文件名，目录空则一并移除 */
+function removeAskpass(ws) {
+  const removed = []
+  for (const f of askpassFiles(ws)) {
+    if (existsSync(f)) { rmSync(f, { force: true }); removed.push(f) }
+  }
+  for (const f of removed) pruneAskpassDir(f)
+  return removed
+}
+
+/**
+ * finish/abort 清理：优先清理本进程为 session 写出的路径（registry），再按显式 workspace 入参清理。
+ * 二者都没有时不猜测路径——避免误删其它工作区里的同名文件。
+ */
+function cleanupAskpassFor(sessionId, workspace) {
+  const removed = new Set()
+  const key = String(sessionId ?? '')
+  const reg = ASKPASS_REGISTRY.get(key)
+  if (reg) {
+    if (existsSync(reg)) { rmSync(reg, { force: true }); removed.add(reg); pruneAskpassDir(reg) }
+    ASKPASS_REGISTRY.delete(key)
+  }
+  const ws = String(workspace ?? '').trim()
+  if (ws) for (const f of removeAskpass(safeRealpath(ws))) removed.add(f)
+  return [...removed]
+}
+
+/** coding 交回三件套（branch / commit / PR）：finish 的产物校验入参 */
+function codingEvidence(a = {}) {
+  return {
+    branch: String(a.branch ?? '').trim(),
+    commit: String(a.commit ?? '').trim(),
+    pr: String(a.pr_number ?? a.pr ?? '').trim(),
+  }
+}
+
+const missingCodingEvidence = (ev) => Object.entries(CODING_EVIDENCE_LABELS)
+  .filter(([k]) => !ev[k])
+  .map(([, label]) => label)
 
 const WARNING_HINTS = {
   remote_may_still_run: '远程分支可能已被云端 worker 推送并开过 MR：先查远端分支与 issue/MR，避免破坏性强推（分支/MR 冲突必须先裁决）。',
@@ -1677,8 +1849,12 @@ export const TOOLS = [
       '原子动作：云端任务让渡给本地、签发 tko_ 接管凭据（12h 可续 24h）、返回完整接管上下文与按 host_os 渲染的脚本。' +
       '之后本地继续该节点工作，用 grape_takeover_progress 回报进度，完成用 grape_takeover_finish 携结构化产物交回，' +
       '或用 grape_takeover_abort 让渡回流水线（当前节点重新派发，链不断）。' +
+<<<<<<< HEAD
       '⚠️ push 能力边界：tko_ 仅 repo_session 能力，**不含 git 凭据注入**；洁净机器的回推路径见返回体。' +
       `接管同时把平台下发的 bundle.assets.skill 物化到本地工作区 <cwd>/${SKILL_ROOT_DIRNAME}/<skill>/（SKILL.md + references/），渲染给出落盘路径；旧平台未下发技能包时显式提示未物化。` +
+=======
+      '⚠️ push 能力边界：tko_ 仅 repo_session 能力，**不含 git 凭据注入**；洁净机器用 `grape_git_credential` 以 tko_ 换一次性本仓券（600s → GIT_ASKPASS 0600）后 push，PR 用 `grape_create_pull`。' +
+>>>>>>> 0c1ec3f (feat(#31): git 写回受控工具（换券+GIT_ASKPASS）与 coding 交回校验（工具面 39→41）)
       '⚠️ 需要平台支持 takeover API（404/无该工具能力时回退 grape_takeover_context + cancel 老路径）。',
     schema: {
       type: 'object',
@@ -1707,9 +1883,9 @@ export const TOOLS = [
       if (ws.cwd_hint) lines.push(`- 本地工作目录: ${ws.cwd_hint}`)
       if (env.GRAPE_AUTH_FILE) lines.push(`- 凭据文件（路径占位符已渲染）: ${fillCwd(env.GRAPE_AUTH_FILE, cwd)}`)
       lines.push('', '**push 能力边界（先读）**', '')
-      lines.push('- `tko_` 只覆盖 repo_session：可继续该节点工作、回报进度、`request-finish`；**不含 git 凭据注入**，不能直接 push。')
-      lines.push('- 本机已有用户级凭据（`grape git` 注入 / 自有 PAT / SSH key）→ 正常 commit & push；洁净机器必须先由用户配置其中一种。')
-      lines.push('- 洁净机器回推路径：① 用户在本机配置用户级 PAT 或 SSH key；② `grape git push origin <branch>`（凭据注入通道）；③ 或让用户在其已有凭据的机器上推送同一提交。不要假设 tko_ 能 push。')
+      lines.push('- `tko_` 只覆盖 repo_session：可继续该节点工作、回报进度、`request-finish`；**不含 git 凭据注入**，需先换券才能 push。')
+      lines.push('- 洁净机器回推（推荐，全链只用换的券）：`grape_git_credential` 用 tko_ 换一次性本仓券（600s）→ 在工作区写 `GIT_ASKPASS`（0600，过期自检提示重新换券）→ `git push` → `grape_create_pull` 建 PR。券在 push 前换、不缓存。')
+      lines.push('- 本机已有用户级凭据（`grape git` 注入 / 自有 PAT / SSH key）→ 也可直接 commit & push；不存在静默回退：券过期必须重新换券。')
       const bundleScripts = renderBundleScripts(b.assets?.scripts ?? b.scripts, cwd)
       if (bundleScripts) {
         lines.push('', '**接管脚本（平台渲染，路径占位符已本地替换为实际路径）**', '', '```bash', ...bundleScripts, '```')
@@ -1871,7 +2047,10 @@ export const TOOLS = [
       '平台给了场景链之外的节点名（如 `reviewer`）时**不按场景链改写**，原样上报「未知节点」待人工裁决；' +
       '补发响应缺事件 `seq` 时判「派发未证实」（不渲染 `seq=0`、不宣称已派发），需查事件核实。' +
       '⚠️ 用户决策层动作：确认本地成果可交回后再调用。' +
-      '两阶段确认流：先 request-finish（仅报告完成，等用户确认），用户确认后再本工具 finish。',
+      '两阶段确认流：先 request-finish（仅报告完成，等用户确认），用户确认后再本工具 finish。' +
+      '⚠️ coding 交回产物校验（Issue #31）：agent_type=coding（或直接带 branch/commit/pr_number 任一）时须带齐 branch、commit、PR；' +
+      'request-finish 只出强 warning，正式 finish 缺项直接拒绝并列出缺失项，补齐后通过；确需带缺项交回时显式 allow_incomplete=true（在 actions 留痕）。' +
+      'finish/abort 会清理本次进程写出的 GIT_ASKPASS（grape_git_credential 产物）。',
     schema: {
       type: 'object',
       properties: {
@@ -1887,6 +2066,12 @@ export const TOOLS = [
         owner: str('兜底派发用 owner（可选；仅当会话未带仓库标识时使用）'),
         repo: str('兜底派发用 repo（可选）'),
         issue_number: num('兜底派发用 issue 编号（可选）'),
+        agent_type: str('本次交回的节点（coding 时校验 branch/commit/PR）'),
+        branch: str('coding 交回产物：分支（head，如 feat/issue-31）'),
+        commit: str('coding 交回产物：commit sha（git rev-parse HEAD）'),
+        pr_number: str('coding 交回产物：PR 编号或链接'),
+        allow_incomplete: bool('true=允许 coding 产物缺项交回（在 actions 留痕）'),
+        workspace: str('工作区路径（用于清理 askpass；缺省用本次进程写出的记录）'),
       },
       required: ['session_id', 'summary'],
     },
@@ -1895,14 +2080,47 @@ export const TOOLS = [
         summary: a.summary,
         evidence: a.evidence || '',
         files_written: a.files_written || [],
-        actions: a.actions || [],
+        actions: Array.isArray(a.actions) ? a.actions : [],
         artifacts: a.artifacts || [],
         next_step: a.next_step || '',
         issue_summary: a.issue_summary || '',
       }
-      if (a.request_only) return api.takeoverRequestFinish(a.session_id, payload)
+      /* coding 产物校验（Issue #31）：agent_type=coding，或未声明 agent_type 但带了任一产物字段（按 coding 处理）。
+       * request-finish 只强 warning（用户确认前可能还要补 push/PR）；正式 finish 缺项拒绝，allow_incomplete 覆写留痕。 */
+      const evidence = codingEvidence(a)
+      const declared = asAgentType(a.agent_type)
+      const coding = declared === 'coding' || (!declared && Object.values(evidence).some(Boolean))
+      const missing = coding ? missingCodingEvidence(evidence) : []
+      if (a.request_only) {
+        const json = await api.takeoverRequestFinish(a.session_id, payload)
+        const base = json && typeof json === 'object' ? json : { raw: json }
+        return {
+          ...base,
+          ...(missing.length
+            ? { coding_evidence_warning: { missing, message: `coding 交回产物不齐：${missing.join('、')}；补齐后再正式 finish（缺项会被拒绝）` } }
+            : {}),
+        }
+      }
+      if (missing.length && !a.allow_incomplete) {
+        throw new GrapeApiError(`coding 交回缺少产物：${missing.join('、')}`, {
+          status: 400,
+          hint: '交回前须带齐 branch / commit / PR 三件套：`git rev-parse HEAD` 取 commit、`grape_create_pull` 建 PR 后回填 pr_number。'
+            + '确需带缺项交回时显式传 allow_incomplete=true（会在 actions 留痕）。本次未调用 finish，交回未发生。',
+        })
+      }
+      if (missing.length) {
+        payload.actions = [...payload.actions, `⚠️ allow_incomplete 覆写：coding 交回缺少 ${missing.join('、')}（显式允许，未补齐）`]
+      }
+      // 正式交回后不再需要 askpass：清理本次进程为该 session 写出的文件
+      const askpassCleanup = cleanupAskpassFor(a.session_id, a.workspace)
       const json = await api.takeoverFinish(a.session_id, { ...payload, outcome: 'completed', handoff: 'a2a' })
-      return ensureNextNodeDispatched(json, a)
+      const out = await ensureNextNodeDispatched(json, a)
+      const base = out && typeof out === 'object' ? out : { raw: out }
+      return {
+        ...base,
+        ...(missing.length ? { incomplete_override: { allowed: true, missing } } : {}),
+        ...(askpassCleanup.length ? { askpass_cleanup: askpassCleanup } : {}),
+      }
     },
     render(json) {
       if (!json || typeof json !== 'object') return R.fallbackJson(json)
@@ -1910,7 +2128,15 @@ export const TOOLS = [
       const lines = []
       const isRequestOnly = json.changed === undefined && !json.event_status && !json.next_agent
         && (json.awaiting_confirmation || json.requested || json.session?.finish_requested_at)
-      if (isRequestOnly) lines.push('### 已报告完成，等待用户确认', '', '用户确认后再次调用本工具（request_only=false）正式交回。')
+      if (isRequestOnly) {
+        lines.push('### 已报告完成，等待用户确认', '', '用户确认后再次调用本工具（request_only=false）正式交回。')
+        const w = json.coding_evidence_warning
+        if (w && Array.isArray(w.missing) && w.missing.length) {
+          lines.push('', '**⚠️ coding 交回产物不齐（正式 finish 会被拒绝）**', '')
+          lines.push(`- 缺少: ${w.missing.join('、')}`)
+          lines.push('', '_补齐 branch / commit / PR 后再交回；确需带缺项交回时显式 allow_incomplete=true（在 actions 留痕）。_')
+        }
+      }
       else {
         // 平台明确 ok=false / changed=false：交回未生效，标题不得写「完成」
         const uncommitted = json.ok === false || json.changed === false
@@ -1921,7 +2147,17 @@ export const TOOLS = [
         if (ho.failure) lines.push(`- **⚠️ 平台 handoff 派发失败：${ho.failure}**${handoffCovered ? '（已由客户端兜底派发覆盖）' : ''}`)
         if (json.issue_stage) lines.push(`- issue 阶段: ${json.issue_stage}`)
         if (json.event_status) lines.push(`- 事件终态: ${json.event_status}`)
+<<<<<<< HEAD
         const handoffSeq = dispatchEvidenceOf(json).seq
+=======
+        if (json.incomplete_override?.allowed) {
+          lines.push(`- **⚠️ allow_incomplete 覆写**：缺少 ${json.incomplete_override.missing.join('、')}（已在 actions 留痕）`)
+        }
+        if (Array.isArray(json.askpass_cleanup) && json.askpass_cleanup.length) {
+          lines.push(`- askpass 已清理: ${json.askpass_cleanup.join('、')}`)
+        }
+        const handoffSeq = seqOf(json, 'handoff_seq')
+>>>>>>> 0c1ec3f (feat(#31): git 写回受控工具（换券+GIT_ASKPASS）与 coding 交回校验（工具面 39→41）)
         if (handoffSeq) {
           // handoff.seq（或历史字段 handoff_seq）是「下一节点已派发」的权威证据
           lines.push(`- 平台 handoff.seq=${handoffSeq}（已派发证据）`)
@@ -1993,10 +2229,17 @@ export const TOOLS = [
         session_id: str('接管会话 id'),
         redispatch: bool('是否重新派发当前节点（默认 true）'),
         reason: str('放弃原因（写入审计事件）'),
+        workspace: str('工作区路径（用于清理 askpass；缺省用本次进程写出的记录）'),
       },
       required: ['session_id'],
     },
-    async native(a) { return api.takeoverAbort(a.session_id, a.redispatch !== false, a.reason || '') },
+    async native(a) {
+      // 让渡后本地不再需要凭据：清理本次进程为该 session 写出的 askpass
+      const askpassCleanup = cleanupAskpassFor(a.session_id, a.workspace)
+      const json = await api.takeoverAbort(a.session_id, a.redispatch !== false, a.reason || '')
+      const base = json && typeof json === 'object' ? json : { raw: json }
+      return { ...base, ...(askpassCleanup.length ? { askpass_cleanup: askpassCleanup } : {}) }
+    },
     render(json) {
       if (!json || typeof json !== 'object') return R.fallbackJson(json)
       if (json.detail) return `让渡失败：${typeof json.detail === 'string' ? json.detail : JSON.stringify(json.detail)}`
@@ -2013,6 +2256,215 @@ export const TOOLS = [
         lines.push('- 节点已回到队列（未重派）')
       }
       if (json.reason) lines.push(`- 原因: ${json.reason}`)
+      if (Array.isArray(json.askpass_cleanup) && json.askpass_cleanup.length) {
+        lines.push(`- askpass 已清理: ${json.askpass_cleanup.join('、')}`)
+      }
+      return lines.join('\n')
+    },
+  },
+
+  {
+    name: 'grape_git_credential',
+    description:
+      'git 写回 · 换一次性本仓凭据并落地 GIT_ASKPASS（Issue #31：干净机器可 push 的关键一环）。' +
+      '用接管凭据 tko_（或会话级 tk_）调 `/api/repos/{owner}/{repo}/git-credential`（600s、仅本仓），' +
+      '在工作区写 `.grape/git-askpass.sh`（POSIX）/ `.cmd`（Windows），权限 0600；脚本内嵌到期 epoch，' +
+      '过期后非零退出并在 stderr 提示「重新换券」，**不存在**静默回退本机 git / CLI 凭据的分支。' +
+      '⚠️ 先校验：owner/repo 必须与接管会话绑定的仓库一致（非本仓拒绝），workspace 必须在会话工作区内（越界拒绝且不落盘）。' +
+      '⚠️ 凭据短时（600s）：push 前重新换券、不缓存；返回只含掩码口令，不回显明文。' +
+      'cleanup=true 只删除本工具写出的 askpass 文件（幂等），不换券。',
+    schema: {
+      type: 'object',
+      properties: {
+        session_id: str('接管会话 id（用于 owner/repo 与工作区绑定校验）'),
+        owner: str('owner（必须与会话仓库一致）'),
+        repo: str('repo（必须与会话仓库一致）'),
+        workspace: str('本地工作区路径（必须是会话工作区或其子目录）'),
+        cleanup: bool('true=只清理 askpass 文件，不换券'),
+      },
+      required: ['session_id', 'owner', 'repo', 'workspace'],
+    },
+    async run(a, deps = {}) {
+      const A = deps.apiModule || api
+      const platform = deps.platform || process.platform
+      const now = deps.now || (() => Math.floor(Date.now() / 1000))
+      assertRepoSeg(a.owner, a.repo)
+      const wsInput = String(a.workspace ?? '').trim()
+      if (!wsInput) {
+        throw new GrapeApiError('缺少 workspace：请传入接管会话的本地工作区路径', { status: 400, hint: '凭据只允许落在会话工作区内，不提供默认落盘位置。' })
+      }
+      const ws = safeRealpath(wsInput)
+      // ① 会话绑定校验（本仓 + 工作区边界）：拿不到会话就不换券，杜绝「非本仓/越界」静默通过
+      let session
+      try {
+        session = await A.takeoverGet(a.session_id)
+      } catch (e) {
+        const needsSessionToken = e instanceof GrapeApiError && (e.status === 401 || e.status === 403)
+        throw new GrapeApiError(`无法校验接管会话 ${a.session_id}：${e?.message || e}`, {
+          status: e?.status || 0,
+          hint: needsSessionToken
+            ? '换券需要会话级凭据（tko_ 接管凭据 / tk_ worker 凭据）；用户级 grape_ 调用 git-credential 必 403，属预期边界，不要更换 token 绕行。'
+            : (e?.hint || ''),
+        })
+      }
+      const bound = sessionRepoOf(session)
+      if (!bound.owner || !bound.repo) {
+        throw new GrapeApiError(`接管会话 ${a.session_id} 未带仓库绑定，拒绝换券（无法校验非本仓）`, {
+          status: 400,
+          hint: '会话缺 repo_key/repository 时无法证明「本仓」；请先用 grape_takeover_status 找回正确会话再换券，本次未写入任何文件。',
+        })
+      }
+      if (bound.owner.toLowerCase() !== String(a.owner).toLowerCase() || bound.repo.toLowerCase() !== String(a.repo).toLowerCase()) {
+        throw new GrapeApiError(`拒绝换券：owner/repo 与接管会话绑定的仓库不一致（会话 ${bound.owner}/${bound.repo}，请求 ${a.owner}/${a.repo}）`, {
+          status: 400,
+          hint: '只允许为本仓换券；不一致时未写入任何文件（不做跨仓降级）。',
+        })
+      }
+      const rootRaw = sessionWorkspaceOf(session) || String(deps.workspaceRoot ?? '').trim() || process.cwd()
+      const root = safeRealpath(rootRaw)
+      if (!insideRoot(root, ws)) {
+        throw new GrapeApiError(`拒绝换券：workspace（${ws}）不在接管会话工作区（${root}）内`, {
+          status: 400,
+          hint: '凭据只允许落在会话工作区（含子目录）；越界路径未写入任何文件。',
+        })
+      }
+      // ② cleanup：只删本工具的两份固定文件，不换券
+      if (a.cleanup) {
+        const cleaned = removeAskpass(ws)
+        ASKPASS_REGISTRY.delete(String(a.session_id))
+        return { cleaned, workspace: ws }
+      }
+      // ③ 换券（一次性、600s）：过期/无到期一律不写盘，提示重新换券
+      const cred = await A.gitCredential(a.owner, a.repo)
+      const username = String(cred?.username ?? 'x-access-token')
+      const password = String(cred?.password ?? cred?.token ?? '')
+      if (/[\r\n\0]/.test(username) || /[\r\n\0]/.test(password)) {
+        throw new GrapeApiError('换券响应含换行/NUL，拒绝写入 askpass（会破坏脚本）', {
+          status: 400,
+          hint: '重新换券；凭据内容异常时不落盘、不静默改用本机凭据。',
+        })
+      }
+      if (!password) {
+        throw new GrapeApiError('换券响应未含 password/token，未写盘', {
+          status: 400,
+          hint: '请重新换券（grape_git_credential）；不得回退本机 git / CLI 凭据静默推送。',
+        })
+      }
+      const expiresAt = credentialExpiry(cred, now())
+      if (!expiresAt || expiresAt <= now()) {
+        throw new GrapeApiError(`换券返回的凭据已过期或缺少有效期（expires=${expiresAt || 'unknown'}），未写盘`, {
+          status: 400,
+          hint: '重新换券（grape_git_credential）后再 push；过期券一律不落盘，不存在静默回退分支。',
+        })
+      }
+      // ④ 落盘：<ws>/.grape（拒绝 symlink 目录，防写到工作区外）
+      const dir = join(ws, ASKPASS_DIR)
+      if (existsSync(dir) && lstatSync(dir).isSymbolicLink()) {
+        throw new GrapeApiError(`拒绝写入：${dir} 是符号链接（可能指向工作区外）`, {
+          status: 400,
+          hint: '删除该符号链接后重试；凭据只允许落在工作区内的真实目录。',
+        })
+      }
+      mkdirSync(dir, { recursive: true, mode: 0o700 })
+      const file = platform === 'win32' ? join(dir, ASKPASS_WIN) : join(dir, ASKPASS_POSIX)
+      const content = platform === 'win32'
+        ? askpassCmd({ username, password, expiresAt })
+        : askpassPosix({ username, password, expiresAt })
+      writeFileSync(file, content, { mode: 0o600 })
+      // win32 无 0600 权限位（按目录 ACL）；POSIX 上显式再 chmod 一次，兼容 umask
+      try { chmodSync(file, 0o600) } catch {}
+      ASKPASS_REGISTRY.set(String(a.session_id), file)
+      return {
+        ok: true,
+        owner: a.owner,
+        repo: a.repo,
+        provider: String(cred?.provider ?? ''),
+        username,
+        masked_password: R.maskSecret(password),
+        expires_at: expiresAt,
+        ttl_seconds: Math.max(0, expiresAt - now()),
+        askpass_path: file,
+        mode: '0600',
+        workspace: ws,
+        clone_url: String(cred?.clone_url ?? ''),
+        note: '凭据一次性（600s）：push 前重新换券、不缓存；过期后脚本非零退出并提示重新换券（无静默回退）。finish/abort 会清理该文件。',
+      }
+    },
+    render(json) {
+      if (!json || typeof json !== 'object') return R.fallbackJson(json)
+      if (json.cleaned !== undefined) {
+        return Array.isArray(json.cleaned) && json.cleaned.length
+          ? ['### askpass 已清理', '', ...json.cleaned.map((f) => `- 删除: ${f}`)].join('\n')
+          : '### askpass 无需清理（文件不存在）'
+      }
+      const lines = ['### git 凭据已换（一次性，短时）', '']
+      lines.push(`- 仓库: ${json.owner}/${json.repo}${json.provider ? `（${json.provider}）` : ''}`)
+      lines.push(`- 用户名: ${json.username} · 口令: ${json.masked_password}（掩码；明文只在 askpass 文件内）`)
+      lines.push(`- 到期: ${R.formatEpoch(json.expires_at)}（epoch ${json.expires_at}，TTL ${json.ttl_seconds}s）`)
+      lines.push(`- askpass: \`${json.askpass_path}\`（权限 ${json.mode}）`)
+      lines.push('', '**push 用法（券在 push 前换，不缓存）**', '', '```bash')
+      lines.push(`export GIT_ASKPASS="${json.askpass_path}"`)
+      lines.push('export GIT_TERMINAL_PROMPT=0')
+      lines.push('git push origin <branch>')
+      lines.push('```')
+      lines.push('', '_过期后 askpass 非零退出并提示「重新换券」；本工具没有静默回退本机 git / CLI 凭据的分支。finish/abort 会清理该文件。_')
+      return lines.join('\n')
+    },
+  },
+  {
+    name: 'grape_create_pull',
+    description:
+      'git 写回 · 创建 PR（薄代理 `POST /api/git-repo/{owner}/{repo}/pulls`，会话级 tk_/tko_ 通道；用户级 grape_ 403 属预期）。' +
+      '只建 PR，不评审、不合并；返回 PR 编号与 URL，作为 takeover finish 的 branch/commit/PR 三件套证据。' +
+      '`issue_number` 映射为 `related_issue_nums`；`auto_close_issues` 默认 false（不擅自关闭 Issue）。',
+    schema: {
+      type: 'object',
+      properties: {
+        owner: str('owner'),
+        repo: str('repo'),
+        title: str('PR 标题'),
+        head: str('源分支（如 feat/issue-31）'),
+        base: str('目标分支（工作基线，如 main）'),
+        body: str('PR 描述（可选）'),
+        issue_number: num('关联 issue 编号（可选，映射 related_issue_nums）'),
+        related_issue_nums: { type: 'array', items: { type: 'number' }, description: '关联 issue 编号列表（可选）' },
+        auto_close_issues: bool('合并后自动关闭关联 Issue（默认 false）'),
+      },
+      required: ['owner', 'repo', 'title', 'head', 'base'],
+    },
+    async native(a) {
+      assertRepoSeg(a.owner, a.repo)
+      for (const k of ['title', 'head', 'base']) {
+        if (!String(a[k] ?? '').trim()) {
+          throw new GrapeApiError(`缺少 ${k}：创建 PR 需要 title/head/base`, {
+            status: 400,
+            hint: 'head 是开发分支、base 是目标合入分支（工作基线）；先用 grape_takeover_status 确认分支后重试。',
+          })
+        }
+      }
+      const payload = { title: a.title, head: a.head, base: a.base }
+      if (a.body) payload.body = a.body
+      const nums = Array.isArray(a.related_issue_nums)
+        ? a.related_issue_nums
+        : (a.issue_number ? [Number(a.issue_number)] : [])
+      if (nums.length) payload.related_issue_nums = nums
+      if (a.auto_close_issues === true) payload.auto_close_issues = true
+      return api.createPull(a.owner, a.repo, payload)
+    },
+    render(json) {
+      if (!json || typeof json !== 'object') return R.fallbackJson(json)
+      const err = json.detail ?? json.error
+      if (err !== undefined) return `PR 创建失败：${typeof err === 'string' ? err : JSON.stringify(err)}`
+      const num = json.number ?? json.pr_number ?? json.iid ?? json.id ?? ''
+      const url = json.html_url || json.web_url || json.url || ''
+      const head = typeof json.head === 'string' ? json.head : (json.head?.ref ?? '')
+      const base = typeof json.base === 'string' ? json.base : (json.base?.ref ?? '')
+      const lines = ['### PR 已创建', '']
+      lines.push(`- 编号: ${num || '-'}`)
+      if (head || base) lines.push(`- 分支: ${head || '?'} → ${base || '?'}`)
+      if (json.title) lines.push(`- 标题: ${json.title}`)
+      if (url) lines.push(`- 链接: ${url}`)
+      lines.push('', '_交回前把 PR 编号与 commit sha 传给 grape_takeover_finish（coding 缺项会被拒绝）；本工具不评审、不合并。_')
       return lines.join('\n')
     },
   },

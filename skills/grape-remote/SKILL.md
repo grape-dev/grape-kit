@@ -30,12 +30,17 @@ description: |
 > **动手前先读「前置检查清单」**：`grape_takeover_start` 的 warnings 全量呈现（含 `remote_may_still_run`）。远端分支可能已有云端提交/已开 MR，按「复用远端分支（推荐）→ rebase 后强推（需用户确认）→ 另起分支」三选一裁决，禁止裸 `--force`。完整 playbook：[docs/20261114-takeover-architecture.md](../docs/20261114-takeover-architecture.md)。
 
 1. `grape_takeover_start(owner, repo, number[, agent_type])` —— 原子让渡：云端任务停、本地接手、签发 tko_ 凭据（12h）、返回完整上下文与服务端渲染脚本。**不要**再调用 `grape_cancel_issue`。
-   - tko_ 只有 repo_session 能力：可继续节点工作、回报进度，**不含 git 凭据注入**；洁净机器回推需自备用户级 PAT / `grape git` 凭据（详见 `grape_takeover_start` 返回的「push 能力边界」）。
+   - tko_ 只有 repo_session 能力：可继续节点工作、回报进度，**不含 git 凭据注入**；洁净机器的写回链路见下方「git 写回」。
+   - **git 写回（Issue #31）**：`grape_git_credential(session_id, owner, repo, workspace)` 用 tko_ 换一次性本仓券（600s）并落 `GIT_ASKPASS`（0600，内嵌到期 epoch）；**push 前重新换券**（不缓存），券过期脚本非零退出并提示「重新换券」，不存在静默回退本机 git/CLI 凭据的分支。PR 用 `grape_create_pull(title/head/base)`；两工具只服务本仓 + 会话工作区，非本仓/越界拒绝且不落盘。
 2. 本地继续该节点工作；关键动作后 `grape_takeover_progress(session_id, summary)` 回报（云端面板可见）。
 3. 完成后两阶段交回（**第二阶段 finish 必须用用户级凭据**）：
    - **① request-finish**：`grape_takeover_finish(request_only=true, …)` 只报告完成与结构化产物，用 tko_ 接管凭据即可。
    - **② 用户授权**：把结论 + 证据原样呈现给用户，在**对话中**取得明确确认。平台不提供任何 UI 确认按钮，不要指路 WebUI/前端页面。
+<<<<<<< HEAD
    - **③ finish**：用户确认后，由**用户级凭据（`grape_`）**的会话调用 `grape_takeover_finish(request_only=false, …)` 正式交回（结构化产物；已派发判据 = `handoff.seq>0` 或 `handoff.reason=already_dispatched`，`next_seq` 恒 0 仅辅助展示——命中则不重复派发；双判据缺失时 kit 以本轮 `handoff_seq` 为下界回读 issue 事件，只认本轮之后且非 `failed` 的下一节点 `a2a_event`，仅历史/失败事件则按场景链 `next` 兜底补发；场景链缺省取 `scenes detail` 的节点 `next`，不可用时不猜默认链；部署类节点 `sre` 保留用户确认门；返回 `pending_dispatch` 待派发标记时按提示 `grape_trigger_pipeline(agent=…)` 补发——标记随交回结果返回，事后可用 `grape_takeover_status` 复查，平台对已结束会话拒绝 progress 写入）。tko_ 仅 repo_session 能力、不推进流水线，用它调 finish 会 403——这是凭据语义边界，不是权限不足。
+=======
+   - **③ finish**：用户确认后，由**用户级凭据（`grape_`）**的会话调用 `grape_takeover_finish(request_only=false, …)` 正式交回（结构化产物，coding→qa 自动接力；**coding 交回须带 branch / commit / PR 三件套**——request-finish 缺项只强 warning，正式 finish 缺项直接拒绝，`allow_incomplete=true` 可覆写并在 actions 留痕；finish/abort 自动清理 askpass；判据只看派发指针 `next_seq`——`next_seq>0` 平台已派发则不重复，`next_seq=0` 时 kit 兜底补发并回填 `next_seq`；返回 `pending_dispatch` 待派发标记时按提示 `grape_trigger_pipeline(agent=…)` 补发——标记随交回结果返回，事后可用 `grape_takeover_status` 复查会话派发指针，平台对已结束会话拒绝 progress 写入）。tko_ 仅 repo_session 能力、不推进流水线，用它调 finish 会 403——这是凭据语义边界，不是权限不足。
+>>>>>>> 0c1ec3f (feat(#31): git 写回受控工具（换券+GIT_ASKPASS）与 coding 交回校验（工具面 39→41）)
 4. 中途放弃：`grape_takeover_abort(session_id, redispatch=true)` —— 当前节点重新派发回云端引擎，已完成的节点保留。
 5. 断连恢复：`grape_takeover_status(owner, repo, number)` 找回 session_id；单条查询带 `renew=true` 续期凭据。
 

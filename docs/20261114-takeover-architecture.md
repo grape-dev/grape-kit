@@ -12,7 +12,7 @@
 flowchart TB
     subgraph EDGE["端侧（本地机器）"]
         AG["宿主 Agent（opencode / hermes / codex / codearts…）"]
-        KIT["grape-kit v0.3.2（MCP stdio）<br/>36 工具面：takeover ×6"]
+        KIT["grape-kit（MCP stdio）<br/>41 工具面：takeover ×6 + git 写回 ×2"]
         WS["本地工作区<br/>clone · 编辑 · 测试 · push 分支"]
         AG -->|"MCP tools/list · tools/call"| KIT
         KIT -->|"grape_takeover_start / progress /<br/>finish / abort / status"| GW
@@ -159,12 +159,42 @@ sequenceDiagram
 ## 5. 遗留与边界
 
 - **内置 Node 接管脚本**：`skills/grape-remote/scripts/takeover/{report,request-finish,finish}.mjs` 随 `skills/` 目录分发（Node ≥20，Windows/Linux 通用）；token 只从环境变量读取，不进入 argv/历史。
+<<<<<<< HEAD
 - **技能物化（#28）**：`<cwd>/.grape-takeover-skills/<skill>/` 是物化产物目录，随工作区存在；`.skills/` 恒不写（worker 会 rmtree）。Windows 路径口径由 `resolve` + `path.sep` 前缀校验覆盖，条目含 `\` 一律拒绝。
 - **tko_ 不含 git 凭据注入**：接管期间的回推依赖宿主已有用户级凭据（`grape git` 注入 / 自有 PAT / SSH key）；洁净机器需用户先配置。kit 在 `grape_takeover_start` 返回体显式披露该边界（0.3.8）。
+=======
+- **tko_ 不含 git 凭据注入**：`tko_` 本身不是 git 凭据；洁净机器改用 `grape_git_credential` 以 tko_ 换一次性本仓券（600s）后 push（见 §5.1），已配置 `grape git` / PAT / SSH 的宿主仍可直接使用。kit 在 `grape_takeover_start` 返回体显式披露该边界（0.3.8）。
+>>>>>>> 0c1ec3f (feat(#31): git 写回受控工具（换券+GIT_ASKPASS）与 coding 交回校验（工具面 39→41）)
 - **生产未部署**：weekly-11（含 #1268 + !1425）未上 www.grapedev.cn——takeover 工具面在生产 404 属预期，grape-kit 已按 404 回退老路径并提示
 - **!1425 待合入**：修复在分支，PR 审核后随 weekly-11 发版列车走（与 #2238/2.4.0 同列）
 - npm v0.3.2 发布待 granular token（用户操作）
 - 外部 agent 的 API key 经宿主 config 注入（env 通道，不落盘、不外显）
+
+
+### 5.1 git 写回链路（Issue #31）
+
+**问题**：#15 / #24 暴露的写回断点——干净机器（无 PAT / SSH / grape CLI）被接管后能改代码、不能 push。
+
+**方案（路径 2，仓内闭环）**：服务端 `GET /repos/{owner}/{repo}/git-credential` 已可用（600s、仅本仓、接受 tko_）。
+
+| 步骤 | 工具 | 行为 |
+|---|---|---|
+| ① 换券 | `grape_git_credential(session_id, owner, repo, workspace)` | `tko_` 换一次性本仓券 → 写 `<ws>/.grape/git-askpass.sh`（POSIX）/ `.cmd`（Windows），0600；脚本内嵌 `GRAPE_ASKPASS_EXPIRES`，运行前自检到期 |
+| ② 推送 | 宿主机 `git` + `GIT_ASKPASS` | `export GIT_ASKPASS=<file>` / `GIT_TERMINAL_PROMPT=0` → `git push`；券在 push 前换、不缓存 |
+| ③ 建 PR | `grape_create_pull(owner, repo, title, head, base)` | 薄代理 `/api/git-repo/{o}/{r}/pulls`（只建 PR，不评审不合并）→ 返回编号/URL |
+| ④ 交回 | `grape_takeover_finish(agent_type=coding, branch, commit, pr_number)` | coding 缺项：request-finish 强 warning、正式 finish 拒绝；`allow_incomplete=true` 覆写并在 actions 留痕；finish/abort 清理 askpass |
+
+**安全边界（硬性）**：
+
+- **本仓**：`owner/repo` 必须与接管会话的 `repo_key` 绑定一致，不一致拒绝且不落盘；会话无仓库绑定时同样拒绝（无法证明本仓）。
+- **工作区**：`workspace` realpath 必须等于或位于会话工作区（`bundle.workspace.cwd_hint`）内；越界拒绝且不生成文件；`<ws>/.grape` 为符号链接时拒绝写入。
+- **过期**：换券响应无到期或已过期（`expires_in<=0` / 缺 `expires_at`）一律不写盘并提示重新换券；askpass 过期后 `exit 1` + stderr 含「重新换券」，**全仓无 native git / CLI 静默回退分支**。
+- **最小暴露**：0600；仅工作区内；返回值/渲染只给掩码口令；finish/abort 删除本次进程写出的文件（registry 记录，不凭 session_id 猜测路径）。
+- **路径注入**：`owner/repo` 只允许 `[A-Za-z0-9._-]`，API 侧再做 URL 编码。
+
+**Out of Scope**：路径 1（服务端 LocalRun prepared 阶段注入凭据，需改 grape 仓且凭据进 bundle env）另行立项；用户级 `grape_` 换券、SSH key 托管、凭据跨 run 持久化均不提供。
+
+**验收**：干净容器全链只用换的券（PR head sha == 本地 commit）；券过期脚本非零退出且提示重新换券；非本仓/越界拒绝且无文件；askpass 0600 且 finish 后清理；coding 缺 branch/commit/PR 时 finish 拒绝、补齐通过；`npm test` 全绿（270 例零回归 + 新增用例）。
 
 ## 6. 分叉裁决 playbook（takeover 前置）
 

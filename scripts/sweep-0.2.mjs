@@ -65,7 +65,11 @@ const listCount = await new Promise((res) => {
   pending.set(listId, (msg) => res(msg.result.tools.length))
   proc.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: listId, method: 'tools/list' }) + '\n')
 })
+<<<<<<< HEAD
 results.push(['tools/list 数量', listCount === 48 ? 'PASS' : 'FAIL', `${listCount} tools`])
+=======
+results.push(['tools/list 数量', listCount === 41 ? 'PASS' : 'FAIL', `${listCount} tools`])
+>>>>>>> 0c1ec3f (feat(#31): git 写回受控工具（换券+GIT_ASKPASS）与 coding 交回校验（工具面 39→41）)
 proc.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n')
 
 // 2 只读组（自管理只读工具 Issue #27：本地诊断，不依赖服务端状态）

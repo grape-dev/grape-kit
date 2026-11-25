@@ -19,6 +19,7 @@ const PKG = JSON.parse(readFileSync(new URL('../package.json', import.meta.url),
 
 export const INSTRUCTIONS = `Grape DevOps 流水线遥控（多 agent：vod→issue→coding→qa→sre）。
 
+<<<<<<< HEAD
 角色（先读）：你是流水线**外面**的遥控/观察者。只触发、只观察、可推进；节点间交接（A2A）由服务端驱动。
 - 禁止用 \`--force\` / \`force=true\` 越过任何门禁（pending_review、派发门禁、技能校验）——那是伪造节点流转、冒充决策层。
 - 不替用户决策：建单、触发流水线、应用场景、设默认场景、取消/恢复/终止、上传/升级技能、正式交回（finish）之前，必须先在对话里拿到用户明确同意。
@@ -40,6 +41,16 @@ export const INSTRUCTIONS = `Grape DevOps 流水线遥控（多 agent：vod→is
   仓库未纳管导致的 403（无权对该仓库发起 A2A）先用 \`grape_host_repo\` 纳管（需用户确认）。
 - 事件是事实源：QA 打回与评论从 \`grape_get_issue_events\` 读；下一节点是否已派发看 \`next_seq\` 与 issue 事件，别重复派发。
 8. 自管理属用户决策层：grape_kit_version / grape_kit_check_update 只读直执行（check_update 的 dismiss 只写本地忽略状态文件）；grape_kit_upgrade / grape_kit_install / grape_kit_uninstall **只生成命令、工具本身不执行任何变更**——必须先把命令块与影响范围交给用户，获得确认后再由用户（或用户允许的终端）执行。`
+=======
+使用纪律：
+1. 只触发、只观察、可推进；节点间交接（A2A）默认由服务端驱动——例外：takeover 交回时 kit 会按场景链确保下一节点被派发（见 7）。
+2. cancel / apply_scene / terminate 属用户决策层——调用前必须向用户确认。
+3. 触发后用 grape_wait_task 等终态（默认 300s 上限）；长任务改用 grape_get_task_status 复查。
+4. token 作用域：当前走用户级 GRAPE_API_TOKEN；git-repo 类会话命令不可用（403 属预期）。
+5. grape_get_issue_events 是云端打回/评论的事件回环入口：PR 被 QA 打回时从这里发现。
+6. 命令面不止这些工具时，优先用已注册工具；未经确认不要构造任何删除/终止类操作。
+7. 接管（takeover）：tko_ 仅 repo_session、不含 git 凭据注入——洁净机器用 grape_git_credential 换一次性本仓券（600s）写 GIT_ASKPASS（0600，过期自检提示重新换券，无静默回退），PR 用 grape_create_pull；finish 必须用用户级凭据且仅在用户对话确认后执行；finish 交回后由 kit 确保下一节点派发（判据是派发指针 next_seq：next_seq>0 已派发不重复；next_seq=0 时按 coding→qa 兜底补发并回填 next_seq；无法派发时返回 pending_dispatch 待派发标记——标记随交回结果返回，平台对已结束会话拒绝 progress 写入（409 not_active），事后经 grape_takeover_status 复查会话记录即可见派发指针缺失，需按提示补发）；takeover_start 只能对准当前活跃节点，409 agent_mismatch 时按 60-120s 轮询再试。`
+>>>>>>> 0c1ec3f (feat(#31): git 写回受控工具（换券+GIT_ASKPASS）与 coding 交回校验（工具面 39→41）)
 
 /**
  * 创建 server 实例（依赖注入便于测试）。

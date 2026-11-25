@@ -78,6 +78,7 @@ try {
 
   const tools = await rpc('tools/list', {})
   console.log(`[ok] tools/list: ${tools.tools.length} tools`)
+<<<<<<< HEAD
   if (tools.tools.length !== 48) throw new Error(`期望 48 个工具，实际 ${tools.tools.length}`)
   // 自管理五工具（Issue #27）必须在 tools/list 里可见——缺一个就是工具面回退
   for (const name of ['grape_kit_version', 'grape_kit_check_update', 'grape_kit_upgrade', 'grape_kit_install', 'grape_kit_uninstall']) {
@@ -99,6 +100,9 @@ try {
   } else {
     throw new Error(`grape_kit_check_update 渲染异常: ${ct.slice(0, 300)}`)
   }
+=======
+  if (tools.tools.length !== 41) throw new Error(`期望 41 个工具，实际 ${tools.tools.length}`)
+>>>>>>> 0c1ec3f (feat(#31): git 写回受控工具（换券+GIT_ASKPASS）与 coding 交回校验（工具面 39→41）)
 
   const r1 = await rpc('tools/call', { name: 'grape_list_issues', arguments: { owner: 'acme', repo: 'demo' } })
   const t1 = r1.content[0].text
