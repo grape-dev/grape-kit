@@ -257,5 +257,5 @@ test('Issue #38 扫描侧无平台门禁：强制 win32 端到端同时走注册
   assert.equal(r.status, 0, `${r.stdout}\n${r.stderr}`)
   assert.doesNotMatch(readFileSync(join(h, '.bashrc'), 'utf8'), /GRAPE_API_TOKEN\s*=/, '强制 win32 下 rc 凭据行必须被清理（扫描无门禁 + 清理不提前 return）')
   assert.match(r.stdout, /宿主会话读不到删除结果/, 'win32 第一条通道（注册表）必须被执行，不得只清 rc')
-  assert.match(r.stdout, /无法确认用户环境变量 GRAPE_API_TOKEN/, '非 win32 宿主上强制 win32：reg 不可用必须如实点名（不谎报零残留）')
+  assert.match(`${r.stdout}${r.stderr}`, /无法确认用户环境变量 GRAPE_API_TOKEN/, '非 win32 宿主上强制 win32：reg 不可用必须如实点名（不谎报零残留；告警走 stderr）')
 })

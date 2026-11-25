@@ -34,6 +34,24 @@ const configPath = () => join(grapeHome(), 'config.json')
 
 /** npx 免全局安装的启动参数（workbuddy / codearts / officeace 共用，与 opencode 的本地脚本模式并列） */
 const NPX_ARGS = ['-y', '-p', '@grape-dev/grape-kit', 'grape-kit-mcp']
+
+/**
+ * 清理/扫描链路的平台判定，**可注入**（`GRAPE_KIT_PLATFORM`）。
+ *
+ * 为什么需要注入：win32 双通道（注册表 + Git Bash rc）正是本 Issue 的修复面，而 CI/审阅环境是
+ * Linux——旧实现把 rc 扫描包在 `if (process.platform !== 'win32')` 里时，Linux 上跑测试永远绿，
+ * 把该门禁还原回扫描侧也全绿（PR #36 QA 复审判断项 1 实测）。注入后非 win32 宿主可端到端复跑
+ * win32 口径：注册表分支被走到（reg 不可用会如实点名）、rc 分支同时生效，任一侧被门禁挡住即红。
+ *
+ * 作用域仅限清理/扫描判定（scanResidues 的注册表查询、cleanCredentialChannels 的通道选择、
+ * --dry-run 预览文案）；路径分隔、权限位、install 提示等其它平台相关行为不随之改变。
+ * 正常使用无需设置该变量。
+ */
+const cliPlatform = () => {
+  const injected = String(process.env.GRAPE_KIT_PLATFORM || '').trim()
+  return injected || process.platform
+}
+
 /** 备份时间戳精确到秒：分钟精度会让同一分钟内的多次写入互相覆盖 */
 const stamp = () => {
   const d = new Date()
@@ -2167,7 +2185,7 @@ function scanResidues() {
     // 不查注册表会让默认 uninstall 在 Windows 假零残留。reg query 仅 win32 执行（实机回归覆盖）。
     // QA#PR13 判断项 4：非零退出必须区分「确实不存在」与「查不了」——拒绝访问/reg 缺失时
     // 静默当成不存在就是假零残留，与 CHANGELOG「不再吞错」相反，故登记 regErrors 供提示点名人工核对。
-    if (process.platform === 'win32') {
+    if (cliPlatform() === 'win32') {
       const verdict = classifyRegQuery(spawnSync('reg', ['query', 'HKCU\\Environment', '/v', k], { encoding: 'utf8' }))
       if (verdict.state === REG_QUERY.PRESENT) out.envKeys.push(k)
       else if (verdict.state === REG_QUERY.ERROR) out.regErrors.push({ key: k, detail: verdict.detail })
@@ -2283,7 +2301,7 @@ async function authInit() {
  * 扫描只读 scanResidues() 这一份结果（与残留提示、--dry-run 同源），备份实现由本文件注入。
  */
 function cleanEnvVars() {
-  cleanCredentialChannels({ scan: scanResidues, backupOf })
+  cleanCredentialChannels({ scan: scanResidues, backupOf, platform: cliPlatform() })
 }
 
 /** 清理本包 npx 缓存：仅认 node_modules/@grape-dev/grape-kit 实体（scanResidues 白名单，
@@ -2458,7 +2476,7 @@ function cleanGlobalPlan() {
     any = true
   }
   if (s.envKeys.length) {
-    console.log(`  环境变量 ${s.envKeys.join('/')}：${process.platform === 'win32' ? 'reg delete 用户级注册表项' : '删除 rc 中的导出行'}（已运行会话需重启后生效）`)
+    console.log(`  环境变量 ${s.envKeys.join('/')}：${cliPlatform() === 'win32' ? 'reg delete 用户级注册表项' : '删除 rc 中的导出行'}（已运行会话需重启后生效）`)
     any = true
   }
   for (const e of s.regErrors) {
