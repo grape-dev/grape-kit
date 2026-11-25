@@ -20,14 +20,14 @@ export const CREDENTIAL_ENV_KEYS = ['GRAPE_API_TOKEN', 'GRAPE_BASE_URL']
 
 /** 凭据导出行三种形态（QA#PR13 判断项 3：旧实现只认 `export`，`declare -x`、`.bash_profile`
  *  与 fish 的 `set -x` 全都不清不掩，「未发现导出行（跳过）」等于谎报）： */
-export const POSIX_CREDENTIAL_LINE_RE = /^\s*(?:export|declare\s+-x)\s+(GRAPE_API_TOKEN|GRAPE_BASE_URL)\s*=/
-export const FISH_CREDENTIAL_LINE_RE = /^\s*set\s+(?:-x|-gx|--export)\s+(GRAPE_API_TOKEN|GRAPE_BASE_URL)(?:\s|$)/
+const POSIX_CREDENTIAL_LINE_RE = /^\s*(?:export|declare\s+-x)\s+(GRAPE_API_TOKEN|GRAPE_BASE_URL)\s*=/
+const FISH_CREDENTIAL_LINE_RE = /^\s*set\s+(?:-x|-gx|--export)\s+(GRAPE_API_TOKEN|GRAPE_BASE_URL)(?:\s|$)/
 
 const BOM = '\uFEFF'
 
 /** 扫描目标：POSIX 常见 rc（含仅登录 shell 读的 .bash_profile）+ fish 配置；kind 决定行形态。
  *  homeDir 默认 homedir()：win32 下即 USERPROFILE，与 Git Bash 读取位置一致（单一扫描源）。 */
-export function rcTargets(homeDir = homedir()) {
+function rcTargets(homeDir = homedir()) {
   return [
     { path: join(homeDir, '.zshrc'), kind: 'posix' },
     { path: join(homeDir, '.bashrc'), kind: 'posix' },
@@ -38,13 +38,13 @@ export function rcTargets(homeDir = homedir()) {
 }
 
 /** 该行是否导出凭据：命中返回变量名，否则 null（扫描、清理、掩码共用同一判据） */
-export function credentialLineKey(line, kind) {
+function credentialLineKey(line, kind) {
   const m = (kind === 'fish' ? FISH_CREDENTIAL_LINE_RE : POSIX_CREDENTIAL_LINE_RE).exec(line)
   return m ? m[1] : null
 }
 
 /** rc 文件的 .bak-grapemcp-* 备份清单（本工具备份命名空间，与 rc 同目录同名前缀） */
-export function rcBackupPathsOf(rcPath) {
+function rcBackupPathsOf(rcPath) {
   const dir = dirname(rcPath)
   const prefix = `${basename(rcPath)}.bak-grapemcp-`
   try { return readdirSync(dir).filter((f) => f.startsWith(prefix)).map((f) => join(dir, f)) } catch { return [] }
@@ -101,7 +101,7 @@ function keepBom(originalText, lines) {
  * 不返回「是否改动」——调用方不需要该值，需要的是逐条可读输出（QA 判断项 5）。
  * backupOf 由宿主注入（备份命名/去重属 CLI 侧关注点）。
  */
-export function cleanRcResidues(residues, { backupOf, log = console.log } = {}) {
+function cleanRcResidues(residues, { backupOf, log = console.log } = {}) {
   for (const hit of residues.rcHits) {
     const { hits, cleaned, masked } = planRcCleanup(readFileSync(hit.path, 'utf8'), hit.kind)
     const backup = backupOf(hit.path, masked)
@@ -125,7 +125,7 @@ const regOf = (args) => spawnSync('reg', args, { encoding: 'utf8' })
  * 查询失败 ≠ 不存在——不得报「未发现（跳过）」蒙混过去（QA#PR13 判断项 4）。
  * reg 运行器可注入：用例以替身覆盖，避免在非 win32 宿主上真的 spawn。
  */
-export function cleanWindowsUserEnvVars(residues, { reg = regOf, log = console.log, warn = console.warn } = {}) {
+function cleanWindowsUserEnvVars(residues, { reg = regOf, log = console.log, warn = console.warn } = {}) {
   for (const name of CREDENTIAL_ENV_KEYS) {
     const unreadable = residues.regErrors.find((e) => e.key === name)
     if (unreadable && !residues.envKeys.includes(name)) {
