@@ -1,0 +1,1 @@
+0.5.1-next.0 test marker — Issue #36 接管链路真机测试产物（test-2 / docs write-back）
