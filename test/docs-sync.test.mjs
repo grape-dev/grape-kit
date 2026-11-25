@@ -53,7 +53,7 @@ test('README 双语单测计数一致（同一口径，不许一边 136 一边 1
   assert.notEqual(en[1], '136', '旧口径 136 已过期，应更新为当前实际单测数')
 })
 
-test('CHANGELOG 保留 Unreleased 段（下一周期入口），0.4.0 发布节覆盖 #21 dsh 适配', () => {
+test('CHANGELOG 保留 Unreleased 段（下一周期入口），0.5.0 发布节覆盖 #26 五宿主 / #20 场景技能 / #27 自管理工具批', () => {
   const md = read('CHANGELOG.md')
   const at = md.search(/^## Unreleased$/m)
   assert.ok(at >= 0, 'CHANGELOG.md 必须保留 ## Unreleased 段（CONTRIBUTING §7）')
@@ -64,11 +64,29 @@ test('CHANGELOG 保留 Unreleased 段（下一周期入口），0.4.0 发布节�
     !/^- \S/m.test(unreleasedBody) || /### (Added|Changed|Fixed)/.test(unreleasedBody),
     'Unreleased 段有条目时必须按 Added/Changed/Fixed 归类（发版后允许空段）',
   )
-  // #21 dsh 适配已随 0.4.0 发布：首个已发布节断言 0.3.10→0.4.0，dsh 覆盖断言落最新发布节
-  assert.match(md.slice(firstPublished, firstPublished + 30), /^## 0\.4\.0 \(2026-11-23\)/, '首个已发布节应为 0.4.0 (2026-11-23)')
+  // #26 五宿主 + #20 场景/技能 + #27 自管理工具批已随 0.5.0 发布：首个已发布节断言 0.4.0→0.5.0，本批覆盖断言落最新发布节
+  assert.match(md.slice(firstPublished, firstPublished + 30), /^## 0\.5\.0 \(2026-11-25\)/, '首个已发布节应为 0.5.0 (2026-11-25)')
   const next = md.slice(firstPublished + 1).search(/^## /m)
   const body = next === -1 ? md.slice(firstPublished) : md.slice(firstPublished, firstPublished + 1 + next)
-  assert.match(body, /### (Added|Changed|Fixed)/, '0.4.0 发布节必须按 Added/Changed/Fixed 归类')
+  assert.match(body, /### (Added|Changed|Fixed)/, '0.5.0 发布节必须按 Added/Changed/Fixed 归类')
+  for (const [re, what] of [
+    [/`SUPPORTED_TARGETS` 由 5 扩到 10/, '#26 五宿主扩容（--target 全量 10）'],
+    [/`codex` \/ `openclaw` \/ `hermes` \/ `atomcode` \/ `trae`/, '#26 五宿主逐一登记'],
+    [/grape_set_repo_scene/, '#20 仓库默认场景工具'],
+    [/grape_upload_skill/, '#20 技能上传工具'],
+    [/创建场景副本/, '#20 apply_scene 市场副本通道'],
+    [/仅项目级语义/, '#26 trae 项目级闸门'],
+    [/自管理五工具（Issue #27，工具面 39 → 48）/, '#27 自管理五工具'],
+    [/`src\/lifecycle\.mjs` 自管理核心/, '#27 自管理核心模块'],
+  ]) {
+    assert.match(body, re, `0.5.0 发布节应记录 ${what} 变更`)
+  }
+  // 历史发布节的覆盖断言不因新版本上移而丢失：#21 dsh 仍在 0.4.0 发布节
+  const at040 = md.search(/^## 0\.4\.0 \(/m)
+  assert.ok(at040 >= 0, 'CHANGELOG 应有 0.4.0 发布节')
+  const next040 = md.slice(at040 + 1).search(/^## /m)
+  const body040 = next040 === -1 ? md.slice(at040) : md.slice(at040, at040 + 1 + next040)
+  assert.match(body040, /### (Added|Changed|Fixed)/, '0.4.0 发布节必须按 Added/Changed/Fixed 归类')
   for (const [re, what] of [
     [/install --target dsh/, '#21 dsh 托管 patch 安装'],
     [/uninstall --target dsh/, '#21 dsh 卸载（只删托管块 + skill 副本）'],
@@ -80,7 +98,7 @@ test('CHANGELOG 保留 Unreleased 段（下一周期入口），0.4.0 发布节�
     [/映射形状/, '#21 QA 写入安全：映射形状拒写'],
     [/逐字节/, '#21 QA 往返保真：逐字节还原'],
   ]) {
-    assert.match(body, re, `0.4.0 发布节应记录 ${what} 变更`)
+    assert.match(body040, re, `0.4.0 发布节应记录 ${what} 变更`)
   }
   // 历史发布节的覆盖断言不因新版本上移而丢失：#19 仍在 0.3.10 发布节
   const at0310 = md.search(/^## 0\.3\.10 \(/m)
@@ -140,13 +158,14 @@ test('Issue #27 README 双语：工具数 48 + 自管理五工具逐个点名 + 
   }
 })
 
-test('Issue #27 CHANGELOG Unreleased 覆盖自管理五工具（Added/Changed 归类）', () => {
+test('Issue #27 CHANGELOG 0.5.0 发布节覆盖自管理五工具（Added/Changed 归类）', () => {
+  // #27 变更已随 0.5.0 发布：按**发布节**取段（发版后 Unreleased 段为空，按 `## Unreleased` 切段会取到空串）
   const md = read('CHANGELOG.md')
-  const at = md.search(/^## Unreleased$/m)
-  assert.ok(at >= 0, 'CHANGELOG 必须保留 Unreleased 段')
-  const firstPublished = md.search(/^## \d+\.\d+\.\d+ \(/m)
-  const body = md.slice(at, firstPublished)
-  assert.match(body, /### (Added|Changed)/, 'Unreleased 段必须按 Added/Changed 归类')
+  const at = md.search(/^## 0\.5\.0 \(/m)
+  assert.ok(at >= 0, 'CHANGELOG 应有 0.5.0 发布节')
+  const next = md.slice(at + 1).search(/^## /m)
+  const body = next === -1 ? md.slice(at) : md.slice(at, at + 1 + next)
+  assert.match(body, /### (Added|Changed)/, '0.5.0 发布节必须按 Added/Changed 归类')
   for (const [re, what] of [
     [/grape_kit_version/, 'grape_kit_version'],
     [/grape_kit_check_update/, 'grape_kit_check_update'],
@@ -156,7 +175,7 @@ test('Issue #27 CHANGELOG Unreleased 覆盖自管理五工具（Added/Changed �
     [/39\s*→\s*48|48 工具|48 tools/, '工具面 39→48'],
     [/dismiss/, 'dismiss 3 天冷却'],
   ]) {
-    assert.match(body, re, `Unreleased 应记录 ${what}`)
+    assert.match(body, re, `0.5.0 发布节应记录 ${what}`)
   }
 })
 

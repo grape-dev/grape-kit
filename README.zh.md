@@ -263,6 +263,7 @@ npx -y @grape-dev/grape-kit intro     # 随时重看能力地图
 
 | 版本 | 日期 | 要点 |
 |---|---|---|
+| 0.5.0 | 2026-11-25 | 场景市场副本通道 + 技能上传批（#20）：`grape_apply_scene` 改走市场 apply 端点在仓库内创建场景副本（id/名未命中本地拒绝、不再静默回落 `default`，应用后回读确认，`set_default` 拆为第二步调用）· 新增 `grape_set_repo_scene`（写 `managed_repos.dev_scene`、写后回读，`clear=true` 清空回落智能推荐）· `grape_list_scenes` 仓库视角列 `custom-` 副本 · `grape_upload_skill` / `grape_update_skill` / `grape_convert_skill`（与服务端同口径本地预检 + 内置 ZIP 打包）· `grape_create_issue` 把 `description` 标为必填。新增 5 个安装目标（#26，`--target` 5→10）：`codex`（TOML 托管块、保注释）· `openclaw`（JSON、兼容旧 `mcpServers`）· `hermes`（YAML 保注释/保序 + `grape-remote` skill 副本）· `atomcode`（`ATOMCODE_HOME`）· `trae`（严格项目级、`$HOME` 闸门、不做用户级兜底）——均提供 install / uninstall（`--dry-run`）/ doctor（`--probe`）/ detect 四件套并纳入自动检测与 `--target all`；裸 doctor 汇总覆盖全部 10 宿主。自管理五工具（#27，工具面 39→48）：`grape_kit_version` 版本全景（本地 kit / npm latest / CLI 回退 / 服务端契约 / 凭据档位，各通道 best-effort 降级）· `grape_kit_check_update` 主动更新检查 + `dismiss` 3 天冷却（与启动期 24h 缓存解耦）· `grape_kit_upgrade` / `grape_kit_install` / `grape_kit_uninstall` 只生成可复制命令、绝不执行（安装形态自动识别：全局 npm / npx 缓存 / ClawHub / 项目本地 / 未知；`damaged` 宿主单列 blocked 并带出解析错误）；`takeover_finish` 只在平台确漏派发时补发（消除 `pending_dispatch` 假警报）；单测 270→395 |
 | 0.4.0 | 2026-11-23 | DeepSeek Harness（dsh）适配（#21）：`install --target dsh` 以 **MCP stdio 托管 patch** 模式接入 dsh web profile —— 在 `$DSH_HOME/profiles/web/cordis.patch.yml` 写入带标记的 `insert` 托管块（`id: grape-kit` / `name: '@deepseek-ai/dsh-mcp-client'` / 本地脚本优先、`npx` 回退），`grape-remote` skill 落 `$DSH_HOME/skills/`，39 工具零改动复用；`uninstall --target dsh` 只删托管块 + skill 副本 · `doctor --target dsh` 三项检查（托管块 / skill 副本 / `dsh-mcp-client`）· `detect` 把 `~/.dsh` 纳入自动检测；依赖安装 best-effort（失败只给手动指引、退出码 0）。QA 硬化（PR #12）：托管块不完整或 patch 顶层为映射形状时拒绝写入（不静默删用户行、不写非法 YAML）· install→uninstall 逐字节往返保真 · 空文件与仅含托管块的备份清理；单测 257→270 |
 | 0.3.10 | 2026-11-23 | 接管交回派发收口（#19）：派发指针只认 `next_seq`（`handoff_seq` 只是交回事件序号，不作派发证据）· 平台漏派时客户端兜底补发 coding→qa（与 trigger 同源 A2A 通道）并回填 `next_seq` · 受阻（`remote_may_still_run`／缺仓库-issue 标识／补发失败）落 `pending_dispatch` 待派发标记 + 可读告警，不再静默 grace；三处「未证实当成功」收口：交回未成功（`ok=false`／`changed=false`）不派发下一节点 · 白名单外节点名（如 `reviewer`）按「未知」上报不改写为 qa · 补发响应缺事件 `seq` 判未证实；#20 凭据/卸载批：`auth init` 唯一写入入口 · `uninstall --clean-global`（`--dry-run`、rc 备份不留凭据行、`_npx` 收窄到 grape-kit）· doctor 完整凭据优先级视图；单测 156→257 |
 | 0.3.9 | 2026-11-23 | 端云接管全链路硬化（#12）：takeover_start 分支/MR 前置检查 · warnings 全量透出 · Node 跨平台接管三脚本（report/request-finish/finish）· 409 agent_mismatch 友好提示 · bundle 脚本 {{CWD}} 渲染 · doctor 凭据来源行；#17 修复批：intro 子命令 + 能力地图（无凭据先给 3 步 API Key 指引）· trigger_pipeline agent 参数（可从指定节点续跑）· doctor base_url 双通道并标注生效来源 · 审核三工具 native 崩溃修复；单测 136→156 |
@@ -277,7 +278,7 @@ npx -y @grape-dev/grape-kit intro     # 随时重看能力地图
 | 0.3.0 | 2026-11-11 | 传输层原生化：原生 HTTP 直连，grape CLI/Python 变可选（401 回退通道） |
 | 0.2.x | 2026-11-09 前 | 13→31 工具扩展 · worker_onboard · B1 接管闭环 |
 
-逐版本完整记录（发布日期、工具面变化、行为修复，覆盖 npm 全部 21 条发布记录——含 `0.0.0-stage` 占位包，0.2.3 从未发布）：[CHANGELOG.md](CHANGELOG.md)
+逐版本完整记录（发布日期、工具面变化、行为修复，覆盖 npm 全部 22 条发布记录——含 `0.0.0-stage` 占位包，0.2.3 从未发布）：[CHANGELOG.md](CHANGELOG.md)
 
 ## 设计原则
 
@@ -296,7 +297,7 @@ npx -y @grape-dev/grape-kit intro     # 随时重看能力地图
 ```bash
 npm install
 
-npm test        # 347 个单测（fake-grape 替身，不依赖真实服务端）
+npm test        # 395 个单测（fake-grape 替身，不依赖真实服务端）
 
 npm run smoke   # 真实 stdio JSON-RPC 往返：initialize → tools/list → tools/call
 ```
