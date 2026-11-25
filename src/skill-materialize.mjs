@@ -302,7 +302,12 @@ export async function materializeSkillAssets(skill, cwd, options = {}) {
     return failed(`技能包解析失败：${toReason(e)}`, name)
   }
   if (!entries || !entries.length) {
-    return failed('assets.skill 既无 files 也无 zip_url（无内容可物化）', name)
+    return failed(
+      asset.files == null
+        ? 'assets.skill 既无 files 也无 zip_url（无内容可物化）'
+        : 'assets.skill.files 形态不可识别或为空（需条目数组或「路径→内容」映射）',
+      name,
+    )
   }
 
   // 两段式：先校验全部条目路径（失败即返回，盘上零副作用），再落盘

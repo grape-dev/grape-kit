@@ -329,6 +329,18 @@ test('Z1 assets.skill 既无 files 也无 zip_url → failed（不静默当 lega
   }
 })
 
+test('Z1b assets.skill.files 形态不可识别（非数组/非映射）→ failed 且点明形态要求', async () => {
+  const cwd = tmp()
+  try {
+    const r = await materializeSkillAssets({ skill: 'bad-shape', files: 'SKILL.md 裸字符串' }, cwd)
+    assert.equal(r.status, 'failed')
+    assert.match(r.reason, /形态不可识别/)
+    assert.deepEqual(readdirSync(cwd), [])
+  } finally {
+    drop(cwd)
+  }
+})
+
 test('Z2 validateSkillName：白名单边界（首字符字母数字、64 上限、禁前导点）', () => {
   assert.equal(validateSkillName('coding-cli').ok, true)
   assert.equal(validateSkillName('A.b_c-1').ok, true)
