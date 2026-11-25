@@ -221,6 +221,15 @@ export const api = {
     const a = normalizeTriggerAgent(agent)
     return apiRequest('POST', '/api/a2a', { body: { agent: a, payload: { repository: `${owner}/${repo}`, account: owner, issue_number: Number(issueNumber), ...(context ? { context } : {}) } } })
   },
+  /**
+   * 按自定义场景链派发下一节点（#30）：场景节点 tag 可不在内置 AGENT_TYPES 内（如 review），
+   * 此时不能走 normalizeTriggerAgent 的枚举校验。仅在目标已在场景链内时由 tools 调用。
+   */
+  dispatchPipeline: async (owner, repo, issueNumber, context = '', agent) => {
+    const a = String(agent ?? '').trim()
+    if (!a) throw new GrapeApiError('派发节点为空：无法确定 A2A 目标', { status: 400 })
+    return apiRequest('POST', '/api/a2a', { body: { agent: a, payload: { repository: `${owner}/${repo}`, account: owner, issue_number: Number(issueNumber), ...(context ? { context } : {}) } } })
+  },
   taskStatus: (seq) => apiRequest('GET', `/api/events/detail/${seq}`),
   issuePipeline: (owner, repo, number) => apiRequest('GET', `/api/issues/${owner}/${repo}/${number}/pipeline`),
   repoRoadmap: (owner, repo) => apiRequest('GET', `/api/pipeline/${owner}/${repo}`),

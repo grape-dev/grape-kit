@@ -6,7 +6,14 @@
 
 ## Unreleased
 
-暂无待发布变更。下一开发周期的用户可见变更先落本段（按 Added / Changed / Fixed 归类，见 CONTRIBUTING §7），发版时并入对应版本节。
+### Changed
+
+- `grape_takeover_finish` 派发判据对齐平台真实返回（#30）：已派发 = `handoff.seq>0` 或 `handoff.reason=already_dispatched`；平台不回填的 `next_seq`（恒 0）降级为辅助展示信号，不再据此误判「未派发」而重复补发/误告警。双判据缺失时先回读 issue 事件，确认下一节点无 `a2a_event` 才补发。
+- 兜底派发范围由硬编码 `coding→qa` 改为按**场景链 `next`** 推导（默认 vod→issue→coding→qa→sre，支持交回结果/会话携带的自定义链如 coding→review→sre）；场景链之外节点名仍原样上报、落 `pending` 待人工裁决。`grape_takeover_status` 渲染与 finish 复用同一判据函数，口径不再漂移。
+
+### Fixed
+
+- #30 修复 `next_seq` 恒 0 导致的「派发未证实」误告警与重复补发；补发响应缺事件 `seq` 仍判未证实、不冒充成功。
 
 ## 0.4.0 (2026-11-23)
 
