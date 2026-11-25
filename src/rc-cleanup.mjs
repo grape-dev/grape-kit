@@ -88,11 +88,28 @@ export function planRcCleanup(text, kind) {
   return { hits, cleaned: keepBom(text, kept).join('\n'), masked: keepBom(text, masked).join('\n') }
 }
 
-/** 原文带 BOM 而结果首行不带时把 BOM 补到新首行（空结果只在原文全是凭据行时出现） */
+/**
+ * BOM 迁移：原文 BOM 在首行行首，首行恰好被删时它随之丢失。
+ *
+ * 迁移位置是这份逻辑唯一容易写错的地方（PR #36 QA 复审应修 1：旧实现一律贴 `lines[0]`）：
+ * - **补**：结果首行本身有内容 → 补在它前面。此时 BOM 仍在文件 offset 0，是真正的 BOM，
+ *   编码风格与原文件一致（原文首行就是「BOM + 一行内容」）。
+ * - **不补**：结果首行为空行/空白行 → 不补。BOM 只有位于 offset 0 才是 BOM；贴到空行上变成
+ *   一行只含 U+FEFF 的「裸 BOM」，贴到后面的非空行则落进命令词里。两者都被 bash 当成命令名，
+ *   实测：裸 BOM 行 → `line 1: : command not found`；BOM + `export` → `line 2: export: command not
+ *   found` 且该行（连 PATH 导出）整行不执行——比丢 BOM 更糟，正是 #38 目标人群每个 shell 都撞一次。
+ * - **不补**：结果全为空行/空串 → 不补（空文件被 source 无任何输出，基线行为）。
+ *
+ * 取舍依据：BOM 是「文件编码标记」，不是可搬动的装饰字符。删掉首行后新首行若为空，文件已经
+ * 不可能是 BOM 文件，保留它只能制造语法错误；宏观看是「BOM 保真」与「不新增报错」两条要求，
+ * 后者是用户可感知的那条（见 test/rc-cleanup.test.mjs 两条边界用例的 bash source 断言）。
+ */
 function keepBom(originalText, lines) {
-  if (!originalText.startsWith(BOM) || lines.length === 0 || lines[0].startsWith(BOM)) return lines
+  if (!originalText.startsWith(BOM) || lines.length === 0) return lines
+  const first = lines[0]
+  if (first.startsWith(BOM) || first.trim() === '') return lines
   const next = lines.slice()
-  next[0] = BOM + lines[0]
+  next[0] = BOM + first
   return next
 }
 
