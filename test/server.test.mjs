@@ -33,10 +33,10 @@ test('initialize 返回 instructions（零调用自举）', async () => {
   await client.close()
 })
 
-test('tools/list 返回 39 个精选工具', async () => {
+test('tools/list 返回 41 个精选工具', async () => {
   const client = await pair()
   const { tools } = await client.listTools()
-  assert.equal(tools.length, 39)
+  assert.equal(tools.length, 41)
   assert.ok(tools.some((t) => t.name === 'grape_wait_task'))
   await client.close()
 })
