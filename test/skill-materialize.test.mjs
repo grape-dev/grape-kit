@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { deflateRawSync } from 'node:zlib'
@@ -382,6 +382,150 @@ test('E6 条目路径 .SKILLS / .skills. 等大小写与尾点变体一律拒绝
   }
 })
 
+/* ── Issue #39：OBS 引用形态（files 条目仅含 __obs_key__）不得写成 0 字节空文件 ──
+ * seam：materializeSkillAssets（模块公开导出）——下载端点经 opts.skillDownload、zip 传输经 opts.fetchImpl 注入；
+ * 渲染经 grape_takeover_start.render（既有同步纯函数）。两者都是 #28 已协商的同一 seam，无新建内部 seam。 */
+
+/** 盘上所有文件（递归），用于断言「没有 0 字节文件」这一用户可见症状 */
+function walkFiles(dir) {
+  const out = []
+  for (const ent of readdirSync(dir, { withFileTypes: true })) {
+    const p = join(dir, ent.name)
+    if (ent.isDirectory()) out.push(...walkFiles(p))
+    else out.push(p)
+  }
+  return out
+}
+
+const assertNoEmptyFile = (dir) => {
+  const files = walkFiles(dir)
+  assert.ok(files.length > 0, '应至少物化出一个文件')
+  for (const f of files) assert.ok(statSync(f).size > 0, `不得出现 0 字节文件：${f}`)
+}
+
+/** Issue #39 现场载荷形状：files 唯一条目只持 OBS 引用键 */
+const obsAsset = (name = 'coding-cli', extra = {}) => ({
+  name,
+  mode: 'inline',
+  files: { [name]: { __obs_key__: `grape/skills/official/${name}/${name}.zip` } },
+  ...extra,
+})
+
+/** 引用形态技能包（带 `<skill>/` 顶层前缀，与平台 zip 一致） */
+const skillZip = (name = 'coding-cli') =>
+  buildZip([
+    { name: `${name}/`, data: '', method: 'store' },
+    { name: `${name}/SKILL.md`, data: '# coding-cli\n1. 先读 runbook\n', method: 'deflate' },
+    { name: `${name}/references/runbook.md`, data: 'runbook 正文', method: 'store' },
+  ])
+
+test('F4 引用形态：files 仅含 __obs_key__ → 经下载端点拉 zip 物化真实 SKILL.md（不再 0 字节）', async () => {
+  const cwd = tmp()
+  try {
+    const calls = []
+    const downloads = []
+    const r = await materializeSkillAssets(obsAsset('coding-cli', { skill_id: 'skill-42' }), cwd, {
+      repo: 'grape-dev/grape-kit',
+      skillDownload: async (skillId, repoKey) => {
+        downloads.push([skillId, repoKey])
+        return { url: 'https://obs.example.test/signed-coding-cli.zip', expires_in: 600 }
+      },
+      fetchImpl: zipFetch(skillZip(), calls),
+    })
+    assert.equal(r.status, 'ok', r.reason)
+    assert.equal(r.skill, 'coding-cli')
+    assert.deepEqual(downloads, [['skill-42', 'grape-dev/grape-kit']], '应按技能标识请求下载端点（带仓库上下文）')
+    assert.deepEqual(calls, ['https://obs.example.test/signed-coding-cli.zip'], '应只拉取短签 URL 一次')
+    assert.equal(r.fileCount, 2, '目录条目不计入文件数')
+    assert.equal(r.hasReferences, true)
+    assert.equal(r.source, 'reference', '渲染需要如实标注来源为引用形态拉取')
+    assert.equal(readFileSync(join(r.path, 'SKILL.md'), 'utf8'), '# coding-cli\n1. 先读 runbook\n')
+    assert.equal(readFileSync(join(r.path, 'references', 'runbook.md'), 'utf8'), 'runbook 正文')
+    assertNoEmptyFile(r.path)
+  } finally {
+    drop(cwd)
+  }
+})
+
+test('F5 引用形态：下载端点失败 → failed + 明示需服务端转 inline/zip_url，盘上零副作用', async () => {
+  const cwd = tmp()
+  try {
+    const r = await materializeSkillAssets(obsAsset('coding-cli', { skill_id: 'skill-42' }), cwd, {
+      skillDownload: async () => {
+        throw new Error('grape API 403: 技能下载只接受用户级凭据')
+      },
+    })
+    assert.equal(r.status, 'failed')
+    assert.match(r.reason, /引用形态技能需服务端转 inline\/zip_url 下发/)
+    assert.match(r.reason, /403/, '端点失败原因必须透出（不吞错）')
+    assert.equal(r.path, '')
+    assert.equal(r.fileCount, 0)
+    assert.deepEqual(readdirSync(cwd), [], '失败后不留半成品目录/空文件')
+  } finally {
+    drop(cwd)
+  }
+})
+
+test('F6 引用形态：既无 skill_id 也无 URL → 不发起盲请求，failed 且盘上零副作用', async () => {
+  const cwd = tmp()
+  try {
+    const calls = []
+    const r = await materializeSkillAssets(obsAsset(), cwd, { fetchImpl: zipFetch(skillZip(), calls) })
+    assert.equal(r.status, 'failed')
+    assert.match(r.reason, /引用形态技能需服务端转 inline\/zip_url 下发/)
+    assert.match(r.reason, /__obs_key__|skill_id|zip_url/, '原因应指明缺什么')
+    assert.deepEqual(calls, [], '无解析来源时不得盲猜 URL 发起请求')
+    assert.deepEqual(readdirSync(cwd), [])
+  } finally {
+    drop(cwd)
+  }
+})
+
+test('F7 引用形态：资产内已带短签 URL（zip_url）时直接拉取，同样不落空文件', async () => {
+  const cwd = tmp()
+  try {
+    const calls = []
+    const r = await materializeSkillAssets(
+      { ...obsAsset('coding-cli'), zip_url: 'https://obs.example.test/signed.zip' },
+      cwd,
+      { fetchImpl: zipFetch(skillZip(), calls) },
+    )
+    assert.equal(r.status, 'ok', r.reason)
+    assert.deepEqual(calls, ['https://obs.example.test/signed.zip'])
+    assert.equal(r.source, 'reference')
+    assertNoEmptyFile(r.path)
+  } finally {
+    drop(cwd)
+  }
+})
+
+test('F8 混合形态（部分 inline + 部分引用）→ failed，不静默只落部分内容', async () => {
+  const cwd = tmp()
+  try {
+    const r = await materializeSkillAssets(
+      { name: 'mixed', files: { 'SKILL.md': '只有一半内容', 'references/x.md': { __obs_key__: 'grape/skills/official/mixed/x.zip' } } },
+      cwd,
+    )
+    assert.equal(r.status, 'failed')
+    assert.match(r.reason, /引用形态技能需服务端转 inline\/zip_url 下发/)
+    assert.deepEqual(readdirSync(cwd), [], '不得把占位条目或半份内容落盘')
+  } finally {
+    drop(cwd)
+  }
+})
+
+test('F9 条目既无内容字段也无引用键 → 显式 failed（移除 ?? \'\' 空文件兜底）', async () => {
+  const cwd = tmp()
+  try {
+    const r = await materializeSkillAssets({ skill: 'noop', files: [{ path: 'SKILL.md' }] }, cwd)
+    assert.equal(r.status, 'failed')
+    assert.match(r.reason, /内容|引用/, '应点明条目缺少内容/引用键')
+    assert.deepEqual(readdirSync(cwd), [])
+  } finally {
+    drop(cwd)
+  }
+})
+
 /* ── Z 其他边界 ── */
 
 test('Z1 assets.skill 既无 files 也无 zip_url → failed（不静默当 legacy）', async () => {
@@ -490,6 +634,41 @@ test('R4 render：无 skillMaterialization 字段时渲染不变（CLI 401 回�
   const out = renderTakeover({})
   assert.ok(!/技能物化/.test(out), '无物化结果时不出现物化段')
   assert.match(out, /接管会话已建立/)
+})
+
+test('R6 render：引用形态物化成功如实标注来源与条数；降级失败给 reason 且不声称已物化', () => {
+  const t = findTool('grape_takeover_start')
+  const ok = t.render({
+    takeover_id: 'tkos_test',
+    bundle: { env: {}, workspace: { cwd_hint: '/work/x' } },
+    skillMaterialization: {
+      status: 'ok',
+      skill: 'coding-cli',
+      path: '/work/x/.grape-takeover-skills/coding-cli',
+      fileCount: 2,
+      hasReferences: true,
+      source: 'reference',
+      reason: '',
+    },
+  })
+  assert.match(ok, /技能已物化：\/work\/x\/\.grape-takeover-skills\/coding-cli/)
+  assert.match(ok, /2/, '成功条数必须透出')
+  assert.match(ok, /引用形态/, '应标注来源为引用形态拉取（与 inline/zip 区分）')
+
+  const bad = renderTakeover({
+    skillMaterialization: {
+      status: 'failed',
+      skill: 'coding-cli',
+      path: '',
+      fileCount: 0,
+      hasReferences: false,
+      source: '',
+      reason: '引用形态技能需服务端转 inline/zip_url 下发，客户端不解析 OBS 引用（引用键 grape/skills/official/coding-cli/coding-cli.zip）',
+    },
+  })
+  assert.match(bad, /技能未能物化：/)
+  assert.match(bad, /需服务端转 inline\/zip_url 下发/, '降级原因必须透出给用户')
+  assert.ok(!/技能已物化：/.test(bad), '失败不得声称已物化')
 })
 
 test('R5 render：工具描述披露技能物化（用户可见行为在描述里可发现）', () => {
