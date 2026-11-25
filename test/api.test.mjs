@@ -319,3 +319,77 @@ test('health：上报 client_capabilities 头并返回服务端能力', async ()
     assert.equal(CLIENT_CAPABILITIES['skills.multi'], true)
   } finally { srv.close() }
 })
+
+/* ── Issue #39 QA 复审（PR !37）：skillDownload 端点封装——binary 通道 / timeoutMs 透传 / 403 下一步 ── */
+
+test('skillDownload：URL/凭据/repo 透传，OBS 短签形态（{url, expires_in}）回对象', async () => {
+  const origFetch = globalThis.fetch
+  let captured = null
+  globalThis.fetch = async (url, opts = {}) => {
+    captured = { url: String(url), auth: opts.headers?.Authorization || '' }
+    return new Response(JSON.stringify({ url: 'https://obs.example.test/s.zip', expires_in: 600 }), {
+      status: 200, headers: { 'content-type': 'application/json' },
+    })
+  }
+  const env = { GRAPE_AUTH_FILE: '/nonexistent/gk-test-auth.json', GRAPE_API_TOKEN: 'grape_user_level', GRAPE_BASE_URL: 'https://unit.example' }
+  try {
+    const r = await api.skillDownload('skill-9', 'o/r', env)
+    assert.deepEqual(r, { url: 'https://obs.example.test/s.zip', expires_in: 600 })
+    assert.match(captured.url, /^https:\/\/unit\.example\/api\/skills\/by-id\/skill-9\/download/, '端点路径与 baseUrl 必须按入参拼接')
+    assert.ok(captured.url.includes('repo=o%2Fr'), 'repo 上下文必须作为 query 透传（repo scope 技能过滤）')
+    assert.equal(captured.auth, 'Bearer grape_user_level')
+  } finally {
+    globalThis.fetch = origFetch
+  }
+})
+
+test('skillDownload：非 OBS 形态直出 zip 二进制 → binary 通道回 Buffer（zipSourceOf 二进制分支可达）', async () => {
+  const origFetch = globalThis.fetch
+  const zipBytes = Buffer.concat([Buffer.from('PK\x03\x04', 'latin1'), Buffer.alloc(64)])
+  globalThis.fetch = async () => new Response(new Uint8Array(zipBytes), {
+    status: 200, headers: { 'content-type': 'application/zip' },
+  })
+  const env = { GRAPE_AUTH_FILE: '/nonexistent/gk-test-auth.json', GRAPE_API_TOKEN: 'grape_user_level', GRAPE_BASE_URL: 'https://unit.example' }
+  try {
+    const r = await api.skillDownload('skill-9', '', env)
+    assert.ok(Buffer.isBuffer(r), '二进制 zip 响应必须原样回 Buffer，不得走 JSON 解析吞掉')
+    assert.equal(r.subarray(0, 2).toString('latin1'), 'PK')
+  } finally {
+    globalThis.fetch = origFetch
+  }
+})
+
+test('skillDownload：timeoutMs 透传（与 zip 拉取同旋钮对齐，不再吃 apiRequest 30s 默认）', async () => {
+  const origFetch = globalThis.fetch
+  globalThis.fetch = async (url, opts = {}) =>
+    new Promise((_, reject) => opts.signal?.addEventListener('abort', () =>
+      reject(Object.assign(new Error('The operation was aborted'), { name: 'AbortError' }))))
+  const env = { GRAPE_AUTH_FILE: '/nonexistent/gk-test-auth.json', GRAPE_API_TOKEN: 'grape_user_level', GRAPE_BASE_URL: 'https://unit.example' }
+  const t0 = Date.now()
+  try {
+    await assert.rejects(
+      api.skillDownload('skill-9', '', env, 100),
+      (e) => e instanceof GrapeApiError && /请求超时（>0s）/.test(e.message),
+    )
+    assert.ok(Date.now() - t0 < 5_000, '端点调用必须吃到传入的 timeoutMs（100ms），不得回落 30s 默认')
+  } finally {
+    globalThis.fetch = origFetch
+  }
+})
+
+test('skillDownload 403：hint 指向用户级凭据/转 inline-zip_url（scope=user_only，不得误报 session_only）', async () => {
+  const origFetch = globalThis.fetch
+  globalThis.fetch = async () => new Response(JSON.stringify({ ok: false, code: 'forbidden', message: '技能下载只接受用户级凭据' }), {
+    status: 403, headers: { 'content-type': 'application/json' },
+  })
+  const env = { GRAPE_AUTH_FILE: '/nonexistent/gk-test-auth.json', GRAPE_API_TOKEN: 'tko_session_scope', GRAPE_BASE_URL: 'https://unit.example' }
+  try {
+    await assert.rejects(
+      api.skillDownload('skill-9', '', env),
+      (e) => e instanceof GrapeApiError && e.status === 403
+        && /用户级 grape_ 凭据/.test(e.hint) && /inline\/zip_url/.test(e.hint) && !/session_only/.test(e.hint),
+    )
+  } finally {
+    globalThis.fetch = origFetch
+  }
+})

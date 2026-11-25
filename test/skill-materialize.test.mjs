@@ -676,3 +676,193 @@ test('R5 render：工具描述披露技能物化（用户可见行为在描述�
   assert.match(t.description, /assets\.skill/)
   assert.match(t.description, /\.grape-takeover-skills/)
 })
+/* ── Issue #39 QA 复审（PR !37 评论 203922886）修复项：
+ * H1 失败下一步分派 / 二进制通道可达 / env 合并 / 超时单旋钮 / 判空口径统一。
+ * seam 不变：materializeSkillAssets（默认下载通道走 globalThis.fetch 真链路）+ grape_takeover_start.render 同步直调。 */
+
+test('F4b 引用形态默认通道（不注入 skillDownload）：端点回短签 {url} → 拉 zip 物化成功（api.skillDownload 真链路）', async () => {
+  const cwd = tmp()
+  const origFetch = globalThis.fetch
+  const seen = []
+  globalThis.fetch = async (url, opts = {}) => {
+    const u = String(url)
+    seen.push(u)
+    if (u.includes('/api/skills/by-id/skill-9/download')) {
+      assert.equal(opts.headers?.Authorization, 'Bearer grape_unit', '下载端点必须带用户级凭据（apiRequest 通道）')
+      return new Response(JSON.stringify({ url: 'https://obs.example.test/signed.zip', expires_in: 600 }), {
+        status: 200, headers: { 'content-type': 'application/json' },
+      })
+    }
+    return new Response(new Uint8Array(skillZip()), { status: 200, headers: { 'content-type': 'application/zip' } })
+  }
+  try {
+    const r = await materializeSkillAssets(obsAsset('coding-cli', { skill_id: 'skill-9' }), cwd, {
+      repo: 'grape-dev/grape-kit',
+      env: { GRAPE_AUTH_FILE: '/nonexistent/gk-test-auth.json', GRAPE_API_TOKEN: 'grape_unit', GRAPE_BASE_URL: 'https://unit.example' },
+    })
+    assert.equal(r.status, 'ok', r.reason)
+    assert.equal(r.source, 'reference')
+    assert.equal(r.fileCount, 2)
+    assert.equal(readFileSync(join(r.path, 'SKILL.md'), 'utf8'), '# coding-cli\n1. 先读 runbook\n')
+    assert.equal(seen.length, 2, '端点解析 + 短签 zip 拉取各一次')
+    assert.match(seen[0], /^https:\/\/unit\.example\/api\/skills\/by-id\/skill-9\/download\?repo=/, '端点 URL 按传入 baseUrl 与 repo query 拼接')
+    assert.equal(seen[1], 'https://obs.example.test/signed.zip')
+    assertNoEmptyFile(r.path)
+  } finally {
+    globalThis.fetch = origFetch
+    drop(cwd)
+  }
+})
+
+test('F4c 引用形态默认通道二进制直出：端点直接回 zip 二进制 → Buffer 分支可达并物化（注释与行为一致）', async () => {
+  const cwd = tmp()
+  const origFetch = globalThis.fetch
+  const seen = []
+  globalThis.fetch = async (url) => {
+    seen.push(String(url))
+    return new Response(new Uint8Array(skillZip('bin-skill')), { status: 200, headers: { 'content-type': 'application/zip' } })
+  }
+  try {
+    const r = await materializeSkillAssets(obsAsset('bin-skill', { skill_id: 'skill-9' }), cwd, {
+      env: { GRAPE_AUTH_FILE: '/nonexistent/gk-test-auth.json', GRAPE_API_TOKEN: 'grape_unit', GRAPE_BASE_URL: 'https://unit.example' },
+    })
+    assert.equal(r.status, 'ok', r.reason)
+    assert.equal(r.source, 'reference')
+    assert.equal(r.fileCount, 2)
+    assert.equal(seen.length, 1, '二进制直出无需二次拉取')
+    assertNoEmptyFile(r.path)
+  } finally {
+    globalThis.fetch = origFetch
+    drop(cwd)
+  }
+})
+
+test('Q1 超时单旋钮（实际断言）：skillDownload 收到与 zip 拉取同旋钮的 timeoutMs', async () => {
+  const dir = tmp()
+  try {
+    const seen = []
+    const opts = (timeoutMs) => ({
+      skillDownload: async (id, repoKey, env, timeoutMs) => {
+        seen.push({ id, repoKey, timeoutMs })
+        return { url: 'https://obs.example.test/s.zip', expires_in: 600 }
+      },
+      fetchImpl: zipFetch(skillZip(), []),
+      ...(timeoutMs ? { fetchTimeoutMs: timeoutMs } : {}),
+    })
+    const a = await materializeSkillAssets(obsAsset('coding-cli', { skill_id: 'skill-9' }), dir, opts())
+    assert.equal(a.status, 'ok', a.reason)
+    assert.equal(seen[0].timeoutMs, 15_000, '缺省端点超时必须与 zip 拉取同为 15s（接管最坏 ~30s 有上界）')
+
+    const b = await materializeSkillAssets(obsAsset('coding-cli', { skill_id: 'skill-9' }), dir, opts(2_500))
+    assert.equal(b.status, 'ok', b.reason)
+    assert.equal(seen[1].timeoutMs, 2_500, 'fetchTimeoutMs 必须同时约束端点调用与 zip 拉取（单一旋钮）')
+  } finally {
+    drop(dir)
+  }
+})
+
+test('F10a 判空口径统一：显式 content:\'\' 同样视为无正文 → failed，不落 0 字节文件', async () => {
+  const dir = tmp()
+  try {
+    const r = await materializeSkillAssets({ name: 'blank', files: { 'SKILL.md': '' } }, dir)
+    assert.equal(r.status, 'failed', '显式空串正文与缺正文同口径——不再落 0 字节文件')
+    assert.match(r.reason, /无内容|拒绝物化成空文件|正文/, '原因应点明正文缺失')
+    assert.deepEqual(readdirSync(dir), [], '失败后盘上零副作用')
+  } finally {
+    drop(dir)
+  }
+})
+
+test('F10b pickContent 跳过空串：content:\'\' 且 text 有值 → 取 text 作正文（正文判定=非空）', async () => {
+  const dir = tmp()
+  try {
+    const r = await materializeSkillAssets({ name: 'fb', files: [{ path: 'SKILL.md', content: '', text: '# 真实正文' }] }, dir)
+    assert.equal(r.status, 'ok', r.reason)
+    assert.equal(readFileSync(join(r.path, 'SKILL.md'), 'utf8'), '# 真实正文', '空串正文不得遮蔽后续字段的真实内容')
+  } finally {
+    drop(dir)
+  }
+})
+
+test('Z2c native wiring：bundle.env 不再遮蔽用户级凭据/baseUrl（process.env 非空值合并优先；平台键仍可见）', async () => {
+  const dir = tmp()
+  const origFetch = globalThis.fetch
+  const origTakeoverStart = api.takeoverStart
+  const saved = {
+    tok: process.env.GRAPE_API_TOKEN, base: process.env.GRAPE_BASE_URL,
+    auth: process.env.GRAPE_AUTH_FILE, bound: process.env.GRAPE_BOUND_SKILL,
+  }
+  process.env.GRAPE_API_TOKEN = 'grape_host_level'
+  process.env.GRAPE_BASE_URL = 'https://host.example'
+  delete process.env.GRAPE_AUTH_FILE
+  delete process.env.GRAPE_BOUND_SKILL
+  try {
+    api.takeoverStart = async () => ({
+      takeover_id: 'tkos_env',
+      bundle: {
+        workspace: { cwd_hint: dir },
+        env: { GRAPE_API_TOKEN: 'tko_session_scope', GRAPE_BASE_URL: 'https://shadow.example' },
+        assets: { skill: { name: 'coding-cli', skill_id: 'skill-9', files: { 'coding-cli': { __obs_key__: 'grape/skills/official/coding-cli/coding-cli.zip' } } } },
+      },
+    })
+    const seen = []
+    globalThis.fetch = async (url, opts = {}) => {
+      const u = String(url)
+      if (u.includes('/api/health')) {
+        return new Response(JSON.stringify({ version: 'x', capabilities: [] }), { status: 200, headers: { 'content-type': 'application/json' } })
+      }
+      if (u.includes('/download')) {
+        seen.push({ url: u, auth: opts.headers?.Authorization || '' })
+        return new Response(JSON.stringify({ detail: '技能下载只接受用户级凭据' }), { status: 403, headers: { 'content-type': 'application/json' } })
+      }
+      return new Response('', { status: 404 })
+    }
+    const tool = findTool('grape_takeover_start')
+    const json = await tool.native({ owner: 'o', repo: 'r', number: 1 })
+    assert.equal(seen.length, 1, '下载端点应恰好命中一次')
+    assert.match(seen[0].url, /^https:\/\/host\.example\//, 'baseUrl 取 process.env 用户配置，不被 bundle.env 遮蔽打到 shadow/生产域')
+    assert.equal(seen[0].auth, 'Bearer grape_host_level', '凭据取 process.env 用户级 token，不被 bundle.env 会话键遮蔽')
+    assert.equal(json.skillMaterialization.status, 'failed')
+    assert.match(json.skillMaterialization.reason, /403/, '端点 403 必须透出到物化失败原因')
+
+    api.takeoverStart = async () => ({
+      takeover_id: 'tkos_env2',
+      bundle: { workspace: { cwd_hint: dir }, env: { GRAPE_BOUND_SKILL: 'bound-skill' } },
+    })
+    const legacy = await tool.native({ owner: 'o', repo: 'r', number: 1 })
+    assert.equal(legacy.skillMaterialization.status, 'legacy')
+    assert.equal(legacy.skillMaterialization.skill, 'bound-skill', '合并不得丢掉 bundle.env 的平台侧键（GRAPE_BOUND_SKILL）')
+  } finally {
+    globalThis.fetch = origFetch
+    api.takeoverStart = origTakeoverStart
+    if (saved.tok === undefined) delete process.env.GRAPE_API_TOKEN; else process.env.GRAPE_API_TOKEN = saved.tok
+    if (saved.base === undefined) delete process.env.GRAPE_BASE_URL; else process.env.GRAPE_BASE_URL = saved.base
+    if (saved.auth === undefined) delete process.env.GRAPE_AUTH_FILE; else process.env.GRAPE_AUTH_FILE = saved.auth
+    if (saved.bound === undefined) delete process.env.GRAPE_BOUND_SKILL; else process.env.GRAPE_BOUND_SKILL = saved.bound
+    drop(dir)
+  }
+})
+
+test('R7 render（H1）：失败行按失败类别分派下一步——403 凭据 / 平台格式 / 网络超时，删笼统「可重试」', () => {
+  const t = findTool('grape_takeover_start')
+  const base = {
+    takeover_id: 'tkos_test',
+    bundle: { env: {}, workspace: { cwd_hint: '/work/x' } },
+    skillMaterialization: { status: 'failed', skill: 's', path: '', fileCount: 0, hasReferences: false, source: '', reason: '' },
+  }
+  const renderWith = (reason) => t.render(structuredClone({ ...base, skillMaterialization: { ...base.skillMaterialization, reason } }))
+
+  const forbidden = renderWith('引用形态技能需服务端转 inline/zip_url 下发，客户端不解析 OBS 引用（引用键 k；grape API 403: 技能下载只接受用户级凭据）')
+  assert.match(forbidden, /技能未能物化：/)
+  assert.match(forbidden, /用户级 grape_ 凭据/, '403/凭据类失败：下一步必须是用户级凭据或转 inline/zip_url')
+  assert.match(forbidden, /inline\/zip_url/)
+  assert.ok(!/核对技能包后可重试/.test(forbidden), '不得再给笼统「可重试」')
+
+  const format = renderWith('引用形态技能需服务端转 inline/zip_url 下发，客户端不解析 OBS 引用（引用键 k；资产未给出可解析标识（无 skill_id、无 zip_url/download_url，引用键仅为 OBS key））')
+  assert.match(format, /平台下发格式问题/, '下发格式类失败：下一步必须指向平台改下发，而不是重试客户端')
+
+  const transient = renderWith('技能 zip 下载失败：HTTP 404')
+  assert.match(transient, /重开接管/, '网络/超时/短签过期类失败：重开接管（取新短签）才是可执行下一步')
+
+  assert.match(t.description, /scope=user_only/, '描述必须披露 403 凭据边界（端点 scope 与接管凭据不匹配）')
+})
