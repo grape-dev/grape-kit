@@ -2586,17 +2586,10 @@ function printResidualHint() {
 
 /* ---------- main ---------- */
 
-/** 测试缝：扫描/清理器可注入 { platform, homeDir }，供非 win32 宿主回归 win32 路径。
- *  导出不改变直接执行行为（main 由 invokedDirectly 门禁）。 */
-export { rcTargets, scanResidues, cleanRcResidues, cleanEnvVars }
-
-const invokedDirectly = (() => {
-  const entry = process.argv[1]
-  if (!entry) return false
-  try { return resolve(entry) === resolve(fileURLToPath(import.meta.url)) } catch { return false }
-})()
-
-if (invokedDirectly) {
+// 本文件是 CLI 入口（package.json bin.grape-kit），脚本主体即 main：不做「入口 vs import.meta.url」
+// 比较守卫——POSIX 安装后真正被执行的是 node_modules/.bin/grape-kit 符号链接，Node 的
+// process.argv[1] 保留链接路径而 import.meta.url 已是 realpath，守卫为假会整块跳过 main，
+// 静默 exit=0 无输出（PR #36 QA P0）。需要单测的清理逻辑放在 src/rc-cleanup.mjs。
 if (cmd === '--version' || cmd === 'version' || cmd === '-v') {
   console.log(JSON.parse(readFileSync(join(HERE, 'package.json'), 'utf8')).version)
   process.exit(0)
@@ -2697,5 +2690,4 @@ if (cmd === 'intro') {
   console.log('      node setup.mjs auth init --token <grape_...> [--base-url <url>]   凭据唯一写入入口（文件通道 + env 指引）')
   console.log('      node setup.mjs intro                   重看安装后能力地图（与宿主无关，随时可用）')
   for (const [name, host] of Object.entries(HOSTS)) console.log(`  --target ${name.padEnd(10)} ${host.label}`)
-}
 }
