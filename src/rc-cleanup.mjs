@@ -18,6 +18,17 @@ import { spawnSync } from 'node:child_process'
 /** 需要清理的用户级环境变量（rc 与注册表两条通道共用同一名单） */
 export const CREDENTIAL_ENV_KEYS = ['GRAPE_API_TOKEN', 'GRAPE_BASE_URL']
 
+/**
+ * 备份文件命名空间 `<原文件名>.bak-grapemcp-<时间戳>` 的唯一定义处
+ * （PR #36 QA 复审判断项 3）。
+ *
+ * 谁在用：CLI 侧写备份（grape-kit.mjs `backupPathFor` / dsh patch 清理）与这里的
+ * `rcBackupPathsOf` 扫描旧备份。两侧各硬编码一份时，改一侧就静默漏扫用户盘上旧版留下的
+ * **含凭据明文**备份——本模块的存在理由正是消除「扫描/清理不同源」的漂移，命名空间必须同源。
+ * 该值属兼容面：用户盘上既有备份按此命名，不得随意改动。
+ */
+export const BACKUP_NAMESPACE = 'bak-grapemcp-'
+
 /** 凭据导出行三种形态（QA#PR13 判断项 3：旧实现只认 `export`，`declare -x`、`.bash_profile`
  *  与 fish 的 `set -x` 全都不清不掩，「未发现导出行（跳过）」等于谎报）： */
 const POSIX_CREDENTIAL_LINE_RE = /^\s*(?:export|declare\s+-x)\s+(GRAPE_API_TOKEN|GRAPE_BASE_URL)\s*=/
@@ -43,10 +54,10 @@ function credentialLineKey(line, kind) {
   return m ? m[1] : null
 }
 
-/** rc 文件的 .bak-grapemcp-* 备份清单（本工具备份命名空间，与 rc 同目录同名前缀） */
+/** rc 文件的备份清单（命名空间见 BACKUP_NAMESPACE：与 rc 同目录同名前缀） */
 function rcBackupPathsOf(rcPath) {
   const dir = dirname(rcPath)
-  const prefix = `${basename(rcPath)}.bak-grapemcp-`
+  const prefix = `${basename(rcPath)}.${BACKUP_NAMESPACE}`
   try { return readdirSync(dir).filter((f) => f.startsWith(prefix)).map((f) => join(dir, f)) } catch { return [] }
 }
 

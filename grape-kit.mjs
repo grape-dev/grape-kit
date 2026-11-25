@@ -21,7 +21,7 @@ import { spawnSync } from 'node:child_process'
 import { checkUpdateStatus, formatUpdateNotice } from './src/update-check.mjs'
 import { resolveCredentials, getBaseUrl, grapeHome, readAuthChannel, npxCacheRoot } from './src/api.mjs'
 import { classifyRegQuery, REG_QUERY } from './src/registry.mjs'
-import { CREDENTIAL_ENV_KEYS, scanRcResidues, cleanCredentialChannels } from './src/rc-cleanup.mjs'
+import { CREDENTIAL_ENV_KEYS, BACKUP_NAMESPACE, scanRcResidues, cleanCredentialChannels } from './src/rc-cleanup.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const DEFAULT_SCRIPT = resolve(HERE, 'grape-kit-mcp.mjs')
@@ -60,7 +60,7 @@ const stamp = () => {
 }
 /** 备份路径；同名备份已存在时追加 -2/-3… 去重，绝不覆盖既有备份 */
 function backupPathFor(file) {
-  const base = `${file}.bak-grapemcp-${stamp()}`
+  const base = `${file}.${BACKUP_NAMESPACE}${stamp()}`
   if (!existsSync(base)) return base
   for (let n = 2; ; n++) {
     const p = `${base}-${n}`
@@ -708,7 +708,7 @@ function writeDshPatch(patchPath, nextText, originalText, mode) {
 function removeInstalledOnlyDshPatch(patchPath) {
   rmSync(patchPath, { force: true })
   const dir = dirname(patchPath)
-  const prefix = `${basename(patchPath)}.bak-grapemcp-`
+  const prefix = `${basename(patchPath)}.${BACKUP_NAMESPACE}`
   for (const f of readdirSync(dir)) {
     if (!f.startsWith(prefix)) continue
     try {
