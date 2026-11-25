@@ -1,7 +1,7 @@
 import { test, after } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { mkdtempSync, readdirSync, readFileSync, writeFileSync, rmSync, mkdirSync, existsSync } from 'node:fs'
+import { mkdtempSync, readdirSync, readFileSync, writeFileSync, rmSync, mkdirSync, existsSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -232,6 +232,45 @@ test('Issue #38 uninstall --clean-global：rc 首行凭据 + BOM + CRLF，清理
   assert.doesNotMatch(text, /grape_cli_seed|GRAPE_API_TOKEN\s*=/, 'rc 凭据行必须删除')
   assert.equal(text.charCodeAt(0), 0xFEFF, '用户可见：rc 的 BOM 不得因首行被删而丢失')
   assert.equal(text, '\uFEFFexport PATH=$PATH:/bin\r\n', '无关行与 CRLF 必须原样保留')
+})
+
+/* ── 切片 7：写回健壮性（QA 复审判断项 5：writeFileSync 非原子、异常未捕获） ── */
+
+test('Issue #38 单文件写回失败：告警点名该文件并留备份，其余 rc 照常清理（不中断、不半写）', () => {
+  const h = home()
+  const paths = seedRc(h)
+  const original = readFileSync(paths.bashrc, 'utf8')
+  const warns = []
+  const scan = () => ({ grapeHome: null, authFileOverride: null, regErrors: [], envKeys: [], ...scanRcResidues(h) })
+
+  cleanCredentialChannels({
+    scan, platform: 'linux', backupOf: backupTo,
+    // win32 常见形态：.bashrc 被编辑器/杀软占用 → EBUSY。旧实现会让整段清理以未捕获异常结束。
+    writeRc: (p, text) => {
+      if (p === paths.bashrc) throw Object.assign(new Error('EBUSY: resource busy or locked'), { code: 'EBUSY' })
+      writeFileSync(p, text)
+    },
+    log: () => {}, warn: (m) => warns.push(m),
+  })
+
+  assert.equal(readFileSync(paths.bashrc, 'utf8'), original, '写失败的文件必须保持原文（不得半写）')
+  assert.ok(warns.some((m) => m.includes(paths.bashrc) && /EBUSY/.test(m) && /备份/.test(m)), `失败必须点名文件+备份+下一步，实际: ${JSON.stringify(warns)}`)
+  assert.doesNotMatch(readFileSync(paths.profile, 'utf8'), /GRAPE_API_TOKEN\s*=/, '其余 rc 不得因单文件失败而漏清')
+  assert.doesNotMatch(readFileSync(paths.fish, 'utf8'), /GRAPE_API_TOKEN/, '其余 rc 同上')
+  assert.ok(existsSync(`${paths.bashrc}.bak-grapemcp-test`), '备份先行：写失败的文件同样留有可回滚的掩码备份')
+})
+
+test('Issue #38 写回为原子替换：不留临时文件，且保留原文件权限位', { skip: process.platform === 'win32' ? 'win32: 无 POSIX 权限位断言' : false }, () => {
+  const h = home()
+  const rc = join(h, '.bashrc')
+  writeFileSync(rc, 'export GRAPE_API_TOKEN=grape_atomic\nexport PATH=$PATH:/bin\n', { mode: 0o600 })
+
+  const scan = () => ({ grapeHome: null, authFileOverride: null, regErrors: [], envKeys: [], ...scanRcResidues(h) })
+  cleanCredentialChannels({ scan, platform: 'linux', backupOf: backupTo, log: () => {}, warn: () => {} })
+
+  assert.doesNotMatch(readFileSync(rc, 'utf8'), /GRAPE_API_TOKEN\s*=/, '凭据行仍必须删除')
+  assert.equal(statSync(rc).mode & 0o777, 0o600, 'rename 换 inode 后必须恢复原权限位（否则 0600 的 rc 变 0644）')
+  assert.deepEqual(readdirSync(h).filter((f) => /tmp|grapemk/.test(f)), [], '原子写不得留下临时文件')
 })
 
 /* ── 切片 6：备份命名空间单一来源（QA 复审判断项 3） ──
