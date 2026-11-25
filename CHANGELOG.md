@@ -6,7 +6,24 @@
 
 ## Unreleased
 
-暂无待发布变更。下一开发周期的用户可见变更先落本段（按 Added / Changed / Fixed 归类，见 CONTRIBUTING §7），发版时并入对应版本节。
+### Added
+
+- **场景三段式工具面**（修复宿主实测 P3/P4/P5 的静默失败）：`grape_apply_scene` 改为走 `POST /api/scenes/market/{id}/apply` 在仓库内**创建场景副本**（响应带 `scene_id=custom-xxxxxxxx`），应用后**回读** `GET /api/scenes?repo=` 确认副本存在；输入只认市场数字 id 或场景名，未命中即本地拒绝（不再让服务端静默回落 `default`），`custom-` 副本 id 直接引导到新工具。`set_default=true` 时再调 `POST …/default-scene` 完成「设为仓库默认」。
+- `grape_set_repo_scene`：写 `managed_repos.dev_scene`（或 `clear=true` 清空回落智能推荐），写后回读 `dev_scene`，不一致时报「未确认」而不是宣称已切换。此前 kit 没有任何工具能改仓库默认场景，「应用场景」与「切换场景」被混为一谈。
+- `grape_list_scenes` 支持仓库视角：传 `owner/repo` 列仓库场景副本（`custom-xxxxxxxx`，`set_repo_scene` 的唯一合法入参），不传则列市场模板。
+- **技能上传/升级/跨 scope**（此前只能手搓 HTTP）：`grape_upload_skill` / `grape_update_skill` / `grape_convert_skill`。上传前做与服务端 `validate_skill` 同口径的本地预检（`SKILL.md`、frontmatter `name`/`version`/`description`、name 必须等于目录名、标签不得与 Agent 类型重名），一次列全部问题、**预检不过不发请求**；ZIP 由内置 `src/zip.mjs` 现场打包（顶层目录 = 技能目录名，UTF-8 文件名，零依赖），服务端 `detail.errors` 全量透出。
+- `grape_create_issue` 把 `description` 标为必填（服务端缺正文 400「任务描述必填」）。
+
+### Changed
+
+- MCP `initialize` instructions 重写为可执行契约：角色边界（禁止 `force` 越门禁、卡点交还用户）、场景/技能/接管三条易错语义、写动作一律回读、403 两类分流。
+- `grape_takeover_finish` 派发前先查 issue 事件：平台已派发下一节点（`handoff_seq` 之后已有该节点 `a2a_event`）时只报事实、**不再客户端补发**——消除「pending_dispatch 假警报」，同时避免同一节点被重复派发跑两遍；交回响应缺 `repo_key`/`issue_number` 时回读会话补齐，不再误报「缺少仓库/issue 标识」。
+
+### Fixed
+
+- 技能上传/升级失败时只显示第一条校验错误：现在按服务端 `detail.errors` 全量列出。
+- 测试脚手架可移植性：`scripts/fake-grape.mjs` 的 wait 轮询计数器原硬编码在共享临时目录，多用户机器上非属主跑 `npm test` 会 EACCES（表现为 287 pass / 1 fail 的假产品缺陷）；改为 `os.tmpdir()` 下按 uid 隔离，并支持 `GRAPE_FAKE_TMPDIR` 覆盖。
+- 技能上传后的「下一步」提示不再暗示平台已有节点级绑定能力：写明目前只能整场景 PUT（节点级写端点属 P1 计划）。
 
 ## 0.4.0 (2026-11-23)
 
