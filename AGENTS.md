@@ -39,6 +39,6 @@
 ## 结构速览
 
 - `src/`：核心实现（api / tools / server / render / cli / update-check）
-- `skills/grape-remote/`：无 MCP 宿主（hermes 等）用的 skill 副本
+- `skills/grape-remote/`：MCP client 宿主（hermes）与无 MCP 宿主共用的 skill 副本
 - `test/`：单测 + `test/cards/` 人工测试卡
 - `docs/`：架构文档（对外可见，勿放内部信息）
