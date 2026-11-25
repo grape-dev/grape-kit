@@ -176,6 +176,44 @@ test('Issue #38 cleanCredentialChannels：win32 注册表查询失败仍如实�
   assert.doesNotMatch(readFileSync(paths.bashrc, 'utf8'), /grape_win_bashrc/, '注册表受阻不影响 rc 通道清理')
 })
 
+/* ── 切片 3b：两通道同结果（Spec 风险表：win32 与非 win32 共用一份清理，不得分叉） ── */
+
+test('Issue #38 两通道同结果：同一夹具下 win32 与非 win32 的清理结果逐字节等价', () => {
+  const fixture = () => {
+    const h = home()
+    return { h, paths: seedRc(h, { crlf: true, bom: true }) }
+  }
+  const a = fixture()
+  const b = fixture()
+  const scanOf = (h) => () => ({ grapeHome: null, authFileOverride: null, regErrors: [], envKeys: [], ...scanRcResidues(h) })
+  const logsA = []
+  const logsB = []
+  const regCalls = []
+
+  cleanCredentialChannels({
+    scan: scanOf(a.h), platform: 'win32', backupOf: backupTo,
+    reg: (args) => { regCalls.push(args); return { status: 0, stdout: '', stderr: '' } },
+    log: (m) => logsA.push(m), warn: () => {},
+  })
+  cleanCredentialChannels({
+    scan: scanOf(b.h), platform: 'linux', backupOf: backupTo,
+    log: (m) => logsB.push(m), warn: () => {},
+  })
+
+  const rel = ['.bashrc', '.bash_profile', join('.config', 'fish', 'config.fish')]
+  for (const f of rel) {
+    assert.equal(Buffer.compare(readFileSync(join(a.h, f)), readFileSync(join(b.h, f))), 0, `${f}: 两通道写回结果必须逐字节等价`)
+    const bak = `${f}.bak-grapemcp-test`
+    assert.equal(Buffer.compare(readFileSync(join(a.h, bak)), readFileSync(join(b.h, bak))), 0, `${bak}: 两通道掩码备份必须逐字节等价`)
+  }
+  // 逐条输出也只应差「注册表通道那几行」——rc 行必须同文案（用户/agent 直读的输出同样不得分叉）
+  const rcLines = (logs, h) => logs.map((m) => m.split(h).join('<HOME>')).filter((m) => !/用户环境变量|宿主会话读不到/.test(m))
+  assert.deepEqual(rcLines(logsA, a.h), rcLines(logsB, b.h), 'rc 通道逐条输出必须同文案')
+  assert.deepEqual(regCalls, [], '夹具 envKeys 为空 → win32 分支只报跳过，不盲删注册表')
+  assert.ok(logsA.some((m) => /宿主会话读不到删除结果/.test(m)), 'win32 仍走注册表通道（第一条通道未被 rc 取代）')
+  assert.equal(logsB.some((m) => /宿主会话读不到删除结果/.test(m)), false, '非 win32 没有注册表通道')
+})
+
 /* ── 切片 4：CLI 端到端（用户可见行为：盘面无凭据残留） ── */
 
 test('Issue #38 uninstall --clean-global：rc 首行凭据 + BOM + CRLF，清理后盘面零残留且编码风格不变', skipOnWin, () => {
