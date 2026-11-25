@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * 冒烟：以真实 stdio 方式拉起 grape-kit-mcp.mjs，走完整 JSON-RPC 往返。
- * 验收：initialize 带 instructions → tools/list 48 个 → tools/call 返回 Markdown（含自管理只读工具）。
+ * 验收：initialize 带 instructions → tools/list 49 个 → tools/call 返回 Markdown（含自管理只读工具）。
  * 运行：GRAPE_CLI_BIN 指向 fake grape（默认），或指向真实 grape CLI + 真实服务端。
  */
 import { spawn } from 'node:child_process'
@@ -78,7 +78,7 @@ try {
 
   const tools = await rpc('tools/list', {})
   console.log(`[ok] tools/list: ${tools.tools.length} tools`)
-  if (tools.tools.length !== 48) throw new Error(`期望 48 个工具，实际 ${tools.tools.length}`)
+  if (tools.tools.length !== 49) throw new Error(`期望 49 个工具，实际 ${tools.tools.length}`)
   // 自管理五工具（Issue #27）必须在 tools/list 里可见——缺一个就是工具面回退
   for (const name of ['grape_kit_version', 'grape_kit_check_update', 'grape_kit_upgrade', 'grape_kit_install', 'grape_kit_uninstall']) {
     if (!tools.tools.some((t) => t.name === name)) throw new Error(`tools/list 缺 ${name}`)

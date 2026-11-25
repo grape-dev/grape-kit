@@ -34,7 +34,7 @@ labels: bug
 
 ## 已尝试的自检
 
-- [ ] `npm run smoke`（48 tools 是否全通过）
+- [ ] `npm run smoke`（49 tools 是否全通过）
 - [ ] `grape-kit doctor`
 - [ ] 确认凭据走环境变量 `GRAPE_API_TOKEN`，未写死在任何配置文件
 - [ ] 已在最新版本上复现（`npm i -g @grape-dev/grape-kit@latest`）

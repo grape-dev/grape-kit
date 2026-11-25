@@ -967,10 +967,25 @@ export const TOOLS = [
       if (!a.clear && !sceneId) {
         throw new GrapeApiError('缺少 scene_id：传仓库场景 id，或 clear=true 清空默认场景', { status: 400 })
       }
-      const r = await api.setDefaultScene(a.owner, a.repo, sceneId)
+      let r
+      try {
+        r = await api.setDefaultScene(a.owner, a.repo, sceneId)
+      } catch (e) {
+        // 版本错位兜底（评审 §4 红线：kit 先于服务端发布时，第③步会打到这里）。
+        // 404/405 说明目标平台还没有 default-scene 端点——给出可执行替代，而不是
+        // 一句「grape API 失败（405）」让宿主反复重试。
+        if (e instanceof GrapeApiError && (e.status === 404 || e.status === 405)) {
+          throw new GrapeApiError(
+            `目标平台没有 default-scene 端点（HTTP ${e.status}）：服务端需先部署「仓库默认场景」接口。\n` +
+            '现在可用的替代路径：① 在 WebUI 场景页把目标场景设为默认；② 建单时显式指定 scene_id（grape_create_issue 前先在页面选场景）；' +
+            '③ 调 grape_apply_scene(..., set_default=true) 会在同一次调用里尝试写入，若服务端同样不支持也会返回本条提示。',
+            { status: e.status, code: 'ENDPOINT_MISSING', hint: '这是版本错位（kit 已升级、服务端未部署），不是权限或参数问题，不要重试。' })
+        }
+        throw e
+      }
       let devScene = r?.dev_scene
       if (devScene === undefined) {
-        // 旧平台没有 default-scene 端点时 sdk 会 404；若平台接受但没回读值，这里再读一次 dashboard
+        // 平台接受但没回读值：再读一次 dashboard 补齐
         try {
           const dash = await api.repoDashboard(a.owner, a.repo)
           devScene = dash?.dev_scene
@@ -991,6 +1006,58 @@ export const TOOLS = [
       return ['### 仓库默认场景已更新', '',
         `- dev_scene: \`${dev || '（已清空 → 回落智能推荐）'}\``,
         '- 生效范围：后续新建且未显式选场景的 issue；已存在 issue 保留自身 scene_id 快照。'].join('\n')
+    },
+  },
+  {
+    name: 'grape_set_node_skill',
+    description:
+      '把场景里**某一个节点**的技能换成指定技能（节点级写端点），其余节点与字段由服务端原样保留。' +
+      '用于「经验沉淀成 skill → 绑到对应节点」的闭环：此前只能整场景 PUT，换一个技能要重写全部节点。' +
+      '入参：owner/repo（仓库）、scene_id（仓库场景副本 custom-xxxxxxxx）、node（节点 id/tag，如 coding）、skill_id（技能 id）。' +
+      '服务端校验三条：技能存在且启用、repo 级场景不得引用 user 级技能、节点角色与引擎归属不变。写后回读并返回改后的节点。' +
+      '若目标平台没有该端点（404/405），会明确报「版本错位」并给出替代路径（整场景 PUT 或等平台升级）。' +
+      '⚠️ 用户决策层动作：改的是该仓库后续新建需求的流水线，调用前必须向用户确认节点与技能。',
+    schema: {
+      type: 'object',
+      properties: {
+        owner: str('owner'),
+        repo: str('仓库名'),
+        scene_id: str('仓库场景 id（custom-xxxxxxxx）'),
+        node: str('节点 id 或 tag（vod / issue / coding / qa / sre / chat）'),
+        skill_id: num('要绑定的技能 id（grape_list_skills / grape_get_skill_detail 获取）'),
+        skill: str('技能名（可选，缺省由服务端按 skill_id 反查；填错会 400）'),
+      },
+      required: ['owner', 'repo', 'scene_id', 'node', 'skill_id'],
+    },
+    async native(a) {
+      try {
+        return await api.setNodeSkill(a.owner, a.repo, a.scene_id, a.node, a.skill_id, a.skill)
+      } catch (e) {
+        if (e instanceof GrapeApiError && (e.status === 404 || e.status === 405)) {
+          const missing = /没有节点|node_ids/.test(String(e.message))
+          throw new GrapeApiError(
+            missing ? e.message
+              : `目标平台没有节点级换技能端点（HTTP ${e.status}）：服务端需先部署 PATCH /api/scenes/{id}/nodes/{node}/skill。\n` +
+                '替代路径：读场景详情拿全量 nodes → 只改目标节点的 skill/skill_id → 整场景 PUT /api/scenes/{scene_id} 提交。',
+            { status: e.status, code: 'ENDPOINT_MISSING', hint: missing ? '' : '这是版本错位，不是参数问题。' })
+        }
+        throw e
+      }
+    },
+    render(json) {
+      if (!json || typeof json !== 'object') return R.fallbackJson(json)
+      if (json.detail) return `换技能失败：${typeof json.detail === 'string' ? json.detail : JSON.stringify(json.detail)}`
+      const n = json.node || {}
+      const before = json.before || {}
+      const lines = ['### 节点技能已切换', '']
+      lines.push(`- 节点: \`${n.id ?? n.tag ?? ''}\``)
+      lines.push(`- 技能: \`${before.skill ?? '?'}\` → \`${n.skill ?? ''}\`（id ${before.skill_id ?? '?'} → ${n.skill_id ?? ''}）`)
+      if (Array.isArray(json.nodes)) {
+        lines.push(`- 场景链: ${json.nodes.map((x) => `${x.id || x.tag}:${x.skill || '-'}`).join(' → ')}`)
+      }
+      lines.push('', '_下一步：新需求才会用到新技能（已存在的 issue 保留 scene_id 快照与当时绑定）；' +
+        '要验证请建一张新单，或读场景详情确认。_')
+      return lines.join('\n')
     },
   },
   {

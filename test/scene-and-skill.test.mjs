@@ -282,3 +282,47 @@ test('upload_skill 的下一步提示必须承认 D5 缺口（不承诺做不到
   assert.match(text, /没有节点级写端点/, '必须写明平台暂无节点级端点')
   assert.match(text, /整场景/, '必须给出当前唯一可行路径：整场景 PUT')
 })
+
+/* ── 节点级换技能（D5）+ 版本错位降级（评审 §4 红线） ───────────────── */
+
+test('set_node_skill：只换目标节点的技能，并渲染 before → after', async () => {
+  let got = null
+  stubApi({
+    setNodeSkill: async (...args) => {
+      got = args
+      return {
+        message: 'ok',
+        node: { id: 'coding', skill: 'deploy-playbook', skill_id: 3625 },
+        before: { id: 'coding', skill: 'coding-cli', skill_id: 2754 },
+        nodes: [{ id: 'vod', skill: 'vod-cli' }, { id: 'coding', skill: 'deploy-playbook' }],
+      }
+    },
+  })
+  const out = await findTool('grape_set_node_skill').native({
+    owner: 'o', repo: 'r', scene_id: 'custom-abc', node: 'coding', skill_id: 3625,
+  })
+  assert.deepEqual(got, ['o', 'r', 'custom-abc', 'coding', 3625, undefined], '必须打节点级端点，不能走整场景 PUT')
+  const text = findTool('grape_set_node_skill').render(out)
+  assert.match(text, /coding-cli.*→.*deploy-playbook/, '要显示 before → after')
+  assert.match(text, /新需求才会用到新技能/, '要讲清快照语义')
+})
+
+test('set_node_skill：目标平台没有该端点（405）时报版本错位并给替代路径', async () => {
+  const { GrapeApiError } = await import('../src/api.mjs')
+  stubApi({
+    setNodeSkill: async () => { throw new GrapeApiError('grape API 405: Method Not Allowed', { status: 405 }) },
+  })
+  await assert.rejects(
+    () => findTool('grape_set_node_skill').native({ owner: 'o', repo: 'r', scene_id: 's', node: 'coding', skill_id: 1 }),
+    (e) => e.status === 405 && /没有节点级换技能端点/.test(e.message) && /整场景 PUT/.test(e.message))
+})
+
+test('set_repo_scene：405/404 降级为「版本错位」而不是裸 API 失败', async () => {
+  const { GrapeApiError } = await import('../src/api.mjs')
+  stubApi({
+    setDefaultScene: async () => { throw new GrapeApiError('grape API 405: Method Not Allowed', { status: 405 }) },
+  })
+  await assert.rejects(
+    () => findTool('grape_set_repo_scene').native({ owner: 'o', repo: 'r', scene_id: 'custom-abc' }),
+    (e) => e.code === 'ENDPOINT_MISSING' && /版本错位/.test(e.hint || '') && /不要重试/.test(e.hint || ''))
+})

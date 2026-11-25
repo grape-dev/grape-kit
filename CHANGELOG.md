@@ -6,7 +6,13 @@
 
 ## Unreleased
 
-暂无待发布变更。下一开发周期的用户可见变更先落本段（按 Added / Changed / Fixed 归类，见 CONTRIBUTING §7），发版时并入对应版本节。
+### Added
+
+- `grape_set_node_skill`（工具面 48 → 49）：**节点级换技能**——只改一个节点的 `skill_id`，其余节点与字段由服务端原样保留，用于「经验沉淀成 skill → 绑到对应节点」的闭环；此前只能整场景 PUT 重写全部节点。对应服务端 `PATCH /api/scenes/{scene_id}/nodes/{node_id}/skill`（grape MR 同批）。
+
+### Changed
+
+- `grape_set_repo_scene` 在目标平台缺 `default-scene` 端点（HTTP 404/405）时不再抛裸「API 失败」：明确报「版本错位（kit 已升级、服务端未部署）」并给出三条替代路径（WebUI 设默认 / 建单显式选场景 / 走 `set_default`），避免宿主反复重试。
 
 ## 0.5.0 (2026-11-25)
 

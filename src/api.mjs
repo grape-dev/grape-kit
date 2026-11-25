@@ -306,6 +306,12 @@ export const api = {
   /** 设为仓库默认场景（写 dev_scene；空串=清空回智能推荐）。写后由服务端回读验证 */
   setDefaultScene: (owner, repo, sceneId) =>
     apiRequest('PUT', `/api/repos/${owner}/${repo}/default-scene`, { body: { scene_id: sceneId || '' } }),
+  /** 节点级换技能（D5）：只改一个节点，其余节点由服务端原样保留 */
+  setNodeSkill: (owner, repo, sceneId, nodeId, skillId, skill) =>
+    apiRequest('PATCH', `/api/scenes/${encodeURIComponent(sceneId)}/nodes/${encodeURIComponent(nodeId)}/skill`, {
+      query: { repo: `${owner}/${repo}` },
+      body: { skill_id: Number(skillId), ...(skill ? { skill: String(skill) } : {}) },
+    }),
   sceneRecommendConfig: (owner, repo) => apiRequest('GET', `/api/repos/${owner}/${repo}/scene-recommend-config`),
   setSceneRecommendFallback: (owner, repo, fallbackScene, rules = []) =>
     apiRequest('PUT', `/api/repos/${owner}/${repo}/scene-recommend-config`,

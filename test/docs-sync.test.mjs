@@ -149,7 +149,7 @@ const LIFECYCLE_TOOL_NAMES = ['grape_kit_version', 'grape_kit_check_update', 'gr
 
 test('Issue #27 README 双语：工具数 48 + 自管理五工具逐个点名 + 写操作决策门口径', () => {
   for (const [name, md] of [['README.md', read('README.md')], ['README.zh.md', read('README.zh.md')]]) {
-    assert.match(md, /48 tools|48 工具/, `${name} 能力总览应为 48 工具（39→48 口径同步）`)
+    assert.match(md, /49 tools|49 工具/, `${name} 能力总览应为 49 工具（39→48 口径同步）`)
     for (const tool of LIFECYCLE_TOOL_NAMES) {
       assert.ok(md.includes(tool), `${name} 应点名 ${tool}`)
     }
@@ -172,7 +172,7 @@ test('Issue #27 CHANGELOG 0.5.0 发布节覆盖自管理五工具（Added/Change
     [/grape_kit_upgrade/, 'grape_kit_upgrade'],
     [/grape_kit_install/, 'grape_kit_install'],
     [/grape_kit_uninstall/, 'grape_kit_uninstall'],
-    [/39\s*→\s*48|48 工具|48 tools/, '工具面 39→48'],
+    [/39\s*→\s*(48|49)/, '工具面 39→48（0.5.0 发布时）'],
     [/dismiss/, 'dismiss 3 天冷却'],
   ]) {
     assert.match(body, re, `0.5.0 发布节应记录 ${what}`)
@@ -180,8 +180,8 @@ test('Issue #27 CHANGELOG 0.5.0 发布节覆盖自管理五工具（Added/Change
 })
 
 test('Issue #27 冒烟/巡检脚本的工具数断言同步为 48', () => {
-  assert.match(read('scripts/smoke.mjs'), /!== 48/, 'smoke 应断言 48 个工具')
-  assert.match(read('scripts/sweep-0.2.mjs'), /=== 48/, 'sweep 应断言 48 个工具')
+  assert.match(read('scripts/smoke.mjs'), /!== 49/, 'smoke 应断言 49 个工具')
+  assert.match(read('scripts/sweep-0.2.mjs'), /=== 49/, 'sweep 应断言 49 个工具')
 })
 
 /* ── QA 复审（PR #21）S1：CONTRIBUTING 自身也是工具面口径载体，必须与 TOOL_NAMES 实际数量同源 ──
