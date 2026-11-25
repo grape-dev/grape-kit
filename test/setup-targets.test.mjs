@@ -7,12 +7,15 @@ import { join, dirname } from 'node:path'
 
 const SETUP = new URL('../grape-kit.mjs', import.meta.url).pathname
 
-/* Windows 可移植性（QA 复审 P2.8）：
- * - win32 的 os.homedir() 读 USERPROFILE 不读 HOME —— 本文件的 HOME=h 隔离对
- *   走 homedir() 的破坏性清理（--clean-global：删 GRAPE_HOME/rc/_npx）全部失效，
- *   在 Windows 开发机上跑会触达真实用户目录（且 rc 断言不成立：win32 走 reg delete）。
- *   此类用例在 win32 整体 skip；win32 行为由 Windows 11 实机回归覆盖（PR 步骤）。
- * - 走 GRAPE_HOME 环境变量的用例（auth init / doctor）实现层可移植，仅权限位断言分流。 */
+/* Windows 可移植性（QA 复审 P2.8 / PR #36 复审判断项 4）：
+ * - win32 的 os.homedir() 读 USERPROFILE 不读 HOME —— 只隔离 HOME 时，走 homedir() 的
+ *   破坏性清理（--clean-global：删 GRAPE_HOME/rc/_npx）在 Windows 开发机上会触达真实用户目录，
+ *   且 rc 断言不成立（win32 走 reg delete）。此类用例在 win32 整体 skip；
+ *   win32 行为由 Windows 11 实机回归覆盖（PR 步骤）。
+ * - 走 GRAPE_HOME 环境变量的用例（auth init / doctor）实现层可移植，仅权限位断言分流：
+ *   run() 同时设 HOME 与 USERPROFILE 指向临时目录，故这些用例在 win32 上读到的仍是夹具 home
+ *   （不读开发机真实 ~/.grape/config.json，写坏 config 也不会落到夹具外造成假红/假绿）。
+ *   POSIX 宿主不使用 USERPROFILE，设为临时目录无副作用。 */
 const isWin = process.platform === 'win32'
 const skipOnWin = { skip: isWin ? 'win32: HOME 隔离对 homedir() 无效，破坏性清理用例走实机回归' : false }
 
@@ -35,6 +38,9 @@ function run(args, h, extraEnv = {}) {
     env: {
       ...process.env,
       HOME: h,
+      // win32 的 homedir() 取 USERPROFILE：只隔离 HOME 时 doctor / auth init 会读开发机真实 ~/.grape
+      // （含 token 则用例红；写坏 config 又落进夹具外的真实 home → 假红/假绿），故两条一起隔离。
+      USERPROFILE: h,
       GRAPE_CODEARTS_CONFIG: '',
       GRAPE_OFFICEACE_MANIFEST: '',
       GRAPE_HOME: '',

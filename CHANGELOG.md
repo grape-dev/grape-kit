@@ -8,7 +8,7 @@
 
 ### Fixed
 
-- #38 修复 Windows 上 `uninstall --clean-global` 不清理 Git Bash 读取的 rc 文件：rc 通道（凭据行判据 / 扫描 / 清理 / 掩码备份）单列到 `src/rc-cleanup.mjs`，两平台共用同一份实现——`scanResidues()` 的 rc 扫描不再被 win32 平台门禁跳过，win32 分支删完注册表后不再提前 `return` 而是继续清理 `.bashrc` / `.bash_profile` / `config.fish`（注册表与 rc 是两条并列通道）；掩码备份不含明文凭据，写回保留原 CRLF，且首行即凭据行时 BOM 迁移到新首行（不再随被删首行丢失）。README 双语同步 Windows 双通道口径。
+- #38 修复 Windows 上 `uninstall --clean-global` 不清理 Git Bash 读取的 rc 文件：rc 通道（凭据行判据 / 扫描 / 清理 / 掩码备份）单列到 `src/credential-channels.mjs`，两平台共用同一份实现——`scanResidues()` 的 rc 扫描不再被 win32 平台门禁跳过，win32 分支删完注册表后不再提前 `return` 而是继续清理 `.bashrc` / `.bash_profile` / `config.fish`（注册表与 rc 是两条并列通道）；掩码备份不含明文凭据，写回保留原 CRLF，且首行即凭据行时 BOM 迁移到新首行（不再随被删首行丢失）。README 双语同步 Windows 双通道口径。
 - #38 修正 `doctor` 无凭据时的 `(FAIL)` 误导读法：`GRAPE_API_TOKEN` token 行与「当前生效凭据来源」改为「未设置（需配置凭据）」/「未配置（需先配置凭据）」等措辞，仍保持 `[!!]` 分类与 `exit=0`，配置解析失败档仍以 `解析失败` 可辨识。
 
 ## 0.5.1 (2026-11-25)

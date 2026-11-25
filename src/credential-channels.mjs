@@ -1,14 +1,20 @@
 /**
- * 凭据清理通道（rc 文件 + Windows 用户环境变量）——单一实现，两平台共用。
+ * 用户级凭据删除通道——**两条并列**：Windows 用户环境变量（注册表 `HKCU\Environment`）与
+ * rc 文件（`.zshrc` / `.bashrc` / `.bash_profile` / `.profile` / `config.fish`）。
+ *
+ * 模块名与职责对齐（PR #36 QA 复审判断项 5）：本模块原名 `rc-cleanup`，但它同时承载注册表通道的
+ * **编排**（`cleanWindowsUserEnvVars`）——注册表查询/删除判定实现未改（仍在 `src/registry.mjs`，
+ * Spec Out of Scope），改动的只是「谁在什么条件下去调它」。文件名若只写 rc，会诱导后来者在这里
+ * 再分叉一次平台逻辑，正是 Issue #38 的根因。
  *
  * 为什么单列成模块：
  * - Issue #38 的缺陷根因就是「同一份清理逻辑被平台分支切成两半」——`scanResidues()` 的 rc 段
  *   包在非 win32 才执行的块里、`cleanEnvVars()` 的 win32 分支删完注册表就 return，于是 Git Bash
  *   读取的 `.bashrc` / `.bash_profile` / `config.fish` 在 Windows 上从不被清理（凭据留盘）。
  *   扫描、清理、备份掩码必须同源，否则必然再次漂移。
- * - 同时它是测试缝：平台与 `reg` 运行器可注入，非 win32 宿主（CI）也能回归 win32 双通道行为，
- *   且用例不会真的 `spawnSync(reg)` 造出 ENOENT 噪声。CLI 入口（grape-kit.mjs）因此不需要导出
- *   内部函数、也不需要「入口 vs import.meta.url」守卫——对外 CLI 行为与改动前一致。
+ * - 同时它是测试缝：平台、`reg` 运行器、备份实现、写回实现均可注入——非 win32 宿主（CI）也能回归
+ *   win32 双通道行为，且用例不会真的 `spawnSync(reg)` 造出 ENOENT 噪声。CLI 入口（grape-kit.mjs）
+ *   因此不需要导出内部函数、也不需要「入口 vs import.meta.url」守卫——对外 CLI 行为与改动前一致。
  */
 import { readFileSync, writeFileSync, readdirSync, existsSync, rmSync } from 'node:fs'
 import { homedir } from 'node:os'
@@ -113,7 +119,7 @@ export function planRcCleanup(text, kind) {
  *
  * 取舍依据：BOM 是「文件编码标记」，不是可搬动的装饰字符。删掉首行后新首行若为空，文件已经
  * 不可能是 BOM 文件，保留它只能制造语法错误；宏观看是「BOM 保真」与「不新增报错」两条要求，
- * 后者是用户可感知的那条（见 test/rc-cleanup.test.mjs 两条边界用例的 bash source 断言）。
+ * 后者是用户可感知的那条（见 test/credential-channels.test.mjs 两条边界用例的 bash source 断言）。
  */
 function keepBom(originalText, lines) {
   if (!originalText.startsWith(BOM) || lines.length === 0) return lines

@@ -5,13 +5,13 @@ import { mkdtempSync, readdirSync, readFileSync, writeFileSync, rmSync, mkdirSyn
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { planRcCleanup, scanRcResidues, cleanCredentialChannels, BACKUP_NAMESPACE } from '../src/rc-cleanup.mjs'
+import { planRcCleanup, scanRcResidues, cleanCredentialChannels, BACKUP_NAMESPACE } from '../src/credential-channels.mjs'
 
 /* Issue #38：win32 的 rc 清理路径此前被两处平台门禁挡死——`scanResidues()` 的 rc 段整体包在
  * `if (process.platform !== 'win32')` 内（win32 下 rcHits 恒空），`cleanEnvVars()` 的 win32 分支
  * 处理完 `reg delete` 就 return（rc 清理循环只属非 win32 路径）。Git Bash 读的是 USERPROFILE 下的
  * rc，于是 Windows 上执行 `uninstall --clean-global` 后三条 rc 凭据行全部留盘。
- * 测试缝落在 src/rc-cleanup.mjs（纯实现 + 注入 reg 运行器/备份实现），CLI 入口不再导出内部函数。 */
+ * 测试缝落在 src/credential-channels.mjs（纯实现 + 注入 reg 运行器/备份实现），CLI 入口不再导出内部函数。 */
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
 const SETUP = join(ROOT, 'grape-kit.mjs')
@@ -235,14 +235,14 @@ test('Issue #38 uninstall --clean-global：rc 首行凭据 + BOM + CRLF，清理
 })
 
 /* ── 切片 6：备份命名空间单一来源（QA 复审判断项 3） ──
- * `bak-grapemcp-` 同时硬编码在 grape-kit.mjs 的 backupPathFor 与 src/rc-cleanup.mjs 的
+ * `bak-grapemcp-` 同时硬编码在 grape-kit.mjs 的 backupPathFor 与 src/credential-channels.mjs 的
  * rcBackupPathsOf 时，改一侧即静默漏扫旧版留下的含凭据备份（备份先行、清理却找不到）。 */
 
 test('Issue #38 备份命名空间单一来源：前缀由模块导出、CLI 侧不硬编码', () => {
   assert.equal(BACKUP_NAMESPACE, 'bak-grapemcp-', '命名空间是兼容面：用户盘上旧版备份按此命名，不得随意 rename')
   const cliSrc = readFileSync(SETUP, 'utf8')
   assert.doesNotMatch(cliSrc, /bak-grapemcp-/, 'grape-kit.mjs 不得再出现字面前缀——必须共用模块导出值')
-  assert.match(cliSrc, /BACKUP_NAMESPACE/, 'CLI 侧须从 src/rc-cleanup.mjs 导入备份命名空间')
+  assert.match(cliSrc, /BACKUP_NAMESPACE/, 'CLI 侧须从 src/credential-channels.mjs 导入备份命名空间')
 })
 
 test('Issue #38 备份命名空间单一来源：--clean-global 删旧含凭据备份，新备份同样落在该命名空间', skipOnWin, () => {

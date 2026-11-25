@@ -21,7 +21,7 @@ import { spawnSync } from 'node:child_process'
 import { checkUpdateStatus, formatUpdateNotice } from './src/update-check.mjs'
 import { resolveCredentials, getBaseUrl, grapeHome, readAuthChannel, npxCacheRoot } from './src/api.mjs'
 import { classifyRegQuery, REG_QUERY } from './src/registry.mjs'
-import { CREDENTIAL_ENV_KEYS, BACKUP_NAMESPACE, scanRcResidues, cleanCredentialChannels } from './src/rc-cleanup.mjs'
+import { CREDENTIAL_ENV_KEYS, BACKUP_NAMESPACE, scanRcResidues, cleanCredentialChannels } from './src/credential-channels.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const DEFAULT_SCRIPT = resolve(HERE, 'grape-kit-mcp.mjs')
@@ -2155,7 +2155,7 @@ async function resolveTargetAuto() {
 
 /* ---------- 凭据写入单入口 / 全局清理（Issue #20） ---------- */
 
-/* rc 凭据行判据 / 扫描 / 清理实现见 src/rc-cleanup.mjs——单一实现两平台共用，CLI 不再本地分叉（Issue #38） */
+/* rc 凭据行判据 / 扫描 / 清理实现见 src/credential-channels.mjs——单一实现两平台共用，CLI 不再本地分叉（Issue #38） */
 
 /**
  * 残留扫描单一 collector：默认 uninstall 的残留提示与 --clean-global 的三路清理
@@ -2193,7 +2193,7 @@ function scanResidues() {
   }
   // Issue #38：rc 扫描不再有平台门禁——注册表判定仍仅 win32（上方分支），rc 则是两平台并列的
   // 凭据通道（win32 下 rcTargets() 基于 USERPROFILE，与 Git Bash 读取位置一致）。扫描实现单列在
-  // src/rc-cleanup.mjs，与清理/备份掩码同源。
+  // src/credential-channels.mjs，与清理/备份掩码同源。
   const rc = scanRcResidues()
   out.rcHits = rc.rcHits
   out.rcCredentialBackups = rc.rcCredentialBackups
@@ -2296,7 +2296,7 @@ async function authInit() {
 
 /**
  * 删除用户级环境变量：rc 文件（POSIX 与 Git Bash 同源）与 Windows 注册表是两条并列通道，
- * 统一由 src/rc-cleanup.mjs 的 cleanCredentialChannels 处理——win32 删完 `reg delete`
+ * 统一由 src/credential-channels.mjs 的 cleanCredentialChannels 处理——win32 删完 `reg delete`
  * 不再提前 return，继续走与非 win32 同一份 rc 清理器（Issue #38 主修复）。
  * 扫描只读 scanResidues() 这一份结果（与残留提示、--dry-run 同源），备份实现由本文件注入。
  */
@@ -2530,7 +2530,7 @@ function printResidualHint() {
 // 本文件是 CLI 入口（package.json bin.grape-kit），脚本主体即 main：不做「入口 vs import.meta.url」
 // 比较守卫——POSIX 安装后真正被执行的是 node_modules/.bin/grape-kit 符号链接，Node 的
 // process.argv[1] 保留链接路径而 import.meta.url 已是 realpath，守卫为假会整块跳过 main，
-// 静默 exit=0 无输出（PR #36 QA P0）。需要单测的清理逻辑放在 src/rc-cleanup.mjs。
+// 静默 exit=0 无输出（PR #36 QA P0）。需要单测的清理逻辑放在 src/credential-channels.mjs。
 if (cmd === '--version' || cmd === 'version' || cmd === '-v') {
   console.log(JSON.parse(readFileSync(join(HERE, 'package.json'), 'utf8')).version)
   process.exit(0)
