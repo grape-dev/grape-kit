@@ -78,7 +78,7 @@ function credentialSourceCheck() {
       : c.sourceKind === 'env' ? '环境变量 GRAPE_API_TOKEN'
         : c.sourceKind === 'file' ? `文件 ${String(c.source).slice('file:'.length)}`
           : ''
-  return ['当前生效凭据来源', c.token ? `ok（${label}；base_url=${c.baseUrl}，不回显 token）` : '未配置（FAIL）：看上一行修复动作']
+  return ['当前生效凭据来源', c.token ? `ok（${label}；base_url=${c.baseUrl}，不回显 token）` : '未配置（需先配置凭据）：看上一行修复动作']
 }
 /**
  * base_url 展示：值取自 getBaseUrl()（唯一事实源），此处只「补一份来源标签」——env / 文件通道 / 默认。
@@ -136,12 +136,13 @@ const envChecks = () => {
   const fileToken = f.exists && !f.parseError && f.cfg && f.cfg.token
   let tokenLine
   // QA 复审（合入后基线）可疑项：runtime 档已命中时 env/file 未命中不是失败——
-  // 否则同一屏「[!!] 未设置（FAIL）」与「[ok] 一次性命中」并存，与「没有 [!!] 即就绪」自相矛盾
+  // 否则同一屏「[!!] 未设置」与「[ok] 一次性命中」并存，与「没有 [!!] 即就绪」自相矛盾。
+  // Issue #38：无凭据档不再写 (FAIL)——它只是缺配置，按三态约定渲染成 [!!] 并给修复动作即可。
   if (c.token && c.sourceKind === 'runtime') tokenLine = 'note（未设置：runtime 档 GRAPE_API_TOKEN_ONCE 已命中，当前生效，不影响使用）'
   else if (process.env.GRAPE_API_TOKEN) tokenLine = 'ok（已设置，不回显）'
   else if (fileToken) tokenLine = `ok（文件通道 ${f.authFile}）`
-  else if (f.exists && f.parseError) tokenLine = `未设置（FAIL）：${f.authFile} 解析失败（内容不回显）`
-  else tokenLine = '未设置（FAIL）：打开 https://www.grapedev.cn/app/#account/profile 生成用户级 API Key（自部署实例用「你的地址/app/#account/profile」），用环境变量或 ~/.grape/config.json 提供'
+  else if (f.exists && f.parseError) tokenLine = `未设置（需修复配置）：${f.authFile} 解析失败（内容不回显）`
+  else tokenLine = '未设置（需配置凭据）：打开 https://www.grapedev.cn/app/#account/profile 生成用户级 API Key（自部署实例用「你的地址/app/#account/profile」），用环境变量或 ~/.grape/config.json 提供'
   return [
     (() => { const { base, source } = baseUrlInfo(); return ['GRAPE_BASE_URL', `ok（${base}；来源=${source}）`] })(),
     ['GRAPE_API_TOKEN', tokenLine],
@@ -2140,13 +2141,15 @@ const CREDENTIAL_ENV_KEYS = ['GRAPE_API_TOKEN', 'GRAPE_BASE_URL']
  *  与 fish 的 `set -x` 全都不清不掩，「未发现导出行（跳过）」等于谎报）： */
 const POSIX_CREDENTIAL_LINE_RE = /^\s*(?:export|declare\s+-x)\s+(GRAPE_API_TOKEN|GRAPE_BASE_URL)\s*=/
 const FISH_CREDENTIAL_LINE_RE = /^\s*set\s+(?:-x|-gx|--export)\s+(GRAPE_API_TOKEN|GRAPE_BASE_URL)(?:\s|$)/
-/** 扫描目标：POSIX 常见 rc（含仅登录 shell 读的 .bash_profile）+ fish 配置；kind 决定行形态 */
-const rcTargets = () => [
-  { path: join(homedir(), '.zshrc'), kind: 'posix' },
-  { path: join(homedir(), '.bashrc'), kind: 'posix' },
-  { path: join(homedir(), '.bash_profile'), kind: 'posix' },
-  { path: join(homedir(), '.profile'), kind: 'posix' },
-  { path: join(homedir(), '.config', 'fish', 'config.fish'), kind: 'fish' },
+/** 扫描目标：POSIX 常见 rc（含仅登录 shell 读的 .bash_profile）+ fish 配置；kind 决定行形态。
+ *  homeDir 可注入（默认 homedir()）：win32 下即 USERPROFILE，与 Git Bash 读取位置一致；
+ *  也作为测试缝，让「扫描/清理同源」在非 win32 宿主上可回归。 */
+const rcTargets = (homeDir = homedir()) => [
+  { path: join(homeDir, '.zshrc'), kind: 'posix' },
+  { path: join(homeDir, '.bashrc'), kind: 'posix' },
+  { path: join(homeDir, '.bash_profile'), kind: 'posix' },
+  { path: join(homeDir, '.profile'), kind: 'posix' },
+  { path: join(homeDir, '.config', 'fish', 'config.fish'), kind: 'fish' },
 ]
 
 /** 该行是否导出凭据：命中返回变量名，否则 null（扫描、清理、掩码共用同一判据） */
@@ -2169,7 +2172,7 @@ function rcBackupPathsOf(rcPath) {
  * QA 复审（合入后基线）硬违规 1：GRAPE_AUTH_FILE 指向的凭据文件必须纳入同一扫描——
  * auth init 的写入目标若是它，清理不删它、检测不扫它 = 凭据留盘 + 「零残留」谎报。
  */
-function scanResidues() {
+function scanResidues({ platform = process.platform, homeDir = homedir() } = {}) {
   const out = { grapeHome: null, authFileOverride: null, envKeys: [], regErrors: [], rcHits: [], rcCredentialBackups: [], npxHits: [] }
   const home = grapeHome()
   if (existsSync(home)) {
@@ -2190,24 +2193,24 @@ function scanResidues() {
     // 不查注册表会让默认 uninstall 在 Windows 假零残留。reg query 仅 win32 执行（实机回归覆盖）。
     // QA#PR13 判断项 4：非零退出必须区分「确实不存在」与「查不了」——拒绝访问/reg 缺失时
     // 静默当成不存在就是假零残留，与 CHANGELOG「不再吞错」相反，故登记 regErrors 供提示点名人工核对。
-    if (process.platform === 'win32') {
+    if (platform === 'win32') {
       const verdict = classifyRegQuery(spawnSync('reg', ['query', 'HKCU\\Environment', '/v', k], { encoding: 'utf8' }))
       if (verdict.state === REG_QUERY.PRESENT) out.envKeys.push(k)
       else if (verdict.state === REG_QUERY.ERROR) out.regErrors.push({ key: k, detail: verdict.detail })
     }
   }
-  if (process.platform !== 'win32') {
-    for (const { path: rc, kind } of rcTargets()) {
-      if (!existsSync(rc)) continue
-      let lines
-      try { lines = readFileSync(rc, 'utf8').split('\n') } catch { continue }
-      const hits = lines.filter((line) => credentialLineKey(line, kind)).length
-      if (hits) out.rcHits.push({ path: rc, kind, hits })
-      for (const b of rcBackupPathsOf(rc)) {
-        try {
-          if (readFileSync(b, 'utf8').split('\n').some((line) => credentialLineKey(line, kind))) out.rcCredentialBackups.push(b)
-        } catch { /* 忽略 */ }
-      }
+  // Issue #38：rc 扫描不再按平台门禁跳过。rcTargets() 基于 homedir()（win32 即 USERPROFILE，
+  // 与 Git Bash 读取位置一致），单一扫描源；注册表判定仍仅 win32（上方分支）。
+  for (const { path: rc, kind } of rcTargets(homeDir)) {
+    if (!existsSync(rc)) continue
+    let lines
+    try { lines = readFileSync(rc, 'utf8').split('\n') } catch { continue }
+    const hits = lines.filter((line) => credentialLineKey(line, kind)).length
+    if (hits) out.rcHits.push({ path: rc, kind, hits })
+    for (const b of rcBackupPathsOf(rc)) {
+      try {
+        if (readFileSync(b, 'utf8').split('\n').some((line) => credentialLineKey(line, kind))) out.rcCredentialBackups.push(b)
+      } catch { /* 忽略 */ }
     }
   }
   const npxRoot = npxCacheRoot()
@@ -2307,31 +2310,11 @@ async function authInit() {
   console.log('优先级：GRAPE_API_TOKEN_ONCE（runtime）> GRAPE_API_TOKEN（env）> GRAPE_AUTH_FILE / GRAPE_HOME/config.json（file）')
 }
 
-/** 删除用户级环境变量：POSIX 精确删 rc 中的 export 行，Windows 用 reg delete。
- *  备份取「原文但凭据行掩码」（QA 判断项：备份=剔除凭据后的全文与清理结果逐字节相同，无回滚价值）：
- *  非凭据行原样保留可回滚，凭据行以注释掩码标注位置（名称保留、值与等号不出现——
- *  含凭据的备份等于换个文件名把 token 留盘）；旧版本留下的含凭据 .bak-grapemcp-* 备份一并删除。 */
-function cleanEnvVars() {
-  if (process.platform === 'win32') {
-    // QA 判断项：win32 不得自行 reg query，必须读 scanResidues() 单一扫描结果（与残留提示同源）。
-    // 扫描已包含「process.env 命中」与「HKCU\Environment 注册表命中」；删除失败必须可见，不吞错。
-    const s = scanResidues()
-    for (const name of CREDENTIAL_ENV_KEYS) {
-      const unreadable = s.regErrors.find((e) => e.key === name)
-      // 查询失败 ≠ 不存在：不得报「未发现（跳过）」蒙混过去（QA#PR13 判断项 4）
-      if (unreadable && !s.envKeys.includes(name)) {
-        console.warn(`  无法确认用户环境变量 ${name} 是否存在（${unreadable.detail}），请人工核对 HKCU\\Environment`)
-        continue
-      }
-      if (!s.envKeys.includes(name)) { console.log(`  未发现用户环境变量: ${name}（跳过）`); continue }
-      const d = spawnSync('reg', ['delete', 'HKCU\\Environment', '/v', name, '/f'], { encoding: 'utf8' })
-      if (d.status === 0) console.log(`  已删除用户环境变量: ${name}`)
-      else console.warn(`  删除用户环境变量 ${name} 失败（reg exit=${d.status}，可能仅存在于当前会话环境），请人工处理`)
-    }
-    console.log('  提示：已运行中的宿主会话读不到删除结果，需重启宿主/终端后生效。')
-    return
-  }
-  const s = scanResidues()
+/** 公共 rc 清理器：win32 与非 win32 共用同一份实现，避免「扫描/清理/检测不同源」二次漂移。
+ *  备份取「原文但凭据行掩码」（非凭据行原样保留可回滚，凭据行以注释掩码标注位置）；
+ *  写回保留原 CRLF/BOM（按 '\n' 分割后各行尾部 '\r' 与首行 BOM 原样带入），
+ *  旧版本留下的含凭据 .bak-grapemcp-* 备份一并删除。 */
+function cleanRcResidues(s) {
   let changed = false
   for (const hit of s.rcHits) {
     const lines = readFileSync(hit.path, 'utf8').split('\n')
@@ -2351,6 +2334,33 @@ function cleanEnvVars() {
     changed = true
   }
   if (!changed) console.log('  未在 shell 配置文件发现 GRAPE_API_TOKEN/GRAPE_BASE_URL 导出行（跳过）')
+  return changed
+}
+
+/** 删除用户级环境变量：POSIX 精确删 rc 中的 export 行，Windows 用 reg delete。
+ *  Issue #38：win32 处理完注册表后不再提前 return，继续走同一份 rc 清理器——
+ *  Git Bash 读的是 USERPROFILE 下的 rc，注册表与 rc 是两条并列通道，必须按同一口径清干净。
+ *  platform/homeDir 可注入仅供测试缝（默认取进程平台与 homedir()）。 */
+function cleanEnvVars({ platform = process.platform, homeDir = homedir() } = {}) {
+  const s = scanResidues({ platform, homeDir })
+  if (platform === 'win32') {
+    // QA 判断项：win32 不得自行 reg query，必须读 scanResidues() 单一扫描结果（与残留提示同源）。
+    // 扫描已包含「process.env 命中」与「HKCU\Environment 注册表命中」；删除失败必须可见，不吞错。
+    for (const name of CREDENTIAL_ENV_KEYS) {
+      const unreadable = s.regErrors.find((e) => e.key === name)
+      // 查询失败 ≠ 不存在：不得报「未发现（跳过）」蒙混过去（QA#PR13 判断项 4）
+      if (unreadable && !s.envKeys.includes(name)) {
+        console.warn(`  无法确认用户环境变量 ${name} 是否存在（${unreadable.detail}），请人工核对 HKCU\\Environment`)
+        continue
+      }
+      if (!s.envKeys.includes(name)) { console.log(`  未发现用户环境变量: ${name}（跳过）`); continue }
+      const d = spawnSync('reg', ['delete', 'HKCU\\Environment', '/v', name, '/f'], { encoding: 'utf8' })
+      if (d.status === 0) console.log(`  已删除用户环境变量: ${name}`)
+      else console.warn(`  删除用户环境变量 ${name} 失败（reg exit=${d.status}，可能仅存在于当前会话环境），请人工处理`)
+    }
+    console.log('  提示：已运行中的宿主会话读不到删除结果，需重启宿主/终端后生效。')
+  }
+  cleanRcResidues(s)
 }
 
 /** 清理本包 npx 缓存：仅认 node_modules/@grape-dev/grape-kit 实体（scanResidues 白名单，
@@ -2576,6 +2586,17 @@ function printResidualHint() {
 
 /* ---------- main ---------- */
 
+/** 测试缝：扫描/清理器可注入 { platform, homeDir }，供非 win32 宿主回归 win32 路径。
+ *  导出不改变直接执行行为（main 由 invokedDirectly 门禁）。 */
+export { rcTargets, scanResidues, cleanRcResidues, cleanEnvVars }
+
+const invokedDirectly = (() => {
+  const entry = process.argv[1]
+  if (!entry) return false
+  try { return resolve(entry) === resolve(fileURLToPath(import.meta.url)) } catch { return false }
+})()
+
+if (invokedDirectly) {
 if (cmd === '--version' || cmd === 'version' || cmd === '-v') {
   console.log(JSON.parse(readFileSync(join(HERE, 'package.json'), 'utf8')).version)
   process.exit(0)
@@ -2676,4 +2697,5 @@ if (cmd === 'intro') {
   console.log('      node setup.mjs auth init --token <grape_...> [--base-url <url>]   凭据唯一写入入口（文件通道 + env 指引）')
   console.log('      node setup.mjs intro                   重看安装后能力地图（与宿主无关，随时可用）')
   for (const [name, host] of Object.entries(HOSTS)) console.log(`  --target ${name.padEnd(10)} ${host.label}`)
+}
 }

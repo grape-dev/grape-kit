@@ -6,6 +6,11 @@
 
 ## Unreleased
 
+### Fixed
+
+- #38 修复 Windows 上 `uninstall --clean-global` 不清理 Git Bash 读取的 rc 文件：`scanResidues()` 的 rc 扫描不再被 win32 平台门禁跳过，`cleanEnvVars()` 的 win32 分支处理完注册表后继续走与非 win32 共用的 `cleanRcResidues()`（掩码备份 + 写回 + 旧含凭据备份删除），`.bashrc` / `.bash_profile` / `config.fish` 三种形态按同一口径清理，备份不含明文凭据、写回保留原 CRLF/BOM。
+- #38 修正 `doctor` 无凭据时的 `(FAIL)` 误导读法：`GRAPE_API_TOKEN` token 行与「当前生效凭据来源」改为「未设置（需配置凭据）」/「未配置（需先配置凭据）」等措辞，仍保持 `[!!]` 分类与 `exit=0`，配置解析失败档仍以 `解析失败` 可辨识。
+
 ## 0.5.1 (2026-11-25)
 
 > **0.5.1-next.0 转正版**。next 通道回归（Linux @next 装机 + 474/474 单测 + stdio 冒烟 50 工具 + 真实调用）与 #23 Windows 11 实机回填均已完成（#23 实测记录见其评论；其中 win32 rc 文件清理分叉已登记转 fix 流程，不阻塞本版）。
