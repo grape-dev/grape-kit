@@ -95,14 +95,14 @@ test('CHANGELOG 版本节与 npm 已发布记录完全一致（倒序，无 0.2.
     PUBLISHED.map(([v]) => v),
     '已发布版本集合与顺序应与 npm 记录一致（倒序）',
   )
-  assert.equal(all[0].version, PUBLISHED[0][0], '最新发布版本节应排在首位')
+  assert.equal(published[0].version, PUBLISHED[0][0], '首个已发布节应为最新 npm 版本（候选节排在已发布节之前）')
   assert.ok(!all.some((s) => s.version === '0.2.3'), '0.2.3 未在 npm 发布，不得补造')
-  // 非 npm 版本节只允许是尚未发布的 dev 候选版本，且必须排在全部已发布节之前
+  // 非 npm 版本节只允许是尚未发布的 dev 候选版本（含预发布号，如 next 通道候选），且必须排在全部已发布节之前
   const firstPublished = all.findIndex((s) => PUBLISHED.some(([v]) => v === s.version))
   all.forEach((s, i) => {
     if (PUBLISHED.some(([v]) => v === s.version)) return
     assert.ok(i < firstPublished, `未发布版本节 ${s.version} 应位于已发布节之前`)
-    assert.match(s.version, /^0\.\d+\.\d+$/, `未发布节版本号应形如 0.x.y：${s.version}`)
+    assert.match(s.version, /^0\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/, `未发布节版本号应形如 0.x.y 或 0.x.y-next.N：${s.version}`)
   })
 })
 
@@ -179,7 +179,7 @@ test('README 版本历史节链接 CHANGELOG.md、含 0.3.3/0.3.6/0.3.7/0.3.8/0.
   assert.ok(row033, '版本历史表应含 0.3.3 行')
   assert.match(row033, /\| 2026-11-18 \|/, '0.3.3 日期应为 npm 发布日 2026-11-18')
 
-  assert.match(section, /22 条发布记录/, '发布记录计数应为 22（npm 已发布 21 + 0.5.0，含 0.0.0-stage 占位包）')
+  assert.match(section, /23 条发布记录/, '发布记录计数应为 23（npm 已发布 22 + next 通道候选 0.5.1-next.0，含 0.0.0-stage 占位包）')
   assert.ok(!/12 个已发布版本|12 条发布记录/.test(section), '不得再写「12 个已发布版本」')
 })
 

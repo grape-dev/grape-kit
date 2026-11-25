@@ -6,16 +6,18 @@
 
 ## Unreleased
 
+## 0.5.1-next.0 (2026-11-25)
+
+> **npm next 通道候选版**：以 `npm publish --tag next` 发布——latest 仍指 0.5.0，`npm i -g @grape-dev/grape-kit` 默认不落本版。转正 0.5.1 stable 的条件：真机 `@next` 回归通过 + #23 Windows 11 回填后另行批准。
+
 ### Added
 
 - git 写回闭环（#31）：`grape_git_credential`（tko_ 换一次性本仓券，GIT_ASKPASS 0600，过期自检、无静默回退、symlink 与 exclude 复核）与 `grape_create_pull`（只建 PR）；`takeover_finish` coding 交回 branch/commit/PR 校验与 askpass 清理。工具面 48→50。
-
-### Added
-
 - `grape_takeover_start` 物化平台下发的 `bundle.assets.skill`（#28）：接管建立后把节点技能落到本地工作区 `<cwd>/.grape-takeover-skills/<skill>/`（`SKILL.md` + `references/*`），渲染给出 `技能已物化：<path>` + 文件数 + 是否含 references——接管 prompt 里「技能已物化，直接读 SKILL.md」由指引变成事实。内联 `files`（数组或「路径→内容」映射）与 `zip_url` 两种下发都支持（zip 走 `zlib.inflateRawSync` 零依赖解压，仅 store/deflate，剥离 `<skill>/` 顶层前缀）；物化幂等覆盖，重复接管不叠加文件。
 - 物化安全面：技能名白名单 `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`（拒 `.` / `..` / `.skills` / 分隔符与盘符，非法即拒绝、不归一化），条目路径拒 `..`、绝对路径、反斜杠与盘符、`.skills` 段（大小写/尾点归一后比较），逐级 `lstat` 拒符号链接（含 zip 的 `S_IFLNK` 条目）并做落盘前缀校验；恒不写 `.skills/`（worker 会 rmtree 该目录）。zip 解压在 inflate 前按 `usize` 预检剩余额度并传 `maxOutputLength` 封顶（64MB），解压后校验长度与 CRC-32，压缩比无法绕过上限。
-- 客户端 capabilities 握手（Issue #32）：`grape_takeover_start` 接管前调 `GET /api/health` 读取服务端 `version` + `capabilities[]`，兼容 `string[]` / `{name:boolean}` / `{name:{supported:boolean}}` 三种形状；`CLIENT_CAPABILITIES` 随握手上报 `skills.multi=true`（新服务端可在 session 建立时拦截未声明支持的旧客户端）。节点 required 技能数 > 1 且服务端未声明 `skills.multi` 时 fail-closed：稳定错误码 `CAPABILITY_REFUSED` + required 技能、服务端版本/能力来源/握手时间与三条升级指引，判据可追溯到本次握手；旧服务端仅允许单技能，单技能路径行为不变。
-- 节点 required 技能数 > 1 且服务端未声明 `skills.multi` 时 **fail-closed**：返回结构化拒绝体（首行 `**接管已被拒绝：E_CAP_UNSUPPORTED_MULTI_SKILL**`），含 required 技能、服务端版本、已声明能力、能力来源、握手时间与三条升级指引（升级服务端 / 升级 kit / 改为单技能节点）；拒绝时不发起 takeover 请求，不再静默只跑 `skills[0]`。
+- 客户端 capabilities 握手（Issue #32）：`grape_takeover_start` 接管前调 `GET /api/health` 读取服务端 `version` + `capabilities[]`，兼容 `string[]` / `{name:boolean}` / `{name:{supported:boolean}}` 三种形状；`CLIENT_CAPABILITIES` 随握手上报 `skills.multi=true`（新服务端可在 session 建立时拦截未声明支持的旧客户端）。节点 required 技能数 > 1 且服务端未声明 `skills.multi` 时 **fail-closed**：返回结构化拒绝体（稳定错误码 `E_CAP_UNSUPPORTED_MULTI_SKILL`，首行「**接管已被拒绝：E_CAP_UNSUPPORTED_MULTI_SKILL**」），含 required 技能、服务端版本、已声明能力、能力来源、握手时间与三条升级指引（升级服务端 / 升级 kit / 改为单技能节点），判据可追溯到本次握手；拒绝时不发起 takeover 请求，不再静默只跑 `skills[0]`。旧服务端仅允许单技能，单技能路径行为不变。
+- 旧服务端（`/api/health` 404 或缺字段）与网络失败按 `source=unknown`、`capabilities=[]` 处理，不伪造能力、不做长负缓存（下次调用重试）；TTL 过期后重取失败回退 `stale-cache` 并保留上一份真实握手结果。单技能 + 旧服务端行为不变。
+- `takeover_bundle.v2` 与 `skills.multi` 正交：v2 只描述 bundle 结构，不隐含多技能支持；客户端唯一判据是 `skills.multi`。
 - `normalizeSkills()` 技能清单解析单一入口（`skills[]` > `assets.skill` > `env.GRAPE_BOUND_SKILL`），供 #28 复用。
 
 ### Changed
@@ -33,8 +35,6 @@
 - `grape_get_skill_detail` 不再静默截断 SKILL.md：常规体量（≤64KB，按 UTF-8 字节）**全文直出**（去掉旧的 `slice(0, 3000)`）；超过 64KB 时把正文**逐字节**写入 `os.tmpdir()` 下的临时文件（保留不删，供调用方读全文），返回文件路径 + 前 2000 字预览，并显式标注「已截断，全文在 `<path>`（共 N 字节）」。`grape_get_knowledge_detail` 的同类截断不在本次范围（单测 270→273）。
 
 ## 0.5.0 (2026-11-25)
-- 旧服务端（`/api/health` 404 或缺字段）与网络失败按 `source=unknown`、`capabilities=[]` 处理，不伪造能力、不做长负缓存（下次调用重试）；TTL 过期后重取失败回退 `stale-cache` 并保留上一份真实握手结果。单技能 + 旧服务端行为不变。
-- `takeover_bundle.v2` 与 `skills.multi` 正交：v2 只描述 bundle 结构，不隐含多技能支持；客户端唯一判据是 `skills.multi`。
 
 ### Added
 
