@@ -6,7 +6,14 @@
 
 ## Unreleased
 
+### Added
+
+- `grape_takeover_start` 物化平台下发的 `bundle.assets.skill`（#28）：接管建立后把节点技能落到本地工作区 `<cwd>/.grape-takeover-skills/<skill>/`（`SKILL.md` + `references/*`），渲染给出 `技能已物化：<path>` + 文件数 + 是否含 references——接管 prompt 里「技能已物化，直接读 SKILL.md」由指引变成事实。内联 `files`（数组或「路径→内容」映射）与 `zip_url` 两种下发都支持（zip 走 `zlib.inflateRawSync` 零依赖解压，仅 store/deflate，剥离 `<skill>/` 顶层前缀）；物化幂等覆盖，重复接管不叠加文件。
+- 物化安全面：技能名白名单 `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`（拒 `.` / `..` / `.skills` / 分隔符与盘符，非法即拒绝、不归一化），条目路径拒 `..`、绝对路径、反斜杠与盘符、`.skills` 段（大小写/尾点归一后比较），逐级 `lstat` 拒符号链接（含 zip 的 `S_IFLNK` 条目）并做落盘前缀校验；恒不写 `.skills/`（worker 会 rmtree 该目录）。zip 解压在 inflate 前按 `usize` 预检剩余额度并传 `maxOutputLength` 封顶（64MB），解压后校验长度与 CRC-32，压缩比无法绕过上限。
+
 ### Changed
+
+- 接管渲染新增「技能物化」段：`ok` 给落盘路径、`legacy`（旧平台未下发技能包）与 `failed` 各给显式 warning，失败不作废已建立的接管会话。
 
 - `grape_takeover_finish` 派发判据对齐平台真实返回（#30）：已派发 = `handoff.seq>0` 或 `handoff.reason=already_dispatched`；平台不回填的 `next_seq`（恒 0）降级为辅助展示信号，不再据此误判「未派发」而重复补发/误告警。双判据缺失时以本轮 `handoff_seq` 为事件下界回读 issue 事件，只认本轮之后且非 `failed` 的下一节点 `a2a_event`，历史轮次/失败事件不再被当成本轮已派发。旧字段 `handoff_seq` 与结构化 `handoff.seq` 不同源，仅见 `handoff_seq` 时先回读核实、不直接判已派发。
 - 兜底派发范围由硬编码 `coding→qa` 改为按**场景链 `next`** 推导（缺省取场景接口 `scenes detail` 的节点 `next`，支持自定义链如 coding→review→sre）；响应未带链且场景接口不可用时不猜默认链、落 `pending` 待人工确认；场景链之外节点名仍原样上报、落 `pending` 待人工裁决；部署类节点（`sre`）保留用户确认门、不自动派发。`grape_takeover_status` 渲染与 finish 复用同一判据函数，口径不再漂移。
