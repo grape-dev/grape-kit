@@ -6,16 +6,25 @@
 
 ## Unreleased
 
+### Added
+
+- 客户端 capabilities 握手（Issue #32）：`grape_takeover_start` 接管前调 `GET /api/health` 读取服务端 `version` + `capabilities[]`，兼容 `string[]` / `{name:boolean}` / `items[]` 三种形态；进程内缓存 TTL 300s（`GRAPE_CAPABILITIES_TTL_MS` 可覆盖，`GRAPE_CAPABILITIES_REFRESH=1` 强制刷新）。握手请求声明 `client_capabilities`（`skills.multi=true`），供新服务端拦截未声明支持的旧客户端。
+- 节点 required 技能数 > 1 且服务端未声明 `skills.multi` 时 **fail-closed**：返回结构化拒绝体（首行 `**接管已被拒绝：E_CAP_UNSUPPORTED_MULTI_SKILL**`），含 required 技能、服务端版本、已声明能力、能力来源、握手时间与三条升级指引（升级服务端 / 升级 kit / 改为单技能节点）；拒绝时不发起 takeover 请求，不再静默只跑 `skills[0]`。
+- `normalizeSkills()` 技能清单解析单一入口（`skills[]` > `assets.skill` > `env.GRAPE_BOUND_SKILL`），供 #28 复用。
+
 ### Changed
 
 - `grape_takeover_finish` 派发判据对齐平台真实返回（#30）：已派发 = `handoff.seq>0` 或 `handoff.reason=already_dispatched`；平台不回填的 `next_seq`（恒 0）降级为辅助展示信号，不再据此误判「未派发」而重复补发/误告警。双判据缺失时以本轮 `handoff_seq` 为事件下界回读 issue 事件，只认本轮之后且非 `failed` 的下一节点 `a2a_event`，历史轮次/失败事件不再被当成本轮已派发。旧字段 `handoff_seq` 与结构化 `handoff.seq` 不同源，仅见 `handoff_seq` 时先回读核实、不直接判已派发。
 - 兜底派发范围由硬编码 `coding→qa` 改为按**场景链 `next`** 推导（缺省取场景接口 `scenes detail` 的节点 `next`，支持自定义链如 coding→review→sre）；响应未带链且场景接口不可用时不猜默认链、落 `pending` 待人工确认；场景链之外节点名仍原样上报、落 `pending` 待人工裁决；部署类节点（`sre`）保留用户确认门、不自动派发。`grape_takeover_status` 渲染与 finish 复用同一判据函数，口径不再漂移。
 - 事件回读增加 `issueEvents` 存在性守卫与 `total` 截断检测：api 模块缺该函数或分页截断时落 `pending`，不再误判「无事件」重复派发。
+- `grape_takeover_start` 成功路径的 render 披露 `capabilities: <version> [..]（来源 server）| 判据：通过（required=N）`，判据可追溯到本次握手；工具 description 补能力依赖与拒绝错误码说明。
 
 ### Fixed
 
 - `grape_get_skill_detail` 不再静默截断 SKILL.md：常规体量（≤64KB，按 UTF-8 字节）**全文直出**（去掉旧的 `slice(0, 3000)`）；超过 64KB 时把正文**逐字节**写入 `os.tmpdir()` 下的临时文件（保留不删，供调用方读全文），返回文件路径 + 前 2000 字预览，并显式标注「已截断，全文在 `<path>`（共 N 字节）」。`grape_get_knowledge_detail` 的同类截断不在本次范围（单测 270→273）。
 - #30 修复 `next_seq` 恒 0 导致的「派发未证实」误告警与重复补发；补发响应缺事件 `seq` 仍判未证实、不冒充成功。
+- 旧服务端（`/api/health` 404 或缺字段）与网络失败按 `source=unknown`、`capabilities=[]` 处理，不伪造能力、不做长负缓存（下次调用重试）；TTL 过期后重取失败回退 `stale-cache` 并保留上一份真实握手结果。单技能 + 旧服务端行为不变。
+- `takeover_bundle.v2` 与 `skills.multi` 正交：v2 只描述 bundle 结构，不隐含多技能支持；客户端唯一判据是 `skills.multi`。
 
 ## 0.4.0 (2026-11-23)
 

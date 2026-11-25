@@ -166,6 +166,7 @@ export async function apiRequest(method, path, opts = {}) {
       headers: {
         Authorization: `Bearer ${token}`,
         'Content-Type': 'application/json',
+        ...(opts.headers || {}),
       },
       body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
       signal: ctrl.signal,
@@ -194,6 +195,32 @@ export async function apiRequest(method, path, opts = {}) {
   return json
 }
 
+/**
+ * 客户端能力声明（Issue #32）：随握手请求上报，供新服务端在 session 建立时
+ * 拦截未声明支持的旧客户端。当前 kit 已支持多技能渲染/判据，故声明 skills.multi。
+ */
+export const CLIENT_CAPABILITIES = { 'skills.multi': true }
+
+/**
+ * `GET /api/health` 握手（Issue #32）：5s 超时；404（旧服务端尚未提供）与网络不可达
+ * 返回 `{ reachable:false }` 而非抛错，交由 capabilities 层归一化为 unknown。
+ * 401 等其余错误照常上抛，由 capabilities 层统一兜底为 unknown。
+ */
+export async function health(opts = {}) {
+  try {
+    return await apiRequest('GET', '/api/health', {
+      timeoutMs: opts.timeoutMs ?? 5000,
+      env: opts.env,
+      headers: { 'X-Grape-Client-Capabilities': 'skills.multi=true' },
+    })
+  } catch (e) {
+    if (e instanceof GrapeApiError && (e.status === 404 || e.status === 0)) {
+      return { reachable: false, status: e.status, error: e.message }
+    }
+    throw e
+  }
+}
+
 /* ── 端点封装：与 tools.mjs 的 31 个工具一一对应 ─────────────── */
 
 /** A2A 节点枚举：与平台 pipelines.json 的 agent tag 对齐 */
@@ -216,6 +243,9 @@ export function normalizeTriggerAgent(agent) {
 }
 
 export const api = {
+  // 握手 / 能力发现（Issue #32）
+  health: (opts) => health(opts),
+
   // 流水线
   triggerPipeline: async (owner, repo, issueNumber, context = '', agent) => {
     const a = normalizeTriggerAgent(agent)

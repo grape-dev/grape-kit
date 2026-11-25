@@ -34,6 +34,7 @@ agent (MCP stdio: opencode / CodeArts / WorkBuddy / dsh…; other MCP-capable ag
 - **Cloud-local collaboration** (v0.3.2+ core): **takeover sessions** atomically hand cloud nodes (e.g. coding) over to your agent — a `tko_` credential (12h) plus the full context bundle (prompt/env/workspace/skill/history) come back; your agent works locally and reports progress. Hand-back is two-phase: `request-finish` only reports completion, and after you confirm **in the conversation** the `finish` call hands back the structured result (the pipeline chain never breaks).
   - **Credential semantics**: `tko_` is repo_session-only (keep working the node / report progress, **no git credential injection**). `request-finish` works with `tko_`, but the final `finish` **requires a user-level credential (`grape_`)**; calling `finish` with `tko_` returns 403 by design. There is no UI confirm button — confirmation happens only in your chat with the agent.
   - Platform requirement: weekly-11+; older platforms fall back to the legacy read-only context automatically. Full sequence: [docs/20261114-takeover-architecture.md](docs/20261114-takeover-architecture.md)
+  - **Capability handshake & multi-skill fail-closed** (Issue #32): before a takeover the client handshakes `GET /api/health` for the server `version` + `capabilities[]` (cached in-process for 300s; `GRAPE_CAPABILITIES_TTL_MS` overrides, `GRAPE_CAPABILITIES_REFRESH=1` forces a refresh). When a node requires more than one skill and the server does not declare `skills.multi`, `grape_takeover_start` **refuses** with the stable code `E_CAP_UNSUPPORTED_MULTI_SKILL` plus required skills, server version, supported capabilities, capability source, handshake time and three remediation steps — it never silently runs only the first skill. Old servers (404 / missing fields) are treated as single-skill only; the single-skill path is unchanged. `takeover_bundle.v2` does **not** imply `skills.multi`; the only client criterion is `skills.multi`. The handshake also declares `client_capabilities` (`skills.multi=true`) so newer servers can reject old clients.
 - **Scenes & repos**: list_scenes · apply_scene · host_repo · sync_repos · managed/member repos · project templates · project-info
 - **Search, knowledge & skills**: search (all/event/repo/agent) · skills ×3 · knowledge ×2 · dashboard
   - `grape_get_skill_detail` returns the **full** SKILL.md (the old 3000-char cut is gone); above **64KB (UTF-8 bytes)** the body is written **byte-for-byte** to a temp file and only a 2000-char preview plus an explicit `已截断，全文在 <path>` notice (with the byte count) comes back.
@@ -219,7 +220,7 @@ Full release notes: [CHANGELOG.md](CHANGELOG.md) — 21 条发布记录（含 0.
 ```bash
 npm install
 
-npm test        # 273 unit tests (fake-grape stand-in, no real server needed)
+npm test        # 288 unit tests (fake-grape stand-in, no real server needed)
 
 npm run smoke   # real stdio JSON-RPC round-trip: initialize → tools/list → tools/call
 ```
