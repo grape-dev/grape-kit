@@ -221,7 +221,7 @@ npx -y @grape-dev/grape-kit intro     # 随时重看能力地图
 ```bash
 npm install
 
-npm test        # 301 个单测（fake-grape 替身，不依赖真实服务端）
+npm test        # 326 个单测（fake-grape 替身，不依赖真实服务端）
 
 npm run smoke   # 真实 stdio JSON-RPC 往返：initialize → tools/list → tools/call
 ```
