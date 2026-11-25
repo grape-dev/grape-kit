@@ -105,22 +105,24 @@ sequenceDiagram
 
 平台 `finish` 返回 `next_agent=qa` 但 `handoff_seq=0`（#62 实测：事件终态 completed、qa 无事件、`stall_state=grace`）时，链会静默停住。kit 侧 `grape_takeover_finish` 对交回结果做三态收口，保证「链不断」不只是一句描述。
 
-**判据唯一（#30 对齐平台真实返回）**：下一节点已派发 = `handoff.seq>0` **或** `handoff.reason=already_dispatched`。平台 finish 不回填 `next_seq`（实测恒 0），故 `next_seq` 降级为辅助展示信号、不单独构成已派发证据。双判据缺失时先回读 issue 事件，确认下一节点无 `a2a_event` 才补发；补发结果必须带回事件 `seq`，否则落待派发。
+**判据唯一（#30 对齐平台真实返回）**：下一节点已派发 = `handoff.seq>0` **或** `handoff.reason=already_dispatched`。平台 finish 不回填 `next_seq`（实测恒 0），故 `next_seq` 降级为辅助展示信号、不单独构成已派发证据。双判据缺失时以本轮 `handoff_seq`（交回/handoff 事件序号）为**事件下界**回读 issue 事件，只认 `seq >= 下界` 且 `status != failed` 的下一节点 `a2a_event`——历史轮次与失败事件不得当成本轮已派发；无满足条件的事件才补发，补发结果必须带回事件 `seq`，否则落待派发。旧字段 `handoff_seq` 语义为「交回事件序号」、与结构化 `handoff.seq` 不同源，**仅见 `handoff_seq` 时先回读核实，不直接判已派发**。
 
 | 交回结果 | kit 行为 | 渲染 |
 |---|---|---|
 | `handoff.seq>0` 或 `handoff.reason=already_dispatched`（无论 `next_seq` 取值） | 平台已派发，**不重复派发、不告警** | `已派发（handoff.seq=N / reason）` |
-| 双判据缺失 + 事件回读无下一节点 `a2a_event`，无阻塞 | **兜底补发**一次 A2A（复用 trigger 同源 `/api/a2a`），目标按**场景链 `next`** 推导（自定义链 coding→review→sre 同样生效） | `已自动派发（seq=N）` |
-| 双判据缺失 + 事件回读已命中下一节点 `a2a_event` | 视为已派发，**不补发** | `已派发（事件 seq=N）` |
-| `remote_may_still_run` 等警告码、`skipped_dispatches>0`、缺 owner/repo/issue_number 标识、事件回读失败、补发失败 | 不瞎派：`dispatch.status=pending` + `pending_dispatch{agent,owner,repo,issue_number,reason}` 随交回结果返回。**标记不走 task_messages**——finish 在服务端同步关会话，事后向已结束会话写 progress 必 409 not_active（mgmt 路由实测）；标记由**会话记录派生**：`grape_takeover_status` 对已结束会话仍可查，`finished + next_agent + 未见 handoff.seq/already_dispatched` 即派发未证实，渲染给出目标/原因/补发指引 | 显式告警 + `grape_trigger_pipeline(agent=…)` 补发指引（补发前先 `grape_get_issue_events` 核实，防兜底已成功时重复派发） |
+| 仅 `handoff_seq>0`（无结构化证据） | 以 `handoff_seq` 为下界回读本轮事件：命中本轮 `a2a_event` 判已派发；仅历史/`failed` 事件则补发 | `已派发（事件 seq=N）` / `已自动派发（seq=N）` |
+| 双判据缺失 + 事件回读无本轮下一节点 `a2a_event`，无阻塞 | **兜底补发**一次 A2A（复用 trigger 同源 `/api/a2a`），目标按**场景链 `next`** 推导（场景接口 `scenes detail` 的节点 `next`，自定义链 coding→review→sre 同样生效） | `已自动派发（seq=N）` |
+| 场景链不可用 / 当前节点不在链内（无法按 `next` 推导） | **不猜默认链**，落待派发待人工核实 | `无法按场景链推导（未派发）` |
+| 下一节点为部署/发布类（`sre`/`deploy`） | **保留用户确认门**，不自动派发 | `部署类需用户确认后派发` |
+| `remote_may_still_run` 等警告码、`skipped_dispatches>0`、缺 owner/repo/issue_number 标识、事件回读失败/截断、补发失败 | 不瞎派：`dispatch.status=pending` + `pending_dispatch{agent,owner,repo,issue_number,reason}` 随交回结果返回。**标记不走 task_messages**——finish 在服务端同步关会话，事后向已结束会话写 progress 必 409 not_active（mgmt 路由实测）；标记由**会话记录派生**：`grape_takeover_status` 对已结束会话仍可查，`finished + next_agent + 未见 handoff.seq/already_dispatched` 即派发未证实，渲染给出目标/原因/补发指引 | 显式告警 + `grape_trigger_pipeline(agent=…)` 补发指引（补发前先 `grape_get_issue_events` 核实，防兜底已成功时重复派发） |
 
 **交回成功度前置（未成功不派发）**：上表的兜底只在交回**本身成功**之后才有意义。平台返回 `ok=false`（可达面：`200 + ok:false`，以及 `401` 经 CLI 回退包装成 `ok:false`）或 `changed=false`（未真正落账）时，kit **不派发**下一节点——否则下一节点会接手一个未交回的任务，属「部分成功当全部成功」的同一类错；此时落 `dispatch.status=pending`、渲染「交回未成功」、标题写「交回未完成」，不再输出「链不断／无需手动 trigger」。
 
-**「未给」与「不认识」是两件事**：平台 `next_agent` 为空或缺省 → 按场景链 `next` 兜底（默认链 vod→issue→coding→qa→sre，也支持交回结果/会话携带的自定义链）；平台给了**场景链之外**节点名（实测 `reviewer`）→ kit 不把平台决定顶掉改写，原样上报「未知节点」并落 `pending` 待人工裁决。`next_step` 的散文不算「给了节点名」，仍按场景链兜底。
+**「未给」与「不认识」是两件事**：平台 `next_agent` 为空或缺省 → 按场景链 `next` 兜底（链来自交回结果/会话携带的节点链，缺省取场景接口 `scenes detail` 的节点 `next`；响应未带链且场景接口不可用时**不猜默认链**、落 `pending`）；平台给了**场景链之外**节点名（实测 `reviewer`）→ kit 不把平台决定顶掉改写，原样上报「未知节点」并落 `pending` 待人工裁决。`next_step` 的散文不算「给了节点名」，仍按场景链兜底。
 
 **补发未证实不判成功**：兜底 A2A 响应缺事件 `seq`（200 形态 `{}`）时 `dispatch.status=pending`（`cause=dispatch_unconfirmed`），转人工查事件核实——不渲染 `seq=0`、不宣称「已自动派发」。
 
-**派发目标口径**：`issue_number` 才是单号；平台 `/tasks` 的 `issue.id`（#19 实测 `18808`）是内部主键，**不能**当 `issue_number` 兜底，否则派发会打到错误 issue。会话未带仓库标识时用 `owner`/`repo`/`issue_number` 入参补齐；场景链尾（如 sre）返回 `no_next_node`，属正常收尾。场景链推导不再依赖当前节点白名单：`vod→issue`、`qa→sre` 等链上节点均可兜底派发。
+**派发目标口径**：`issue_number` 才是单号；平台 `/tasks` 的 `issue.id`（#19 实测 `18808`）是内部主键，**不能**当 `issue_number` 兜底，否则派发会打到错误 issue。会话未带仓库标识时用 `owner`/`repo`/`issue_number` 入参补齐；场景链尾（节点 `next=done`）返回 `no_next_node`，属正常收尾；部署类节点（`sre`）不自动派发，保留用户确认门。场景链推导不再依赖当前节点白名单：`vod→issue`、`qa→sre` 等链上节点均可按 `next` 推导。
 
 **待派发的阻塞判据**：只认警告**稳定码**（`remote_may_still_run` / `branch_conflict` / `merge_conflict`，取 `code:` 前缀精确匹配）。不匹配散文子串——「branch_sync: 远端无冲突」含「冲突」二字但不阻塞；平台 warnings 是稳定 code 列表，按码匹配不漏不误伤。
 

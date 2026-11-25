@@ -8,8 +8,9 @@
 
 ### Changed
 
-- `grape_takeover_finish` 派发判据对齐平台真实返回（#30）：已派发 = `handoff.seq>0` 或 `handoff.reason=already_dispatched`；平台不回填的 `next_seq`（恒 0）降级为辅助展示信号，不再据此误判「未派发」而重复补发/误告警。双判据缺失时先回读 issue 事件，确认下一节点无 `a2a_event` 才补发。
-- 兜底派发范围由硬编码 `coding→qa` 改为按**场景链 `next`** 推导（默认 vod→issue→coding→qa→sre，支持交回结果/会话携带的自定义链如 coding→review→sre）；场景链之外节点名仍原样上报、落 `pending` 待人工裁决。`grape_takeover_status` 渲染与 finish 复用同一判据函数，口径不再漂移。
+- `grape_takeover_finish` 派发判据对齐平台真实返回（#30）：已派发 = `handoff.seq>0` 或 `handoff.reason=already_dispatched`；平台不回填的 `next_seq`（恒 0）降级为辅助展示信号，不再据此误判「未派发」而重复补发/误告警。双判据缺失时以本轮 `handoff_seq` 为事件下界回读 issue 事件，只认本轮之后且非 `failed` 的下一节点 `a2a_event`，历史轮次/失败事件不再被当成本轮已派发。旧字段 `handoff_seq` 与结构化 `handoff.seq` 不同源，仅见 `handoff_seq` 时先回读核实、不直接判已派发。
+- 兜底派发范围由硬编码 `coding→qa` 改为按**场景链 `next`** 推导（缺省取场景接口 `scenes detail` 的节点 `next`，支持自定义链如 coding→review→sre）；响应未带链且场景接口不可用时不猜默认链、落 `pending` 待人工确认；场景链之外节点名仍原样上报、落 `pending` 待人工裁决；部署类节点（`sre`）保留用户确认门、不自动派发。`grape_takeover_status` 渲染与 finish 复用同一判据函数，口径不再漂移。
+- 事件回读增加 `issueEvents` 存在性守卫与 `total` 截断检测：api 模块缺该函数或分页截断时落 `pending`，不再误判「无事件」重复派发。
 
 ### Fixed
 
