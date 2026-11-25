@@ -409,3 +409,38 @@ test('Optional：进程重启（registry 为空）时 finish 传入 workspace �
     rmSync(ws, { recursive: true, force: true })
   }
 })
+
+/* ── Issue #37：换券会话根对齐 workspace 解析优先级（云端 cwd_hint 不再锁死本地接管） ── */
+
+test('W6 云端 cwd_hint 在本机不存在时，显式 workspace 作会话根并换券落盘', async () => {
+  const ws = tmpWs()
+  const cloud = join(tmpdir(), `gk-cloud-${Date.now()}-nonexistent`)
+  try {
+    const j = await runCred(
+      { session_id: 'tkos_1', owner: 'acme', repo: 'demo', workspace: ws },
+      { apiModule: fakeApi({ __ws: cloud }), now: () => NOW, platform: 'linux' },
+    )
+    assert.ok(existsSync(askpassOf(ws)), '显式 workspace 在云端 hint 下必须可落盘')
+    assert.equal(j.workspace, ws)
+    assert.equal(j.session_root, ws, '本机视角的会话根 = 显式 workspace')
+    assert.match(j.session_root_note, /云端 cwd_hint/, '应披露 cwd_hint 因本机不存在被忽略')
+  } finally { rmSync(ws, { recursive: true, force: true }) }
+})
+
+test('W7 本机存在的 cwd_hint 仍作越界边界：工作区外路径拒绝且不落盘', async () => {
+  const root = tmpWs()
+  const outside = tmpWs()
+  try {
+    await assert.rejects(
+      runCred(
+        { session_id: 'tkos_1', owner: 'acme', repo: 'demo', workspace: outside },
+        { apiModule: fakeApi({ __ws: root }), now: () => NOW, platform: 'linux' },
+      ),
+      (e) => /工作区/.test(e.message),
+    )
+    assert.ok(!existsSync(join(outside, '.grape')), '越界目录不得生成文件')
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+    rmSync(outside, { recursive: true, force: true })
+  }
+})
