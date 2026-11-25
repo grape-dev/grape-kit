@@ -233,3 +233,29 @@ test('Issue #38 uninstall --clean-global：rc 首行凭据 + BOM + CRLF，清理
   assert.equal(text.charCodeAt(0), 0xFEFF, '用户可见：rc 的 BOM 不得因首行被删而丢失')
   assert.equal(text, '\uFEFFexport PATH=$PATH:/bin\r\n', '无关行与 CRLF 必须原样保留')
 })
+
+/* ── 切片 5：扫描侧平台门禁回归（QA 复审判断项 1：门禁在 grape-kit.mjs 的 scanResidues，不在本模块） ──
+ * 上面 4 条模块用例即便把 scanResidues 的 rc 段还原成旧 `if (process.platform !== 'win32') { … }`
+ * 也照样全绿（模块本身无门禁）——#38 的扫描半边修复此前没有任何断言能挡回退。这里用 CLI 端到端
+ * 覆盖：GRAPE_KIT_PLATFORM=win32 时注册表通道与 rc 通道必须同时生效，任一被门禁挡住即红。 */
+
+test('Issue #38 扫描侧无平台门禁：强制 win32 端到端同时走注册表与 rc 两条通道', skipOnWin, () => {
+  const h = home()
+  writeFileSync(join(h, '.bashrc'), 'export GRAPE_API_TOKEN=grape_scan_gate\n')
+  const env = {
+    ...process.env, HOME: h, GRAPE_HOME: '', GRAPE_AUTH_FILE: '', DSH_HOME: '',
+    GRAPE_API_TOKEN: '', GRAPE_BASE_URL: '',
+    GRAPE_KIT_PLATFORM: 'win32',
+  }
+
+  const plan = spawnSync(process.execPath, [SETUP, 'uninstall', '--clean-global', '--dry-run'], { encoding: 'utf8', cwd: h, env, timeout: 30_000 })
+  assert.equal(plan.status, 0, `${plan.stdout}\n${plan.stderr}`)
+  assert.match(plan.stdout, /reg delete 用户级注册表项|无法确认注册表项/, '预览按注入平台走 win32 口径（cleanGlobalPlan 与 scanResidues 同一平台判定）')
+  assert.match(plan.stdout, /将从 .*\.bashrc 删除 1 行/, '预览必须看到 rc 命中（rc 扫描无平台门禁）')
+
+  const r = spawnSync(process.execPath, [SETUP, 'uninstall', '--clean-global'], { encoding: 'utf8', cwd: h, env, timeout: 30_000 })
+  assert.equal(r.status, 0, `${r.stdout}\n${r.stderr}`)
+  assert.doesNotMatch(readFileSync(join(h, '.bashrc'), 'utf8'), /GRAPE_API_TOKEN\s*=/, '强制 win32 下 rc 凭据行必须被清理（扫描无门禁 + 清理不提前 return）')
+  assert.match(r.stdout, /宿主会话读不到删除结果/, 'win32 第一条通道（注册表）必须被执行，不得只清 rc')
+  assert.match(r.stdout, /无法确认用户环境变量 GRAPE_API_TOKEN/, '非 win32 宿主上强制 win32：reg 不可用必须如实点名（不谎报零残留）')
+})
