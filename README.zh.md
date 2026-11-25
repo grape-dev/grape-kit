@@ -38,6 +38,9 @@ agent 宿主（MCP stdio：opencode / CodeArts / WorkBuddy / dsh…；其他 MCP
 - **场景与仓库**：场景列表（市场 / 仓库副本）· 应用场景（建仓库副本，可选设默认）· 设仓库默认场景（决定新建需求走哪条流水线）· 托管仓库 · 同步仓库 · 项目模板 · 项目信息
 - **搜索、知识与技能**：全局搜索（all/event/repo/agent）· 技能 ×6（列表/搜索/详情 + **上传/升级/跨 scope 复制**：本地预检、自动打 ZIP 带顶层目录、服务端 errors 全量透出）· 知识 ×2 · 仪表盘
   - `grape_get_skill_detail` 返回 **SKILL.md 全文**（去掉旧的 3000 字截断）；超过 **64KB（UTF-8 字节）** 时把正文**逐字节**写入临时文件，只返回 2000 字预览并显式标注「已截断，全文在 <path>」（含字节数）。
+  - **能力握手与多技能 fail-closed**（Issue #32）：接管前先握手 `GET /api/health` 读取服务端 `version` + `capabilities[]`（进程内缓存 300s；`GRAPE_CAPABILITIES_TTL_MS` 可覆盖，`GRAPE_CAPABILITIES_REFRESH=1` 强制刷新）。节点 required 技能数 > 1 且服务端未声明 `skills.multi` 时，`grape_takeover_start` **拒绝接管**并返回稳定错误码 `E_CAP_UNSUPPORTED_MULTI_SKILL`，附 required 技能、服务端版本、已声明能力、能力来源、握手时间与三条升级指引——绝不静默只跑第一个技能。旧服务端（404 / 缺字段）视同仅支持单技能，单技能路径行为不变。`takeover_bundle.v2` **不隐含** `skills.multi`，客户端唯一判据是 `skills.multi`。握手请求同时声明 `client_capabilities`（`skills.multi=true`），供新服务端拦截旧客户端。
+- **场景与仓库**：场景列表 · 应用场景 · 托管仓库 · 同步仓库 · 项目模板 · 项目信息
+- **搜索、知识与技能**：全局搜索 · 技能 ×3 · 知识库 ×2 · 看板
 - **Worker 接入**：把本机注册为 grape 执行引擎（`grape_worker_onboard`）
 - **自管理**（v0.4.1+）：`grape_kit_version`（版本全景：本地 kit 版本 / npm 最新版 / grape CLI / 服务端连通性与契约版本 / 凭据来源）与 `grape_kit_check_update`（更新检查，支持 `dismiss` 3 天冷却）进程内只读直执行；`grape_kit_upgrade` / `grape_kit_install` / `grape_kit_uninstall` **只生成可复制命令**（自动识别安装形态：全局 npm / npx 缓存 / ClawHub / 项目本地依赖）——工具本身不执行任何变更，由用户确认后手动执行。只生成命令，无静默执行。
 
@@ -300,6 +303,7 @@ npx -y @grape-dev/grape-kit intro     # 随时重看能力地图
 npm install
 
 npm test        # 430 个单测（fake-grape 替身，不依赖真实服务端）
+npm test        # 288 个单测（fake-grape 替身，不依赖真实服务端）
 
 npm run smoke   # 真实 stdio JSON-RPC 往返：initialize → tools/list → tools/call
 ```

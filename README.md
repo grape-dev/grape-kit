@@ -38,6 +38,9 @@ agent (MCP stdio: opencode / CodeArts / WorkBuddy / dsh…; other MCP-capable ag
 - **Scenes & repos**: list_scenes (market / repo copies) · apply_scene (creates the repo copy, optional set-default) · set_repo_scene (repo default = which pipeline new issues take) · host_repo · sync_repos · managed/member repos · project templates · project-info
 - **Search, knowledge & skills**: search (all/event/repo/agent) · skills ×6 (list/search/detail + **upload/update/convert**: local preflight, auto ZIP with top-level dir, full server `errors`) · knowledge ×2 · dashboard
   - `grape_get_skill_detail` returns the **full** SKILL.md (the old 3000-char cut is gone); above **64KB (UTF-8 bytes)** the body is written **byte-for-byte** to a temp file and only a 2000-char preview plus an explicit `已截断，全文在 <path>` notice (with the byte count) comes back.
+  - **Capability handshake & multi-skill fail-closed** (Issue #32): before a takeover the client handshakes `GET /api/health` for the server `version` + `capabilities[]` (cached in-process for 300s; `GRAPE_CAPABILITIES_TTL_MS` overrides, `GRAPE_CAPABILITIES_REFRESH=1` forces a refresh). When a node requires more than one skill and the server does not declare `skills.multi`, `grape_takeover_start` **refuses** with the stable code `E_CAP_UNSUPPORTED_MULTI_SKILL` plus required skills, server version, supported capabilities, capability source, handshake time and three remediation steps — it never silently runs only the first skill. Old servers (404 / missing fields) are treated as single-skill only; the single-skill path is unchanged. `takeover_bundle.v2` does **not** imply `skills.multi`; the only client criterion is `skills.multi`. The handshake also declares `client_capabilities` (`skills.multi=true`) so newer servers can reject old clients.
+- **Scenes & repos**: list_scenes · apply_scene · host_repo · sync_repos · managed/member repos · project templates · project-info
+- **Search, knowledge & skills**: search (all/event/repo/agent) · skills ×3 · knowledge ×2 · dashboard
 - **Worker onboarding**: register this machine as a grape execution engine (`grape_worker_onboard`)
 - **Self-management** (v0.4.1+): `grape_kit_version` (version panorama: local kit / npm latest / grape CLI / server reachability + contract version / credential source) and `grape_kit_check_update` (update check with a 3-day `dismiss` cooldown) run read-only in-process; `grape_kit_upgrade`, `grape_kit_install` and `grape_kit_uninstall` only **generate copy-pasteable commands** (install form detection: global npm / npx cache / ClawHub / local dependency) — the tools never execute anything, the user confirms and runs them. Command generation only, no silent execution.
 
@@ -300,6 +303,7 @@ Full release notes: [CHANGELOG.md](CHANGELOG.md) — 22 条发布记录（含 0.
 npm install
 
 npm test        # 430 unit tests (fake-grape stand-in, no real server needed)
+npm test        # 288 unit tests (fake-grape stand-in, no real server needed)
 
 npm run smoke   # real stdio JSON-RPC round-trip: initialize → tools/list → tools/call
 ```
