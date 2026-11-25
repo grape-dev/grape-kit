@@ -1,5 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { join } from 'node:path'
 import { TOOLS, findTool } from '../src/tools.mjs'
 
 /* takeover 工具组（v0.3.2，weekly-11+ PR #1268 一等接管资源）*/
@@ -268,7 +269,9 @@ test('W3 render：以本地 workspace 渲染 {{CWD}}，披露云端 hint 并本�
   assert.match(out, /云端工作区路径在本机不存在[^\n]*\/cloud\/ws/, '不一致必须显式披露')
   assert.match(out, /cd "\/local\/ws" && node run\.mjs/, '脚本占位符按本地 workspace 渲染')
   assert.match(out, /\/local\/ws\/\.grape-takeover-token/, 'AUTH_FILE 应前缀替换为本地工作区')
-  assert.ok(!out.includes('/cloud/ws/.grape-takeover-token') || /已按本地工作区重写/.test(out), '云端路径不得静默留下')
+  const authLine = out.split('\n').find((l) => l.includes('凭据文件（路径占位符已渲染）'))
+  assert.ok(authLine && authLine.includes('/local/ws/.grape-takeover-token'), '凭据文件行必须是本地路径')
+  assert.ok(authLine && !authLine.includes('/cloud/ws'), '凭据文件行不得残留云端路径')
   assert.ok(!out.includes('{{CWD}}'))
 })
 
@@ -290,4 +293,25 @@ test('W5 render：无显式 workspace 时保持 cwd_hint 旧口径（不回退�
   assert.match(out, /本地工作目录: \/cloud\/ws/)
   assert.match(out, /\/cloud\/ws\/\.grape\/config\.json/)
   assert.ok(!/云端工作区路径在本机不存在/.test(out), '一致时不得告警')
+})
+
+test('W8 AUTH_FILE 本地化：自定义绝对路径与相对路径不改写（不丢子目录、不误改用户路径）', async () => {
+  const { localizeAuthFile } = await import('../src/tools.mjs')
+  const custom = localizeAuthFile('/opt/creds/.grape-takeover-token', { workspace: '/local/ws', cwdHint: '/cloud/ws' })
+  assert.equal(custom.path, '/opt/creds/.grape-takeover-token', '自定义绝对路径不得被 basename 启发式改写')
+  assert.equal(custom.rewritten, false)
+  assert.match(custom.note, /本机可能不可读|source/)
+  const relative = localizeAuthFile('creds/.grape-takeover-token', { workspace: '/local/ws', cwdHint: '/cloud/ws' })
+  assert.equal(relative.path, 'creds/.grape-takeover-token', '相对路径不得被改写（否则丢子目录）')
+  assert.equal(relative.rewritten, false)
+  const underHint = localizeAuthFile('/cloud/ws/.grape-takeover-token', { workspace: '/local/ws', cwdHint: '/cloud/ws' })
+  assert.equal(underHint.path, join('/local/ws', '.grape-takeover-token'), 'cwd_hint 内的平台默认 token 仍应前缀替换')
+  assert.equal(underHint.rewritten, true)
+})
+
+test('W9 路径归一：Windows 盘根不丢分隔符', async () => {
+  const { resolveLocalWorkspace } = await import('../src/tools.mjs')
+  assert.equal(resolveLocalWorkspace({ workspace: 'C:\\' }), 'C:\\', '盘根 C:\\ 不得剥成 C:')
+  assert.equal(resolveLocalWorkspace({ workspace: 'C:/' }), 'C:/', '盘根 C:/ 保持')
+  assert.equal(resolveLocalWorkspace({ workspace: '/' }), '/', 'POSIX 根保持')
 })

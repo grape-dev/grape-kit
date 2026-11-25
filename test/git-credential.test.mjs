@@ -423,7 +423,9 @@ test('W6 云端 cwd_hint 在本机不存在时，显式 workspace 作会话根�
     assert.ok(existsSync(askpassOf(ws)), '显式 workspace 在云端 hint 下必须可落盘')
     assert.equal(j.workspace, ws)
     assert.equal(j.session_root, ws, '本机视角的会话根 = 显式 workspace')
+    assert.equal(j.session_boundary, 'workspace', '云端 hint 本机不存在时为降级边界')
     assert.match(j.session_root_note, /云端 cwd_hint/, '应披露 cwd_hint 因本机不存在被忽略')
+    assert.match(j.session_root_note, /没有云端工作区可作越界边界/, '必须明确降级披露无越界边界')
   } finally { rmSync(ws, { recursive: true, force: true }) }
 })
 
@@ -443,4 +445,36 @@ test('W7 本机存在的 cwd_hint 仍作越界边界：工作区外路径拒绝�
     rmSync(root, { recursive: true, force: true })
     rmSync(outside, { recursive: true, force: true })
   }
+})
+
+test('W10 cwd_hint 在本机存在且 workspace 在其内：放行、边界=hint、无降级披露', async () => {
+  const root = tmpWs()
+  const ws = join(root, 'sub')
+  mkdirSync(ws, { recursive: true })
+  try {
+    const j = await runCred(
+      { session_id: 'tkos_1', owner: 'acme', repo: 'demo', workspace: ws },
+      { apiModule: fakeApi({ __ws: root }), now: () => NOW, platform: 'linux' },
+    )
+    assert.ok(existsSync(askpassOf(ws)), 'hint 内的子目录必须可落盘')
+    assert.equal(j.session_boundary, 'hint')
+    assert.equal(j.session_root, root)
+    assert.equal(j.session_root_note, '', '正常边界场景不得出现降级披露')
+  } finally { rmSync(root, { recursive: true, force: true }) }
+})
+
+test('W11 workspace 已存在但是文件：拒绝且不落盘', async () => {
+  const root = tmpWs()
+  const file = join(root, 'not-a-dir')
+  try {
+    writeFileSync(file, 'x')
+    await assert.rejects(
+      runCred(
+        { session_id: 'tkos_1', owner: 'acme', repo: 'demo', workspace: file },
+        { apiModule: fakeApi({ __ws: '/cloud/absent' }), now: () => NOW, platform: 'linux' },
+      ),
+      /已存在但不是目录/,
+    )
+    assert.equal(readFileSync(file, 'utf8'), 'x', '拒绝时不得覆盖该文件')
+  } finally { rmSync(root, { recursive: true, force: true }) }
 })
