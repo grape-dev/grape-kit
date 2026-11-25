@@ -6,6 +6,15 @@
 
 ## Unreleased
 
+### Added
+
+- 本地接管 workspace 覆盖（#37）：`grape_takeover_start` 新增可选 `workspace`（本机绝对路径）。统一解析优先级 `args.workspace` > `bundle.workspace.cwd_hint` > `process.cwd()`（`resolveLocalWorkspace`，纯优先级、不探测存在性），技能物化目录、接管脚本 `{{CWD}}`、`GRAPE_AUTH_FILE` 均以解析出的本地路径为准，返回体带 `workspace_effective`；与云端 `cwd_hint` 不一致时渲染显式披露「云端工作区路径在本机不存在（<hint>），已改用 <本地路径>」，不静默替换。本地接管不再被云端路径锁死，且不依赖平台 #3620。
+- `GRAPE_AUTH_FILE` 本地化（#37）：`{{CWD}}` 占位符以本地 workspace 填充；位于 `cwd_hint` 根内的云端路径（含平台默认 `<hint>/.grape-takeover-token`）按前缀替换为本地 workspace；自定义绝对路径与相对路径一律不改写（相对路径不丢子目录），仅对绝对路径提示「本机可能不可读、source 前先确认」。
+
+### Fixed
+
+- `grape_git_credential` 换券会话根（#37）：改为单一解析器 `resolveCredentialSessionRoot`——`cwd_hint` 在本机存在时作可信越界边界（workspace 必须在其内，工作区外继续拒绝且不落盘），本机不存在（本地接管）时显式 workspace 即会话根并**明确降级披露**「无云端工作区可作越界边界、仅校验目录存在」，返回 `session_root` / `session_boundary` / `session_root_note`；workspace 必须是本机已存在的目录，工具描述与真实边界一致。
+
 ## 0.5.1 (2026-11-25)
 
 > **0.5.1-next.0 转正版**。next 通道回归（Linux @next 装机 + 474/474 单测 + stdio 冒烟 50 工具 + 真实调用）与 #23 Windows 11 实机回填均已完成（#23 实测记录见其评论；其中 win32 rc 文件清理分叉已登记转 fix 流程，不阻塞本版）。
