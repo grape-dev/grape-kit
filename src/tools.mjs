@@ -951,7 +951,7 @@ export const TOOLS = [
         skills: {
           type: 'array',
           description: '节点技能清单（可选）：[{name, required}] 或 ["skill-name"]；缺省时 best-effort 读取当前节点绑定技能',
-          items: { type: 'object' },
+          items: {},
         },
       },
       required: ['owner', 'repo', 'number'],
