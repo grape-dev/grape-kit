@@ -7,6 +7,7 @@ import { deflateRawSync } from 'node:zlib'
 
 import { materializeSkillAssets, validateSkillName, SKILL_ROOT_DIRNAME } from '../src/skill-materialize.mjs'
 import { findTool } from '../src/tools.mjs'
+import { api } from '../src/api.mjs'
 
 /* ── Issue #28：takeover_start 物化 assets.skill 到 <cwd>/.grape-takeover-skills/<skill>/ ──
  * seam：materializeSkillAssets（模块公开导出，可注入 fetch）+ grape_takeover_start.render（既有同步直调）*/
@@ -195,6 +196,57 @@ test('F2c zip：不支持 zip64 / 非 store-deflate 压缩方式 → failed + �
   }
 })
 
+/* ── F2d-F2f 解压上限与完整性（复审 Required） ── */
+
+const cdOffsetOf = (buf) => buf.readUInt32LE(buf.length - 22 + 16)
+
+test('F2d zip：单条目声明解压体积超上限 → usize 预检直接 failed（不进入 inflate 大分配）', async () => {
+  const cwd = tmp()
+  try {
+    const buf = buildZip([{ name: 'bomb/SKILL.md', data: '# ok', method: 'store' }])
+    buf.writeUInt32LE(64 * 1024 * 1024 + 1, cdOffsetOf(buf) + 24) // 中央目录 usize 谎报为 64MB+1
+    const r = await materializeSkillAssets({ skill: 'bomb', zip_url: 'u' }, cwd, { fetchImpl: zipFetch(buf) })
+    assert.equal(r.status, 'failed')
+    assert.match(r.reason, /额度|上限|超限/)
+    assert.equal(r.path, '')
+    assert.deepEqual(readdirSync(cwd), [])
+  } finally {
+    drop(cwd)
+  }
+})
+
+test('F2e zip：usize 谎报偏小、实际膨胀超全局上限 → inflate maxOutputLength 兜底 failed', async () => {
+  const cwd = tmp()
+  try {
+    const big = Buffer.alloc(64 * 1024 * 1024 + 1024, 0x61)
+    const buf = buildZip([{ name: 'bomb/SKILL.md', data: big, method: 'deflate' }])
+    buf.writeUInt32LE(1024, cdOffsetOf(buf) + 24) // 声明 1KB，实际 64MB+
+    const r = await materializeSkillAssets({ skill: 'bomb', zip_url: 'u' }, cwd, { fetchImpl: zipFetch(buf) })
+    assert.equal(r.status, 'failed')
+    assert.match(r.reason, /deflate 解压失败|Buffer|上限|超限/i)
+    assert.equal(r.path, '')
+    assert.deepEqual(readdirSync(cwd), [])
+  } finally {
+    drop(cwd)
+  }
+})
+
+test('F2f zip：条目内容与 CRC 不符 → failed（损坏/截断内容不得落盘）', async () => {
+  const cwd = tmp()
+  try {
+    const buf = buildZip([{ name: 'crc/SKILL.md', data: 'abcdef', method: 'store' }])
+    const i = buf.indexOf(Buffer.from('abcdef'))
+    assert.ok(i > 0, '测试夹具应包含正文字节')
+    buf[i] = 0x41 // 内容 'A'bcdef，长度不变、CRC 不符
+    const r = await materializeSkillAssets({ skill: 'crc', zip_url: 'u' }, cwd, { fetchImpl: zipFetch(buf) })
+    assert.equal(r.status, 'failed')
+    assert.match(r.reason, /CRC/)
+    assert.deepEqual(readdirSync(cwd), [])
+  } finally {
+    drop(cwd)
+  }
+})
+
 /* ── F3 三态之三：legacy ── */
 
 test('F3 legacy：无 assets.skill 不落盘、不抛错，显式返回 legacy + 原因（技能名回退 env.GRAPE_BOUND_SKILL）', async () => {
@@ -316,6 +368,20 @@ test('E5 zip 条目标记为符号链接（S_IFLNK）被拒绝解压', async () 
   }
 })
 
+test('E6 条目路径 .SKILLS / .skills. 等大小写与尾点变体一律拒绝（Windows/macOS 文件系统不敏感）', async () => {
+  const cwd = tmp()
+  try {
+    for (const bad of ['.SKILLS/x', '.Skills/x', '.skills./x']) {
+      const r = await materializeSkillAssets({ skill: 'variant', files: [{ path: bad, content: 'pwn' }] }, cwd)
+      assert.equal(r.status, 'failed', `${bad} 应被拒绝`)
+      assert.match(r.reason, /\.skills/i)
+    }
+    assert.deepEqual(readdirSync(cwd), [], '拒绝时盘上零副作用')
+  } finally {
+    drop(cwd)
+  }
+})
+
 /* ── Z 其他边界 ── */
 
 test('Z1 assets.skill 既无 files 也无 zip_url → failed（不静默当 legacy）', async () => {
@@ -350,6 +416,32 @@ test('Z2 validateSkillName：白名单边界（首字符字母数字、64 上限
   assert.equal(validateSkillName('a b').ok, false)
   assert.equal(validateSkillName('-lead').ok, false)
   assert.equal(validateSkillName('a\\b').ok, false)
+})
+
+test('Z2b native wiring：takeover_start 按 bundle.workspace.cwd_hint 物化并挂 skillMaterialization；detail 跳过物化', async () => {
+  const cwd = tmp()
+  const original = api.takeoverStart
+  try {
+    api.takeoverStart = async () => ({
+      takeover_id: 'tkos_wire',
+      bundle: {
+        workspace: { cwd_hint: cwd },
+        assets: { skill: { skill: 'coding-cli', files: [{ path: 'SKILL.md', content: '# wired' }] } },
+      },
+    })
+    const tool = findTool('grape_takeover_start')
+    const json = await tool.native({ owner: 'o', repo: 'r', number: 1 })
+    assert.equal(json.skillMaterialization.status, 'ok', json.skillMaterialization.reason)
+    assert.equal(json.skillMaterialization.path, join(real(cwd), SKILL_ROOT_DIRNAME, 'coding-cli'))
+    assert.equal(readFileSync(join(cwd, SKILL_ROOT_DIRNAME, 'coding-cli', 'SKILL.md'), 'utf8'), '# wired')
+
+    api.takeoverStart = async () => ({ detail: '会话不存在' })
+    const err = await tool.native({ owner: 'o', repo: 'r', number: 1 })
+    assert.equal(err.skillMaterialization, undefined, 'detail 失败体不物化')
+  } finally {
+    api.takeoverStart = original
+    drop(cwd)
+  }
 })
 
 /* ── R 渲染（同步纯函数，直接读结果字段） ── */
