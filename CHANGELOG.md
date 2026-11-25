@@ -6,9 +6,16 @@
 
 ## Unreleased
 
+### Changed
+
+- `grape_takeover_finish` 派发判据对齐平台真实返回（#30）：已派发 = `handoff.seq>0` 或 `handoff.reason=already_dispatched`；平台不回填的 `next_seq`（恒 0）降级为辅助展示信号，不再据此误判「未派发」而重复补发/误告警。双判据缺失时以本轮 `handoff_seq` 为事件下界回读 issue 事件，只认本轮之后且非 `failed` 的下一节点 `a2a_event`，历史轮次/失败事件不再被当成本轮已派发。旧字段 `handoff_seq` 与结构化 `handoff.seq` 不同源，仅见 `handoff_seq` 时先回读核实、不直接判已派发。
+- 兜底派发范围由硬编码 `coding→qa` 改为按**场景链 `next`** 推导（缺省取场景接口 `scenes detail` 的节点 `next`，支持自定义链如 coding→review→sre）；响应未带链且场景接口不可用时不猜默认链、落 `pending` 待人工确认；场景链之外节点名仍原样上报、落 `pending` 待人工裁决；部署类节点（`sre`）保留用户确认门、不自动派发。`grape_takeover_status` 渲染与 finish 复用同一判据函数，口径不再漂移。
+- 事件回读增加 `issueEvents` 存在性守卫与 `total` 截断检测：api 模块缺该函数或分页截断时落 `pending`，不再误判「无事件」重复派发。
+
 ### Fixed
 
 - `grape_get_skill_detail` 不再静默截断 SKILL.md：常规体量（≤64KB，按 UTF-8 字节）**全文直出**（去掉旧的 `slice(0, 3000)`）；超过 64KB 时把正文**逐字节**写入 `os.tmpdir()` 下的临时文件（保留不删，供调用方读全文），返回文件路径 + 前 2000 字预览，并显式标注「已截断，全文在 `<path>`（共 N 字节）」。`grape_get_knowledge_detail` 的同类截断不在本次范围（单测 270→273）。
+- #30 修复 `next_seq` 恒 0 导致的「派发未证实」误告警与重复补发；补发响应缺事件 `seq` 仍判未证实、不冒充成功。
 
 ## 0.4.0 (2026-11-23)
 
