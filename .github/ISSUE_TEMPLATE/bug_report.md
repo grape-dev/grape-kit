@@ -34,7 +34,8 @@ labels: bug
 
 ## 已尝试的自检
 
-- [ ] `npm run smoke`（48 tools 是否全通过）
+- [ ] `npm run smoke`（50 tools 是否全通过）
+0c1ec3f (feat(#31): git 写回受控工具（换券+GIT_ASKPASS）与 coding 交回校验（工具面 39→41）)
 - [ ] `grape-kit doctor`
 - [ ] 确认凭据走环境变量 `GRAPE_API_TOKEN`，未写死在任何配置文件
 - [ ] 已在最新版本上复现（`npm i -g @grape-dev/grape-kit@latest`）

@@ -23,11 +23,11 @@ Grape-kit helps **mainstream agents** (opencode / CodeArts / WorkBuddy / dsh / o
 
 ```
 agent (MCP stdio: opencode / CodeArts / WorkBuddy / dsh…; other MCP-capable agents wire up manually)
-  → grape-kit (48 tools · native HTTP · Markdown rendering · initialize-instruction bootstrap)
+  → grape-kit (50 tools · native HTTP · Markdown rendering · initialize-instruction bootstrap)
     → grape server (pipelines / events / takeover session API; CLI only as 401 fallback)
 ```
 
-## Capabilities (48 tools)
+## Capabilities (50 tools)
 
 - **Pipeline control**: trigger (the only A2A entry) · wait_task · task status · cancel/resume with decision gates
 - **Issues & events**: list/detail/events/my-issues · create · structured hand-back templates
@@ -164,7 +164,7 @@ npx -y @grape-dev/grape-kit install --target dsh          # re-assembly after up
 npx -y @grape-dev/grape-kit uninstall --target dsh        # removes the managed block + skill copy only
 ```
 
-> dsh uses the **MCP minimal path** (all 48 tools reused unchanged). The full native Cordis plugin lives in [grape-dsh](https://gitcode.com/grape-dev/grape-dsh); the two coexist.
+> dsh uses the **MCP minimal path** (all 50 tools reused unchanged). The full native Cordis plugin lives in [grape-dsh](https://gitcode.com/grape-dev/grape-dsh); the two coexist.
 
 ### Codex CLI
 
@@ -224,7 +224,7 @@ npx -y @grape-dev/grape-kit uninstall --target trae
 openclaw plugins install clawhub:grape-kit@latest
 ```
 
-The `clawhub:` prefix is the source (matching devkit's listing form). Verify with the plugin's MCP tools list (48 tools). Marketplace page: https://clawhub.ai/grape-dev/plugins/grape-kit
+The `clawhub:` prefix is the source (matching devkit's listing form). Verify with the plugin's MCP tools list (50 tools). Marketplace page: https://clawhub.ai/grape-dev/plugins/grape-kit
 
 Alternatively, register the MCP server directly with the file-based installer (no marketplace needed):
 
@@ -302,8 +302,7 @@ Full release notes: [CHANGELOG.md](CHANGELOG.md) — 22 条发布记录（含 0.
 ```bash
 npm install
 
-npm test        # 430 unit tests (fake-grape stand-in, no real server needed)
-npm test        # 288 unit tests (fake-grape stand-in, no real server needed)
+npm test        # 473 unit tests (fake-grape stub, no live server)
 
 npm run smoke   # real stdio JSON-RPC round-trip: initialize → tools/list → tools/call
 ```

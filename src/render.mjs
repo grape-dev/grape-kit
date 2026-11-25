@@ -20,6 +20,26 @@ export function fallbackJson(data) {
   try { return '```json\n' + JSON.stringify(data, null, 2).slice(0, 8000) + '\n```' } catch { return String(data) }
 }
 
+/**
+ * 凭据掩码（Issue #31）：只保留首尾各 2 位，长度 ≤6 一律全掩。
+ * 渲染层唯一入口——任何工具都不得把明文口令拼进输出/注释/评论。
+ */
+export function maskSecret(secret) {
+  const s = String(secret ?? '')
+  if (!s) return ''
+  if (s.length <= 6) return '****'
+  return `${s.slice(0, 2)}****${s.slice(-2)}`
+}
+
+/** 到期 epoch → 可读时间（UTC ISO；同时保留 epoch 便于脚本比对） */
+export function formatEpoch(epoch) {
+  const n = Number(epoch)
+  if (!Number.isFinite(n) || n <= 0) return '-'
+  const d = new Date(n * 1000)
+  if (Number.isNaN(d.getTime())) return String(n)
+  return `${d.toISOString().replace('.000Z', 'Z')}（UTC）`
+}
+
 export function mdTable(rows, columns) {
   if (!rows || !rows.length) return '_（空）_'
   const head = `| ${columns.map((c) => c.h).join(' | ')} |`

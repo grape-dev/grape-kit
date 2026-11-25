@@ -8,6 +8,10 @@
 
 ### Added
 
+- git 写回闭环（#31）：`grape_git_credential`（tko_ 换一次性本仓券，GIT_ASKPASS 0600，过期自检、无静默回退、symlink 与 exclude 复核）与 `grape_create_pull`（只建 PR）；`takeover_finish` coding 交回 branch/commit/PR 校验与 askpass 清理。工具面 48→50。
+
+### Added
+
 - `grape_takeover_start` 物化平台下发的 `bundle.assets.skill`（#28）：接管建立后把节点技能落到本地工作区 `<cwd>/.grape-takeover-skills/<skill>/`（`SKILL.md` + `references/*`），渲染给出 `技能已物化：<path>` + 文件数 + 是否含 references——接管 prompt 里「技能已物化，直接读 SKILL.md」由指引变成事实。内联 `files`（数组或「路径→内容」映射）与 `zip_url` 两种下发都支持（zip 走 `zlib.inflateRawSync` 零依赖解压，仅 store/deflate，剥离 `<skill>/` 顶层前缀）；物化幂等覆盖，重复接管不叠加文件。
 - 物化安全面：技能名白名单 `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`（拒 `.` / `..` / `.skills` / 分隔符与盘符，非法即拒绝、不归一化），条目路径拒 `..`、绝对路径、反斜杠与盘符、`.skills` 段（大小写/尾点归一后比较），逐级 `lstat` 拒符号链接（含 zip 的 `S_IFLNK` 条目）并做落盘前缀校验；恒不写 `.skills/`（worker 会 rmtree 该目录）。zip 解压在 inflate 前按 `usize` 预检剩余额度并传 `maxOutputLength` 封顶（64MB），解压后校验长度与 CRC-32，压缩比无法绕过上限。
 - 客户端 capabilities 握手（Issue #32）：`grape_takeover_start` 接管前调 `GET /api/health` 读取服务端 `version` + `capabilities[]`，兼容 `string[]` / `{name:boolean}` / `{name:{supported:boolean}}` 三种形状；`CLIENT_CAPABILITIES` 随握手上报 `skills.multi=true`（新服务端可在 session 建立时拦截未声明支持的旧客户端）。节点 required 技能数 > 1 且服务端未声明 `skills.multi` 时 fail-closed：稳定错误码 `CAPABILITY_REFUSED` + required 技能、服务端版本/能力来源/握手时间与三条升级指引，判据可追溯到本次握手；旧服务端仅允许单技能，单技能路径行为不变。

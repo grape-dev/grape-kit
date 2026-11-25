@@ -8,9 +8,9 @@
 
 ## 验证
 
-- [ ] `npm ci && npm test` 全绿（单测数以实际输出为准，不写死）
-- [ ] `npm run smoke` 通过（期望 48 tools）
-- [ ] 涉及工具面变化 → 已同步 `README.md` / `README.zh.md` / `CHANGELOG.md` / `CONTRIBUTING.md` / 本模板 / `.github/ISSUE_TEMPLATE/bug_report.md`
+- [ ] `npm ci && npm test` 全绿
+- [ ] `npm run smoke` 通过（期望 50 tools）
+- [ ] 涉及工具面变化 → 已同步 `README.md` / `README.zh.md` / `CHANGELOG.md`
 - [ ] 未提交任何真实凭据、内网地址或个人敏感信息
 
 ## 风险与回滚

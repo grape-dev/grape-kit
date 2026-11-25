@@ -31,14 +31,14 @@ export const INSTRUCTIONS = `Grape DevOps 流水线遥控（多 agent：vod→is
 2. 技能 scope：user 级技能不能绑进 repo 级场景（平台 403 级拦截）。先 \`grape_convert_skill\` 复制成 repo 技能，再改节点 skill_id。
    上传/升级用 \`grape_upload_skill\` / \`grape_update_skill\`：本地预检 frontmatter 与 ZIP 顶层目录，服务端 errors 全量透出。
 3. 端云接管：\`takeover_start\` 只能对准**当前活跃节点**（409 agent_mismatch 时按 60-120s 轮询再试）。
-   \`tko_\` 只覆盖 repo_session、**不含 git 凭据注入**；request-finish 可用 tko_；正式 \`finish\` 必须用**用户级凭据**（\`grape_\`）且只在用户确认后执行。
+   \`tko_\` 只覆盖 repo_session、**不含 git 凭据注入**；洁净机器用 \`grape_git_credential\` 换一次性本仓券（600s）写 GIT_ASKPASS（0600，过期自检提示重新换券，无静默回退）后 push，PR 用 \`grape_create_pull\`；request-finish 可用 tko_；正式 \`finish\` 必须用**用户级凭据**（\`grape_\`）且只在用户确认后执行；派发判据 = \`handoff.seq>0\` 或 \`handoff.reason=already_dispatched\`，\`next_seq\` 恒 0 仅辅助。
 
 执行纪律：
 - 触发后用 \`grape_wait_task\` 等终态（默认 300s）；长任务改 \`grape_get_task_status\` 复查，别死等。
 - 写动作一律以**回读**为准：应用场景后列仓库场景；设默认后读 dev_scene；建单后读 issue 详情；交回后看 handoff 与事件。
 - 403 分两类：tk_ 专属端点（review-pass / review-reject / confirm-done）属通道边界，**不要重试**，改用 WebUI 或请用户执行；
   仓库未纳管导致的 403（无权对该仓库发起 A2A）先用 \`grape_host_repo\` 纳管（需用户确认）。
-- 事件是事实源：QA 打回与评论从 \`grape_get_issue_events\` 读；下一节点是否已派发看 \`next_seq\` 与 issue 事件，别重复派发。
+- 事件是事实源：QA 打回与评论从 \`grape_get_issue_events\` 读；下一节点是否已派发看 \`handoff.seq\` 与 issue 事件（\`next_seq\` 恒 0 不作判据），别重复派发。
 8. 自管理属用户决策层：grape_kit_version / grape_kit_check_update 只读直执行（check_update 的 dismiss 只写本地忽略状态文件）；grape_kit_upgrade / grape_kit_install / grape_kit_uninstall **只生成命令、工具本身不执行任何变更**——必须先把命令块与影响范围交给用户，获得确认后再由用户（或用户允许的终端）执行。`
 
 /**

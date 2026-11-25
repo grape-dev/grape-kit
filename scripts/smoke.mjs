@@ -78,7 +78,7 @@ try {
 
   const tools = await rpc('tools/list', {})
   console.log(`[ok] tools/list: ${tools.tools.length} tools`)
-  if (tools.tools.length !== 48) throw new Error(`期望 48 个工具，实际 ${tools.tools.length}`)
+  if (tools.tools.length !== 50) throw new Error(`期望 50 个工具，实际 ${tools.tools.length}`)
   // 自管理五工具（Issue #27）必须在 tools/list 里可见——缺一个就是工具面回退
   for (const name of ['grape_kit_version', 'grape_kit_check_update', 'grape_kit_upgrade', 'grape_kit_install', 'grape_kit_uninstall']) {
     if (!tools.tools.some((t) => t.name === name)) throw new Error(`tools/list 缺 ${name}`)
