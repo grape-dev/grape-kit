@@ -8,6 +8,13 @@ import { apiRequest, api, resolveCredentials, hintFor, hostInfo } from '../src/a
 import { findTool } from '../src/tools.mjs'
 
 /*
+ * 接管任务由平台注入 GRAPE_SCENE_ID（takeover.py 组 env 时写入）；#30 起 kit 不再内置
+ * 默认场景链猜链，场景链用例必须显式提供场景。这里按真实任务环境建模，避免 CI 无 env
+ * 时把「场景链兜底」误判为失败。
+ */
+process.env.GRAPE_SCENE_ID = process.env.GRAPE_SCENE_ID || 'custom-test-scene'
+
+/*
  * 真实平台契约回归（Issue #12 补强）
  *
  * 几条用例刻意用「平台真实响应形状」而不是手搓的友好形状：
