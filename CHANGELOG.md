@@ -6,6 +6,12 @@
 
 ## Unreleased
 
+暂无待发布变更。下一开发周期的用户可见变更先落本段（按 Added / Changed / Fixed 归类，见 CONTRIBUTING §7），发版时并入对应版本节。
+
+## 0.4.0-next.0 (2026-11-25, dist-tag: next)
+
+> 发布口径：本版走 npm **next** 预发布通道（`npm publish --tag next`）；`latest` 仍指 stable **0.3.11**，`npm i -g @grape-dev/grape-kit` 的用户不受影响，仅显式 `@grape-dev/grape-kit@next` 拉取者拿到本版。后续转正版本号将用 **0.4.1**（npm 已存在 0.4.0 号，避免同号不同内容）。
+
 ### Added
 
 - **场景三段式工具面**（修复宿主实测 P3/P4/P5 的静默失败）：`grape_apply_scene` 改为走 `POST /api/scenes/market/{id}/apply` 在仓库内**创建场景副本**（响应带 `scene_id=custom-xxxxxxxx`），应用后**回读** `GET /api/scenes?repo=` 确认副本存在；输入只认市场数字 id 或场景名，未命中即本地拒绝（不再让服务端静默回落 `default`），`custom-` 副本 id 直接引导到新工具。`set_default=true` 时再调 `POST …/default-scene` 完成「设为仓库默认」。

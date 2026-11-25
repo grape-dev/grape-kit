@@ -1,6 +1,6 @@
 {
   "name": "@grape-dev/grape-kit",
-  "version": "0.4.0",
+  "version": "0.4.0-next.0",
   "description": "Grape DevOps pipeline tools for coding agents — native HTTP transport (zero Python required), grape CLI optional. Turn any Git project into an AI-driven workflow, right inside your terminal agent.",
   "type": "module",
   "main": "src/server.mjs",
