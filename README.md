@@ -36,6 +36,7 @@ agent (MCP stdio: opencode / CodeArts / WorkBuddy / dsh…; other MCP-capable ag
   - Platform requirement: weekly-11+; older platforms fall back to the legacy read-only context automatically. Full sequence: [docs/20261114-takeover-architecture.md](docs/20261114-takeover-architecture.md)
 - **Scenes & repos**: list_scenes · apply_scene · host_repo · sync_repos · managed/member repos · project templates · project-info
 - **Search, knowledge & skills**: search (all/event/repo/agent) · skills ×3 · knowledge ×2 · dashboard
+  - `grape_get_skill_detail` returns the **full** SKILL.md (the old 3000-char cut is gone); above **64KB (UTF-8 bytes)** the body is written **byte-for-byte** to a temp file and only a 2000-char preview plus an explicit `已截断，全文在 <path>` notice (with the byte count) comes back.
 - **Worker onboarding**: register this machine as a grape execution engine (`grape_worker_onboard`)
 
 ## Quick Start
@@ -218,7 +219,7 @@ Full release notes: [CHANGELOG.md](CHANGELOG.md) — 21 条发布记录（含 0.
 ```bash
 npm install
 
-npm test        # 270 unit tests (fake-grape stand-in, no real server needed)
+npm test        # 273 unit tests (fake-grape stand-in, no real server needed)
 
 npm run smoke   # real stdio JSON-RPC round-trip: initialize → tools/list → tools/call
 ```

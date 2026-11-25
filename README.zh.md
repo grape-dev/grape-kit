@@ -36,6 +36,7 @@ agent 宿主（MCP stdio：opencode / CodeArts / WorkBuddy / dsh…；其他 MCP
   - 平台要求 weekly-11+；旧平台自动回退只读上下文。完整时序：[docs/20261114-takeover-architecture.md](docs/20261114-takeover-architecture.md)
 - **场景与仓库**：场景列表 · 应用场景 · 托管仓库 · 同步仓库 · 项目模板 · 项目信息
 - **搜索、知识与技能**：全局搜索 · 技能 ×3 · 知识库 ×2 · 看板
+  - `grape_get_skill_detail` 返回 **SKILL.md 全文**（去掉旧的 3000 字截断）；超过 **64KB（UTF-8 字节）** 时把正文**逐字节**写入临时文件，只返回 2000 字预览并显式标注「已截断，全文在 <path>」（含字节数）。
 - **Worker 接入**：把本机注册为 grape 执行引擎（`grape_worker_onboard`）
 
 ## 快速开始
@@ -218,7 +219,7 @@ npx -y @grape-dev/grape-kit intro     # 随时重看能力地图
 ```bash
 npm install
 
-npm test        # 270 个单测（fake-grape 替身，不依赖真实服务端）
+npm test        # 273 个单测（fake-grape 替身，不依赖真实服务端）
 
 npm run smoke   # 真实 stdio JSON-RPC 往返：initialize → tools/list → tools/call
 ```

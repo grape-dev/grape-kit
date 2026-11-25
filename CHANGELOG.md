@@ -6,7 +6,9 @@
 
 ## Unreleased
 
-暂无待发布变更。下一开发周期的用户可见变更先落本段（按 Added / Changed / Fixed 归类，见 CONTRIBUTING §7），发版时并入对应版本节。
+### Fixed
+
+- `grape_get_skill_detail` 不再静默截断 SKILL.md：常规体量（≤64KB，按 UTF-8 字节）**全文直出**（去掉旧的 `slice(0, 3000)`）；超过 64KB 时把正文**逐字节**写入 `os.tmpdir()` 下的临时文件（保留不删，供调用方读全文），返回文件路径 + 前 2000 字预览，并显式标注「已截断，全文在 `<path>`（共 N 字节）」。`grape_get_knowledge_detail` 的同类截断不在本次范围（单测 270→273）。
 
 ## 0.4.0 (2026-11-23)
 
