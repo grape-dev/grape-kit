@@ -25,7 +25,7 @@ export const INSTRUCTIONS = `Grape DevOps 流水线遥控（多 agent：vod→is
 4. token 作用域：当前走用户级 GRAPE_API_TOKEN；git-repo 类会话命令不可用（403 属预期）。
 5. grape_get_issue_events 是云端打回/评论的事件回环入口：PR 被 QA 打回时从这里发现。
 6. 命令面不止这些工具时，优先用已注册工具；未经确认不要构造任何删除/终止类操作。
-7. 接管（takeover）：tko_ 仅 repo_session、不含 git 凭据注入；finish 必须用用户级凭据且仅在用户对话确认后执行；finish 交回后由 kit 确保下一节点派发（判据是派发指针 next_seq：next_seq>0 已派发不重复；next_seq=0 时按 coding→qa 兜底补发并回填 next_seq；无法派发时返回 pending_dispatch 待派发标记——标记随交回结果返回，平台对已结束会话拒绝 progress 写入（409 not_active），事后经 grape_takeover_status 复查会话记录即可见派发指针缺失，需按提示补发）；takeover_start 只能对准当前活跃节点，409 agent_mismatch 时按 60-120s 轮询再试。`
+7. 接管（takeover）：tko_ 仅 repo_session、不含 git 凭据注入——洁净机器用 grape_git_credential 换一次性本仓券（600s）写 GIT_ASKPASS（0600，过期自检提示重新换券，无静默回退），PR 用 grape_create_pull；finish 必须用用户级凭据且仅在用户对话确认后执行；finish 交回后由 kit 确保下一节点派发（判据是派发指针 next_seq：next_seq>0 已派发不重复；next_seq=0 时按 coding→qa 兜底补发并回填 next_seq；无法派发时返回 pending_dispatch 待派发标记——标记随交回结果返回，平台对已结束会话拒绝 progress 写入（409 not_active），事后经 grape_takeover_status 复查会话记录即可见派发指针缺失，需按提示补发）；takeover_start 只能对准当前活跃节点，409 agent_mismatch 时按 60-120s 轮询再试。`
 
 /**
  * 创建 server 实例（依赖注入便于测试）。

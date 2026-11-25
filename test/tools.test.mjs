@@ -5,22 +5,26 @@ import { tmpdir } from 'node:os'
 import { TOOLS, toolDefs, findTool } from '../src/tools.mjs'
 import * as R from '../src/render.mjs'
 
-test('工具面共 39 个且命名规范', () => {
-  assert.equal(TOOLS.length, 39)
+test('工具面共 41 个且命名规范', () => {
+  assert.equal(TOOLS.length, 41)
   for (const t of TOOLS) {
     assert.match(t.name, /^grape_[a-z_]+$/)
     assert.ok(t.description.length >= 12, `${t.name} 描述过短`)
     assert.equal(t.schema.type, 'object')
   }
-  assert.equal(toolDefs().length, 39)
+  assert.equal(toolDefs().length, 41)
   assert.ok(findTool('grape_trigger_pipeline'))
   assert.equal(findTool('nope'), null)
 })
 
 test('高危/越权命令不在工具面', () => {
   const names = new Set(TOOLS.map((t) => t.name))
-  for (const banned of ['terminate', 'delete', 'remove', 'git_repo', 'credential', 'token']) {
+  for (const banned of ['terminate', 'delete', 'remove', 'git_repo', 'token']) {
     assert.ok(![...names].some((n) => n.includes(banned)), `工具面不应含 ${banned}`)
+  }
+  // Issue #31：credential 收窄为「一次性本仓券」单一入口，其它 credential 形态仍不得暴露
+  for (const n of names) {
+    if (n.includes('credential')) assert.equal(n, 'grape_git_credential', `credential 只允许 grape_git_credential，实际 ${n}`)
   }
 })
 

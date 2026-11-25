@@ -76,7 +76,7 @@ try {
 
   const tools = await rpc('tools/list', {})
   console.log(`[ok] tools/list: ${tools.tools.length} tools`)
-  if (tools.tools.length !== 39) throw new Error(`期望 39 个工具，实际 ${tools.tools.length}`)
+  if (tools.tools.length !== 41) throw new Error(`期望 41 个工具，实际 ${tools.tools.length}`)
 
   const r1 = await rpc('tools/call', { name: 'grape_list_issues', arguments: { owner: 'acme', repo: 'demo' } })
   const t1 = r1.content[0].text

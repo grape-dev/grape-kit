@@ -23,11 +23,11 @@ Grape-kit helps **mainstream agents** (opencode / CodeArts / WorkBuddy / dsh / o
 
 ```
 agent (MCP stdio: opencode / CodeArts / WorkBuddy / dsh…; other MCP-capable agents wire up manually)
-  → grape-kit (39 tools · native HTTP · Markdown rendering · initialize-instruction bootstrap)
+  → grape-kit (41 tools · native HTTP · Markdown rendering · initialize-instruction bootstrap)
     → grape server (pipelines / events / takeover session API; CLI only as 401 fallback)
 ```
 
-## Capabilities (39 tools)
+## Capabilities (41 tools)
 
 - **Pipeline control**: trigger (the only A2A entry) · wait_task · task status · cancel/resume with decision gates
 - **Issues & events**: list/detail/events/my-issues · create · structured hand-back templates
@@ -35,7 +35,8 @@ agent (MCP stdio: opencode / CodeArts / WorkBuddy / dsh…; other MCP-capable ag
   - **Credential semantics**: `tko_` is repo_session-only (keep working the node / report progress, **no git credential injection**). `request-finish` works with `tko_`, but the final `finish` **requires a user-level credential (`grape_`)**; calling `finish` with `tko_` returns 403 by design. There is no UI confirm button — confirmation happens only in your chat with the agent.
   - **Skill materialization**: on takeover the platform-supplied `assets.skill` is materialized into your local workspace at `<cwd>/.grape-takeover-skills/<skill>/` (`SKILL.md` + `references/*`), and the render prints the on-disk path (`技能已物化：<path>` plus file count and whether references are included) — the takeover prompt's "skills are already materialized, read SKILL.md" stops being a promise. Both inline `files` and a `zip_url` bundle are supported (zip is extracted with Node's built-in `zlib`, zero new dependencies, store/deflate only); older platforms send no skill bundle, so the render states "not materialized" explicitly, and a failed materialization only warns — it never invalidates the established session. Skill names go through a whitelist, entries reject path traversal / absolute paths / drive letters / symlinks, and `.skills/` is never written (the worker rmtree's that directory).
   - Platform requirement: weekly-11+; older platforms fall back to the legacy read-only context automatically. Full sequence: [docs/20261114-takeover-architecture.md](docs/20261114-takeover-architecture.md)
-  - **Capability handshake & multi-skill fail-closed** (Issue #32): before a takeover the client handshakes `GET /api/health` for the server `version` + `capabilities[]` (cached in-process for 300s; `GRAPE_CAPABILITIES_TTL_MS` overrides, `GRAPE_CAPABILITIES_REFRESH=1` forces a refresh). When a node requires more than one skill and the server does not declare `skills.multi`, `grape_takeover_start` **refuses** with the stable code `E_CAP_UNSUPPORTED_MULTI_SKILL` plus required skills, server version, supported capabilities, capability source, handshake time and three remediation steps — it never silently runs only the first skill. Old servers (404 / missing fields) are treated as single-skill only; the single-skill path is unchanged. `takeover_bundle.v2` does **not** imply `skills.multi`; the only client criterion is `skills.multi`. The handshake also declares `client_capabilities` (`skills.multi=true`) so newer servers can reject old clients.
+- **Capability handshake & multi-skill fail-closed** (Issue #32): before a takeover the client handshakes `GET /api/health` for the server `version` + `capabilities[]` (cached in-process for 300s; `GRAPE_CAPABILITIES_TTL_MS` overrides, `GRAPE_CAPABILITIES_REFRESH=1` forces a refresh). When a node requires more than one skill and the server does not declare `skills.multi`, `grape_takeover_start` **refuses** with the stable code `E_CAP_UNSUPPORTED_MULTI_SKILL` plus required skills, server version, supported capabilities, capability source, handshake time and three remediation steps — it never silently runs only the first skill. Old servers (404 / missing fields) are treated as single-skill only; the single-skill path is unchanged. `takeover_bundle.v2` does **not** imply `skills.multi`; the only client criterion is `skills.multi`. The handshake also declares `client_capabilities` (`skills.multi=true`) so newer servers can reject old clients.
+  - **Git write-back** (Issue #31, clean machines with no PAT/SSH/CLI): `grape_git_credential` exchanges the takeover credential for a one-shot repo-scoped credential (600s) and writes `GIT_ASKPASS` in the workspace (`0600`, embedded expiry epoch; an expired script exits non-zero and tells you to re-exchange, with **no silent fallback** to local git/CLI credentials). `grape_create_pull` is a thin proxy over the PR endpoint (create only — no review, no merge). The credential is bound to the session repo and workspace: cross-repo or out-of-workspace paths are refused with no file written, symlinked `.grape` dirs / askpass files are rejected (no write outside the workspace), and the tool writes `/.grape/` into `.git/info/exclude` + verifies with `git check-ignore` before writing (refuses if exclusion cannot be confirmed — the 600s token must never reach remote history). `finish`/`abort` clean the askpass file up, and validated branch/commit/PR are carried into the hand-back `artifacts`.
 - **Scenes & repos**: list_scenes · apply_scene · host_repo · sync_repos · managed/member repos · project templates · project-info
 - **Search, knowledge & skills**: search (all/event/repo/agent) · skills ×3 · knowledge ×2 · dashboard
   - `grape_get_skill_detail` returns the **full** SKILL.md (the old 3000-char cut is gone); above **64KB (UTF-8 bytes)** the body is written **byte-for-byte** to a temp file and only a 2000-char preview plus an explicit `已截断，全文在 <path>` notice (with the byte count) comes back.
@@ -143,7 +144,7 @@ npx -y @grape-dev/grape-kit install --target dsh          # re-assembly after up
 npx -y @grape-dev/grape-kit uninstall --target dsh        # removes the managed block + skill copy only
 ```
 
-> dsh uses the **MCP minimal path** (all 39 tools reused unchanged). The full native Cordis plugin lives in [grape-dsh](https://gitcode.com/grape-dev/grape-dsh); the two coexist.
+> dsh uses the **MCP minimal path** (all 41 tools reused unchanged). The full native Cordis plugin lives in [grape-dsh](https://gitcode.com/grape-dev/grape-dsh); the two coexist.
 
 ### openclaw (ClawHub marketplace)
 
@@ -151,7 +152,7 @@ npx -y @grape-dev/grape-kit uninstall --target dsh        # removes the managed 
 openclaw plugins install clawhub:grape-kit@latest
 ```
 
-The `clawhub:` prefix is the source (matching devkit's listing form). Verify with the plugin's MCP tools list (39 tools). Marketplace page: https://clawhub.ai/grape-dev/plugins/grape-kit
+The `clawhub:` prefix is the source (matching devkit's listing form). Verify with the plugin's MCP tools list (41 tools). Marketplace page: https://clawhub.ai/grape-dev/plugins/grape-kit
 
 ### Version check & update (all targets)
 

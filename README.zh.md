@@ -23,11 +23,11 @@
 
 ```
 agent 宿主（MCP stdio：opencode / CodeArts / WorkBuddy / dsh…；其他 MCP 能力宿主可手动接线）
-  → grape-kit（39 工具 · 原生 HTTP 直连 · Markdown 渲染 · initialize instructions 自举）
+  → grape-kit（41 工具 · 原生 HTTP 直连 · Markdown 渲染 · initialize instructions 自举）
     → grape 服务端（流水线 / events / takeover 会话 API；CLI 仅 401 回退用）
 ```
 
-## 能力总览（39 工具）
+## 能力总览（41 工具）
 
 - **流水线遥控**：触发（唯一 A2A 入口）· 等待任务 · 任务状态 · 取消/恢复（带决策门）
 - **需求与事件**：列表/详情/事件流/我的需求 · 建单 · 结构化交回模板
@@ -35,7 +35,8 @@ agent 宿主（MCP stdio：opencode / CodeArts / WorkBuddy / dsh…；其他 MCP
   - **凭据语义**：`tko_` 仅 repo_session 能力（继续节点工作 / 回报进度，**不含 git 凭据注入**）——`request-finish` 用 tko_ 即可，但**最终 `finish` 必须用用户级凭据（`grape_`）**，tko_ 调 finish 会 403 属预期边界。平台不提供 UI 确认按钮，确认只发生在你与 Agent 的对话里。
   - **技能物化**：接管建立时把平台下发的 `assets.skill` 落到本地工作区 `<cwd>/.grape-takeover-skills/<skill>/`（`SKILL.md` + `references/*`），渲染直接给出落盘路径（`技能已物化：<path>` + 文件数 + 是否含 references）——接管 prompt 里「技能已物化，直接读 SKILL.md」由指引变成事实。内联 `files` 与 `zip_url` 两种下发都支持（zip 走 Node 原生 `zlib` 零依赖解压，仅 store/deflate）；旧平台未下发技能包时显式提示「本次未物化技能」，物化失败只告警、不作废已建立的会话。技能名过白名单、条目拒路径穿越/绝对路径/盘符/符号链接，恒不写 `.skills/`（worker 会清理该目录）。
   - 平台要求 weekly-11+；旧平台自动回退只读上下文。完整时序：[docs/20261114-takeover-architecture.md](docs/20261114-takeover-architecture.md)
-  - **能力握手与多技能 fail-closed**（Issue #32）：接管前先握手 `GET /api/health` 读取服务端 `version` + `capabilities[]`（进程内缓存 300s；`GRAPE_CAPABILITIES_TTL_MS` 可覆盖，`GRAPE_CAPABILITIES_REFRESH=1` 强制刷新）。节点 required 技能数 > 1 且服务端未声明 `skills.multi` 时，`grape_takeover_start` **拒绝接管**并返回稳定错误码 `E_CAP_UNSUPPORTED_MULTI_SKILL`，附 required 技能、服务端版本、已声明能力、能力来源、握手时间与三条升级指引——绝不静默只跑第一个技能。旧服务端（404 / 缺字段）视同仅支持单技能，单技能路径行为不变。`takeover_bundle.v2` **不隐含** `skills.multi`，客户端唯一判据是 `skills.multi`。握手请求同时声明 `client_capabilities`（`skills.multi=true`），供新服务端拦截旧客户端。
+- **能力握手与多技能 fail-closed**（Issue #32）：接管前先握手 `GET /api/health` 读取服务端 `version` + `capabilities[]`（进程内缓存 300s；`GRAPE_CAPABILITIES_TTL_MS` 可覆盖，`GRAPE_CAPABILITIES_REFRESH=1` 强制刷新）。节点 required 技能数 > 1 且服务端未声明 `skills.multi` 时，`grape_takeover_start` **拒绝接管**并返回稳定错误码 `E_CAP_UNSUPPORTED_MULTI_SKILL`，附 required 技能、服务端版本、已声明能力、能力来源、握手时间与三条升级指引——绝不静默只跑第一个技能。旧服务端（404 / 缺字段）视同仅支持单技能，单技能路径行为不变。`takeover_bundle.v2` **不隐含** `skills.multi`，客户端唯一判据是 `skills.multi`。握手请求同时声明 `client_capabilities`（`skills.multi=true`），供新服务端拦截旧客户端。
+  - **git 写回**（Issue #31，干净机器无 PAT/SSH/CLI）：`grape_git_credential` 用接管凭据换一次性本仓券（600s）并在工作区写 `GIT_ASKPASS`（`0600`，内嵌到期 epoch；过期脚本非零退出并提示重新换券，**无静默回退**本机 git/CLI 凭据）；`grape_create_pull` 薄代理 PR 端点（只建 PR、不评审不合并）。凭据绑定会话仓库与工作区：非本仓/工作区外一律拒绝且不落盘；`.grape` 目录/askpass 文件为符号链接时拒绝（不写到工作区外）；写盘前把 `/.grape/` 写入 `.git/info/exclude` 并用 `git check-ignore` 复核，无法确认已排除即拒绝写盘（600s 券不得进远端历史）；`finish`/`abort` 自动清理 askpass，校验通过的 branch/commit/PR 会写入交回 `artifacts` 留痕。
 - **场景与仓库**：场景列表 · 应用场景 · 托管仓库 · 同步仓库 · 项目模板 · 项目信息
 - **搜索、知识与技能**：全局搜索 · 技能 ×3 · 知识库 ×2 · 看板
   - `grape_get_skill_detail` 返回 **SKILL.md 全文**（去掉旧的 3000 字截断）；超过 **64KB（UTF-8 字节）** 时把正文**逐字节**写入临时文件，只返回 2000 字预览并显式标注「已截断，全文在 <path>」（含字节数）。
@@ -143,7 +144,7 @@ npx -y @grape-dev/grape-kit install --target dsh          # 升级后重新装�
 npx -y @grape-dev/grape-kit uninstall --target dsh        # 只删托管块 + skill 副本
 ```
 
-> dsh 走 **MCP 最小路径**（39 工具零改动复用）；完整形态的原生 Cordis 插件由 [grape-dsh](https://gitcode.com/grape-dev/grape-dsh) 承载，二者并存。
+> dsh 走 **MCP 最小路径**（41 工具零改动复用）；完整形态的原生 Cordis 插件由 [grape-dsh](https://gitcode.com/grape-dev/grape-dsh) 承载，二者并存。
 
 ### openclaw（ClawHub 市场）
 
@@ -151,7 +152,7 @@ npx -y @grape-dev/grape-kit uninstall --target dsh        # 只删托管块 + sk
 openclaw plugins install clawhub:grape-kit@latest
 ```
 
-`clawhub:` 为来源前缀（与 devkit 上架同款）。装后用插件 MCP 工具列表验证（39 工具）。市场页：https://clawhub.ai/grape-dev/plugins/grape-kit
+`clawhub:` 为来源前缀（与 devkit 上架同款）。装后用插件 MCP 工具列表验证（41 工具）。市场页：https://clawhub.ai/grape-dev/plugins/grape-kit
 
 ### 版本查询与更新（全宿主通用）
 

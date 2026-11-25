@@ -532,7 +532,7 @@ function doctorOfficeace(probe) {
 /**
  * dsh 装配位置：`$DSH_HOME || ~/.dsh`，MCP 客户端以 Cordis patch 行挂在 web profile。
  * `GRAPE_DSH_PATCH` 覆盖 patch 文件路径（实机 profile 差异 / 用例隔离，对齐 GRAPE_CODEARTS_CONFIG）。
- * 口径：dsh 走 MCP 最小路径（39 工具零改动复用），原生 Cordis 插件形态由 grape-dsh 承载，二者并存。
+ * 口径：dsh 走 MCP 最小路径（41 工具零改动复用），原生 Cordis 插件形态由 grape-dsh 承载，二者并存。
  */
 function dshPaths() {
   const dshHome = String(process.env.DSH_HOME || '').trim() || join(homedir(), '.dsh')

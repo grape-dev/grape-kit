@@ -13,6 +13,8 @@
 - `normalizeSkills()` 技能清单解析单一入口（`skills[]` > `assets.skill` > `env.GRAPE_BOUND_SKILL`），供 #28 复用。
 - `grape_takeover_start` 物化平台下发的 `bundle.assets.skill`（#28）：接管建立后把节点技能落到本地工作区 `<cwd>/.grape-takeover-skills/<skill>/`（`SKILL.md` + `references/*`），渲染给出 `技能已物化：<path>` + 文件数 + 是否含 references——接管 prompt 里「技能已物化，直接读 SKILL.md」由指引变成事实。内联 `files`（数组或「路径→内容」映射）与 `zip_url` 两种下发都支持（zip 走 `zlib.inflateRawSync` 零依赖解压，仅 store/deflate，剥离 `<skill>/` 顶层前缀）；物化幂等覆盖，重复接管不叠加文件。
 - 物化安全面：技能名白名单 `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`（拒 `.` / `..` / `.skills` / 分隔符与盘符，非法即拒绝、不归一化），条目路径拒 `..`、绝对路径、反斜杠与盘符、`.skills` 段（大小写/尾点归一后比较），逐级 `lstat` 拒符号链接（含 zip 的 `S_IFLNK` 条目）并做落盘前缀校验；恒不写 `.skills/`（worker 会 rmtree 该目录）。zip 解压在 inflate 前按 `usize` 预检剩余额度并传 `maxOutputLength` 封顶（64MB），解压后校验长度与 CRC-32，压缩比无法绕过上限。
+- git 写回闭环（#31）：新增 `grape_git_credential` —— 用接管凭据 `tko_`（或 `tk_`）调 `/api/repos/{o}/{r}/git-credential` 换一次性本仓券（600s），在工作区写 `GIT_ASKPASS`（POSIX `.grape/git-askpass.sh` / Windows `.cmd`，权限 0600），脚本内嵌到期 epoch、过期非零退出并提示「重新换券」（无静默回退本机 git/CLI 凭据）；写盘前拒绝 `.grape` 目录/askpass 文件 symlink（不越界写），并把 `/.grape/` 写入 `.git/info/exclude` + `git check-ignore --no-index` 复核，无法确认已排除即拒绝写盘（防 600s 券进远端历史）；Windows `.cmd` 用 `set "VAR=…"` 且时间取数失败即非零退出，含 cmd 元字符的券拒写；`cleanup=true` 幂等清理。新增 `grape_create_pull` 薄代理 `/api/git-repo/{o}/{r}/pulls`（只建 PR，不评审不合并；`issue_number` 映射 `related_issue_nums`）。工具面 39→41。
+- `grape_takeover_finish` 增加 coding 交回产物校验：`agent_type=coding`（或带 branch/commit/pr_number 任一）时须带齐 branch、commit、PR；未显式声明且无产物时回退读会话 `agent_type` 判定（封堵静默放行）——request-finish 只出强 warning，正式 finish 缺项拒绝并列出缺失项，`allow_incomplete=true` 可覆写并在 actions 留痕；校验通过的 branch/commit/PR 追加进 `artifacts` 留痕（不写平台顶层字段）；finish/abort 清理 askpass（registry + 显式/会话 workspace 兜底，跨进程重启可清）。`owner/repo` 拒绝 `.`/`..` 段。
 
 ### Changed
 
@@ -21,6 +23,8 @@
 - 事件回读增加 `issueEvents` 存在性守卫与 `total` 截断检测：api 模块缺该函数或分页截断时落 `pending`，不再误判「无事件」重复派发。
 - `grape_takeover_start` 成功路径的 render 披露 `capabilities: <version> [..]（来源 server）| 判据：通过（required=N）`，判据可追溯到本次握手；工具 description 补能力依赖与拒绝错误码说明。
 - 接管渲染新增「技能物化」段：`ok` 给落盘路径、`legacy`（旧平台未下发技能包）与 `failed` 各给显式 warning，失败不作废已建立的接管会话。
+- `grape_takeover_start` 的 push 能力边界文案改指向换券工具（`grape_git_credential` → `git push` → `grape_create_pull`），洁净机器不再要求用户先配置 PAT/SSH；tko_ 本身的 repo_session 边界不变。
+- README 双语 / `grape-remote` skill / takeover 架构文档同步 git 写回链路与 41 工具面。
 
 ### Fixed
 
