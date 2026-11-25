@@ -1,5 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { join } from 'node:path'
 import { TOOLS, findTool } from '../src/tools.mjs'
 
 /* takeover 工具组（v0.3.2，weekly-11+ PR #1268 一等接管资源）*/
@@ -210,4 +211,107 @@ test('工具：worker_onboard 不输出明文 token（P1-2）', async () => {
   } finally {
     apiMod.api.workerCredentialCreate = orig
   }
+})
+
+/* ── Issue #37：本地接管 workspace 覆盖（物化 / AUTH_FILE 不再被云端 cwd_hint 锁死） ── */
+
+test('W1 三态优先级：args.workspace > bundle.workspace.cwd_hint > 基目录', async () => {
+  const { resolveLocalWorkspace } = await import('../src/tools.mjs')
+  const { join } = await import('node:path')
+  const bundle = { workspace: { cwd_hint: '/cloud/ws' } }
+  assert.equal(resolveLocalWorkspace({ workspace: '/local/ws', bundle, cwd: '/proc/cwd' }), '/local/ws', '入参必须优先于 cwd_hint')
+  assert.equal(resolveLocalWorkspace({ bundle, cwd: '/proc/cwd' }), '/cloud/ws', '缺入参时回落 cwd_hint')
+  assert.equal(resolveLocalWorkspace({ bundle: {}, cwd: '/proc/cwd' }), '/proc/cwd', '两者皆缺时回落当前目录')
+  assert.equal(resolveLocalWorkspace({ workspace: '   ', bundle, cwd: '/proc/cwd' }), '/cloud/ws', '空白入参视同缺省')
+  assert.equal(resolveLocalWorkspace({ workspace: 'proj/sub', bundle: {}, cwd: '/base' }), join('/base', 'proj', 'sub'), '相对路径按基目录归一')
+})
+
+test('W2 native wiring：显式 workspace 优先物化，返回 workspace_effective + 不一致披露', async () => {
+  const { mkdtempSync, rmSync, existsSync, readFileSync } = await import('node:fs')
+  const { tmpdir } = await import('node:os')
+  const { join } = await import('node:path')
+  const { api } = await import('../src/api.mjs')
+  const local = mkdtempSync(join(tmpdir(), 'gk-ws37-'))
+  const original = api.takeoverStart
+  try {
+    api.takeoverStart = async () => ({
+      takeover_id: 'tkos_ws37',
+      bundle: {
+        workspace: { cwd_hint: '/cloud/does-not-exist' },
+        assets: { skill: { skill: 'coding-cli', files: [{ path: 'SKILL.md', content: '# wired' }] } },
+      },
+    })
+    const json = await findTool('grape_takeover_start').native({ owner: 'o', repo: 'r', number: 37, workspace: local })
+    assert.equal(json.workspace_effective, local, '返回体应携带解析后的本地工作区')
+    assert.equal(json.skillMaterialization.status, 'ok', json.skillMaterialization.reason)
+    assert.equal(json.skillMaterialization.path, join(local, '.grape-takeover-skills', 'coding-cli'), '物化必须落到入参目录')
+    assert.equal(readFileSync(join(local, '.grape-takeover-skills', 'coding-cli', 'SKILL.md'), 'utf8'), '# wired')
+    assert.ok(existsSync(json.skillMaterialization.path))
+    assert.match(json.workspace_note, /云端工作区路径在本机不存在/, '与 cwd_hint 不一致时必须显式披露')
+    assert.match(json.workspace_note, /\/cloud\/does-not-exist/)
+  } finally {
+    api.takeoverStart = original
+    rmSync(local, { recursive: true, force: true })
+  }
+})
+
+test('W3 render：以本地 workspace 渲染 {{CWD}}，披露云端 hint 并本地化 AUTH_FILE', () => {
+  const out = findTool('grape_takeover_start').render({
+    takeover_id: 'tkos_ws37',
+    workspace_effective: '/local/ws',
+    bundle: {
+      env: { GRAPE_SESSION_TOKEN: 'tko_fake', GRAPE_AUTH_FILE: '/cloud/ws/.grape-takeover-token' },
+      workspace: { cwd_hint: '/cloud/ws' },
+      assets: { scripts: [{ filename: 'env.sh', content: 'cd "{{CWD}}" && node run.mjs' }] },
+    },
+  })
+  assert.match(out, /本地工作目录: \/local\/ws/, '本地工作目录必须是解析值')
+  assert.match(out, /云端工作区路径在本机不存在[^\n]*\/cloud\/ws/, '不一致必须显式披露')
+  assert.match(out, /cd "\/local\/ws" && node run\.mjs/, '脚本占位符按本地 workspace 渲染')
+  assert.match(out, /\/local\/ws\/\.grape-takeover-token/, 'AUTH_FILE 应前缀替换为本地工作区')
+  const authLine = out.split('\n').find((l) => l.includes('凭据文件（路径占位符已渲染）'))
+  assert.ok(authLine && authLine.includes('/local/ws/.grape-takeover-token'), '凭据文件行必须是本地路径')
+  assert.ok(authLine && !authLine.includes('/cloud/ws'), '凭据文件行不得残留云端路径')
+  assert.ok(!out.includes('{{CWD}}'))
+})
+
+test('W4 render：AUTH_FILE 不在 cwd_hint 根内时保持原路径并提示 source', () => {
+  const out = findTool('grape_takeover_start').render({
+    takeover_id: 'tkos_ws37',
+    workspace_effective: '/local/ws',
+    bundle: { env: { GRAPE_AUTH_FILE: '/opt/creds/grape.json' }, workspace: { cwd_hint: '/cloud/ws' } },
+  })
+  assert.match(out, /\/opt\/creds\/grape\.json/, '不在 hint 根内的自定义路径不得被改写')
+  assert.match(out, /本机可能不可读|source/, '无法安全重写时必须给 source 提示')
+})
+
+test('W5 render：无显式 workspace 时保持 cwd_hint 旧口径（不回退）', () => {
+  const out = findTool('grape_takeover_start').render({
+    takeover_id: 'tkos_ws37',
+    bundle: { env: { GRAPE_AUTH_FILE: '{{CWD}}/.grape/config.json' }, workspace: { cwd_hint: '/cloud/ws' } },
+  })
+  assert.match(out, /本地工作目录: \/cloud\/ws/)
+  assert.match(out, /\/cloud\/ws\/\.grape\/config\.json/)
+  assert.ok(!/云端工作区路径在本机不存在/.test(out), '一致时不得告警')
+})
+
+test('W8 AUTH_FILE 本地化：自定义绝对路径与相对路径不改写（不丢子目录、不误改用户路径）', async () => {
+  const { localizeAuthFile } = await import('../src/tools.mjs')
+  const custom = localizeAuthFile('/opt/creds/.grape-takeover-token', { workspace: '/local/ws', cwdHint: '/cloud/ws' })
+  assert.equal(custom.path, '/opt/creds/.grape-takeover-token', '自定义绝对路径不得被 basename 启发式改写')
+  assert.equal(custom.rewritten, false)
+  assert.match(custom.note, /本机可能不可读|source/)
+  const relative = localizeAuthFile('creds/.grape-takeover-token', { workspace: '/local/ws', cwdHint: '/cloud/ws' })
+  assert.equal(relative.path, 'creds/.grape-takeover-token', '相对路径不得被改写（否则丢子目录）')
+  assert.equal(relative.rewritten, false)
+  const underHint = localizeAuthFile('/cloud/ws/.grape-takeover-token', { workspace: '/local/ws', cwdHint: '/cloud/ws' })
+  assert.equal(underHint.path, join('/local/ws', '.grape-takeover-token'), 'cwd_hint 内的平台默认 token 仍应前缀替换')
+  assert.equal(underHint.rewritten, true)
+})
+
+test('W9 路径归一：Windows 盘根不丢分隔符', async () => {
+  const { resolveLocalWorkspace } = await import('../src/tools.mjs')
+  assert.equal(resolveLocalWorkspace({ workspace: 'C:\\' }), 'C:\\', '盘根 C:\\ 不得剥成 C:')
+  assert.equal(resolveLocalWorkspace({ workspace: 'C:/' }), 'C:/', '盘根 C:/ 保持')
+  assert.equal(resolveLocalWorkspace({ workspace: '/' }), '/', 'POSIX 根保持')
 })

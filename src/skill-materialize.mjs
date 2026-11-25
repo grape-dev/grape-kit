@@ -311,7 +311,7 @@ async function collectZipEntries(asset, opts, name) {
  * 物化 `assets.skill` 到 `<cwd>/.grape-takeover-skills/<skill>/`。
  *
  * @param {object|null|undefined} skill 平台下发的 `bundle.assets.skill`（`skill`/`name` + `files` 或 `zip_url`）
- * @param {string} cwd 工作目录（`bundle.workspace.cwd_hint || process.cwd()`）
+ * @param {string} cwd 工作目录（Issue #37：`args.workspace > bundle.workspace.cwd_hint > process.cwd()` 解析出的本地路径）
  * @param {{fetchImpl?: Function, env?: object}} [options] 可注入 fetch（单测）与 env（技能名回退 GRAPE_BOUND_SKILL）
  * @returns {Promise<{status: 'ok'|'legacy'|'failed', skill: string, path: string, fileCount: number, hasReferences: boolean, reason: string}>}
  */
