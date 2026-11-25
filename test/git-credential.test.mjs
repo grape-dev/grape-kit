@@ -32,8 +32,8 @@ const tmpWs = () => mkdtempSync(join(tmpdir(), 'gk-cred-'))
 const askpassOf = (ws) => join(ws, '.grape', POSIX ? 'git-askpass.sh' : 'git-askpass.cmd')
 const runCred = (args, deps = {}) => findTool('grape_git_credential').run(args, deps)
 
-test('工具面 41：新增 git 写回两工具', () => {
-  assert.equal(TOOLS.length, 41)
+test('工具面 50：新增 git 写回两工具', () => {
+  assert.equal(TOOLS.length, 50)
   for (const name of ['grape_git_credential', 'grape_create_pull']) assert.ok(findTool(name), `缺 ${name}`)
 })
 
@@ -197,7 +197,7 @@ test('finish：补齐 branch/commit/PR 通过；allow_incomplete 覆写留痕', 
   const t = findTool('grape_takeover_finish')
   const orig = api.takeoverFinish
   let payload = null
-  api.takeoverFinish = async (_sid, p) => { payload = p; return { ok: true, changed: true, next_agent: 'qa', next_seq: 9 } }
+  api.takeoverFinish = async (_sid, p) => { payload = p; return { ok: true, changed: true, next_agent: 'qa', next_seq: 9, handoff: { seq: 9, reason: 'dispatched' } } }
   try {
     const ok = await t.native({ session_id: 'tkos_1', summary: '完成', agent_type: 'coding', branch: 'feat/issue-31', commit: 'abc1234', pr_number: '7' })
     assert.equal(payload.branch, undefined, 'branch 是本地校验入参，不塞进平台 body')

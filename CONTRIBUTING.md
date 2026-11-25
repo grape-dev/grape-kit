@@ -13,7 +13,7 @@
 ```bash
 npm ci            # 按 package-lock.json 安装（CI 同口径）
 npm test          # 单测：fake-grape 替身，不依赖真实服务端
-npm run smoke     # 冒烟：真实 stdio JSON-RPC 往返（41 tools）
+npm run smoke     # 冒烟：真实 stdio JSON-RPC 往返（50 tools）
 0c1ec3f (feat(#31): git 写回受控工具（换券+GIT_ASKPASS）与 coding 交回校验（工具面 39→41）)
 ```
 

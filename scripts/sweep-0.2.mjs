@@ -66,7 +66,7 @@ const listCount = await new Promise((res) => {
   proc.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: listId, method: 'tools/list' }) + '\n')
 })
 <<<<<<< HEAD
-results.push(['tools/list 数量', listCount === 48 ? 'PASS' : 'FAIL', `${listCount} tools`])
+results.push(['tools/list 数量', listCount === 50 ? 'PASS' : 'FAIL', `${listCount} tools`])
 =======
 results.push(['tools/list 数量', listCount === 41 ? 'PASS' : 'FAIL', `${listCount} tools`])
 >>>>>>> 0c1ec3f (feat(#31): git 写回受控工具（换券+GIT_ASKPASS）与 coding 交回校验（工具面 39→41）)

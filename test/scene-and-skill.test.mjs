@@ -166,7 +166,7 @@ test('takeover_finish：确实没派发时才兜底补发一次', async () => {
     triggerPipeline: async (owner, repo, n, ctx, agent) => { triggered += 1; return { seq: 23100, agent } },
   })
 
-  const json = await finishTool.native({ session_id: 'tk_2', summary: '完成', evidence: 'ok' })
+  const json = await finishTool.native({ session_id: 'tk_2', summary: '完成', evidence: 'ok', agent_type: 'coding', branch: 'feat/issue-16', commit: 'abc1234', pr_number: '9' })
   assert.equal(triggered, 1)
   assert.equal(json.dispatch.status, 'dispatched')
   assert.equal(json.next_seq, 23100)

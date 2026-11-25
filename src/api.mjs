@@ -198,7 +198,6 @@ export async function apiRequest(method, path, opts = {}) {
   return json
 }
 
-<<<<<<< HEAD
 /**
  * multipart 上传（技能 ZIP）。apiRequest 只发 JSON，这条通道单独走 FormData：
  * Content-Type 必须交给 fetch 自动生成 boundary（手写 application/json 会 422）。
@@ -248,10 +247,7 @@ export async function apiUpload(path, formData, opts = {}) {
   return json
 }
 
-/* ── 端点封装：与 tools.mjs 的 31 个工具一一对应 ─────────────── */
-=======
 /* ── 端点封装：与 tools.mjs 的工具面一一对应 ─────────────── */
->>>>>>> 0c1ec3f (feat(#31): git 写回受控工具（换券+GIT_ASKPASS）与 coding 交回校验（工具面 39→41）)
 
 /** A2A 节点枚举：与平台 pipelines.json 的 agent tag 对齐 */
 export const AGENT_TYPES = ['vod', 'issue', 'coding', 'qa', 'sre']

@@ -159,12 +159,8 @@ sequenceDiagram
 ## 5. 遗留与边界
 
 - **内置 Node 接管脚本**：`skills/grape-remote/scripts/takeover/{report,request-finish,finish}.mjs` 随 `skills/` 目录分发（Node ≥20，Windows/Linux 通用）；token 只从环境变量读取，不进入 argv/历史。
-<<<<<<< HEAD
 - **技能物化（#28）**：`<cwd>/.grape-takeover-skills/<skill>/` 是物化产物目录，随工作区存在；`.skills/` 恒不写（worker 会 rmtree）。Windows 路径口径由 `resolve` + `path.sep` 前缀校验覆盖，条目含 `\` 一律拒绝。
-- **tko_ 不含 git 凭据注入**：接管期间的回推依赖宿主已有用户级凭据（`grape git` 注入 / 自有 PAT / SSH key）；洁净机器需用户先配置。kit 在 `grape_takeover_start` 返回体显式披露该边界（0.3.8）。
-=======
 - **tko_ 不含 git 凭据注入**：`tko_` 本身不是 git 凭据；洁净机器改用 `grape_git_credential` 以 tko_ 换一次性本仓券（600s）后 push（见 §5.1），已配置 `grape git` / PAT / SSH 的宿主仍可直接使用。kit 在 `grape_takeover_start` 返回体显式披露该边界（0.3.8）。
->>>>>>> 0c1ec3f (feat(#31): git 写回受控工具（换券+GIT_ASKPASS）与 coding 交回校验（工具面 39→41）)
 - **生产未部署**：weekly-11（含 #1268 + !1425）未上 www.grapedev.cn——takeover 工具面在生产 404 属预期，grape-kit 已按 404 回退老路径并提示
 - **!1425 待合入**：修复在分支，PR 审核后随 weekly-11 发版列车走（与 #2238/2.4.0 同列）
 - npm v0.3.2 发布待 granular token（用户操作）

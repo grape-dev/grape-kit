@@ -147,9 +147,9 @@ test('Issue #20 README 双语载明凭据优先级链与 auth init / uninstall -
 
 const LIFECYCLE_TOOL_NAMES = ['grape_kit_version', 'grape_kit_check_update', 'grape_kit_upgrade', 'grape_kit_install', 'grape_kit_uninstall']
 
-test('Issue #27 README 双语：工具数 48 + 自管理五工具逐个点名 + 写操作决策门口径', () => {
+test('Issue #27 README 双语：工具数 50 + 自管理五工具逐个点名 + 写操作决策门口径', () => {
   for (const [name, md] of [['README.md', read('README.md')], ['README.zh.md', read('README.zh.md')]]) {
-    assert.match(md, /48 tools|48 工具/, `${name} 能力总览应为 48 工具（39→48 口径同步）`)
+    assert.match(md, /50 tools|50 工具/, `${name} 能力总览应为 50 工具（39→50 口径同步）`)
     for (const tool of LIFECYCLE_TOOL_NAMES) {
       assert.ok(md.includes(tool), `${name} 应点名 ${tool}`)
     }
@@ -179,9 +179,9 @@ test('Issue #27 CHANGELOG 0.5.0 发布节覆盖自管理五工具（Added/Change
   }
 })
 
-test('Issue #27 冒烟/巡检脚本的工具数断言同步为 48', () => {
-  assert.match(read('scripts/smoke.mjs'), /!== 48/, 'smoke 应断言 48 个工具')
-  assert.match(read('scripts/sweep-0.2.mjs'), /=== 48/, 'sweep 应断言 48 个工具')
+test('Issue #27 冒烟/巡检脚本的工具数断言同步为 50', () => {
+  assert.match(read('scripts/smoke.mjs'), /!== 50/, 'smoke 应断言 50 个工具')
+  assert.match(read('scripts/sweep-0.2.mjs'), /=== 50/, 'sweep 应断言 50 个工具')
 })
 
 /* ── QA 复审（PR #21）S1：CONTRIBUTING 自身也是工具面口径载体，必须与 TOOL_NAMES 实际数量同源 ──
