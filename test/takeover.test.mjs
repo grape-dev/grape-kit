@@ -76,7 +76,7 @@ test('takeover_finish render：request 与完成两态', () => {
   const t = findTool('grape_takeover_finish')
   const req = t.render({ ok: true, session: { finish_requested_at: '2026-11-14T12:00:00Z' } })
   assert.match(req, /等待用户确认/)
-  const done = t.render({ ok: true, changed: true, next_agent: 'qa', event_status: 'completed', issue_stage: 'qa', session: { handoff_seq: 42 } })
+  const done = t.render({ ok: true, changed: true, next_agent: 'qa', event_status: 'completed', issue_stage: 'qa', session: { handoff: { seq: 42 } } })
   assert.match(done, /接管交回完成/)
   assert.match(done, /qa/)
   assert.match(done, /seq=42/)
