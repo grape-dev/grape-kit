@@ -14,7 +14,8 @@
 import * as R from './render.mjs'
 import { hostname } from 'node:os'
 import { fileURLToPath } from 'node:url'
-import { existsSync, mkdirSync, writeFileSync, chmodSync, rmSync, rmdirSync, readdirSync, lstatSync, realpathSync } from 'node:fs'
+import { existsSync, mkdirSync, writeFileSync, chmodSync, rmSync, rmdirSync, readdirSync, readFileSync, lstatSync, realpathSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
 import { join, resolve, sep, dirname } from 'node:path'
 import { api, apiRequest, getBaseUrl, AGENT_TYPES, normalizeTriggerAgent, GrapeApiError } from './api.mjs'
 
@@ -76,11 +77,17 @@ function insideRoot(root, target) {
   return t === r || t.startsWith(r + sep)
 }
 
+const isDotSeg = (v) => {
+  const s = String(v ?? '')
+  return s === '.' || s === '..'
+}
+
 function assertRepoSeg(owner, repo) {
-  if (!REPO_SEG_RE.test(String(owner ?? '')) || !REPO_SEG_RE.test(String(repo ?? ''))) {
+  const bad = (v) => !REPO_SEG_RE.test(String(v ?? '')) || isDotSeg(v)
+  if (bad(owner) || bad(repo)) {
     throw new GrapeApiError(`非法仓库标识：${owner}/${repo}`, {
       status: 400,
-      hint: 'owner/repo 只允许字母数字与 ._-（拒绝路径注入）；非本仓请求一律拒绝且不落盘。',
+      hint: 'owner/repo 只允许字母数字与 ._-，且不得为 . / ..（拒绝路径注入）；非本仓请求一律拒绝且不落盘。',
     })
   }
 }
@@ -145,24 +152,68 @@ function askpassPosix({ username, password, expiresAt }) {
   ].join('\n')
 }
 
-/** Windows askpass（.cmd）：epoch 由 PowerShell 取；平台 token 为字母数字，cmd 元字符风险低（注释已声明） */
+/**
+ * Windows askpass（.cmd）：epoch 由 PowerShell 取。
+ * 口令/用户名已在 run() 中拒绝 cmd 元字符，这里统一用 `set "VAR=..."` 包裹，避免 `%`/`&`/`^` 破坏脚本；
+ * 取时间失败或非数字时**立即非零退出**（否则 `if %NOW% GEQ ...` 语法失败后会继续执行并回显口令）。
+ */
 function askpassCmd({ username, password, expiresAt }) {
   return [
     '@echo off',
     'rem grape-kit one-shot git askpass (Issue #31) - do not commit/share',
-    `set GRAPE_ASKPASS_EXPIRES=${Number(expiresAt)}`,
-    `set GRAPE_ASKPASS_USERNAME=${username}`,
-    `set GRAPE_ASKPASS_PASSWORD=${password}`,
-    'for /f "usebackq delims=" %%e in (`powershell -NoProfile -Command "[int][double]::Parse((Get-Date -UFormat %%s))"`) do set NOW=%%e',
-    'if %NOW% GEQ %GRAPE_ASKPASS_EXPIRES% (',
-    '  echo [grape] git 凭据已过期，请重新换券：再次调用 grape_git_credential 换新券后重试；不静默回退。 1>&2',
-    '  exit /b 1',
-    ')',
+    `set "GRAPE_ASKPASS_EXPIRES=${Number(expiresAt)}"`,
+    `set "GRAPE_ASKPASS_USERNAME=${username}"`,
+    `set "GRAPE_ASKPASS_PASSWORD=${password}"`,
+    'set "NOW="',
+    'for /f "usebackq delims=" %%e in (`powershell -NoProfile -Command "[int][double]::Parse((Get-Date -UFormat %%s))"`) do set "NOW=%%e"',
+    'if not defined NOW goto expired_guard',
+    'echo %NOW%|findstr /r "^[0-9][0-9]*$" >nul',
+    'if errorlevel 1 goto expired_guard',
+    'if %NOW% GEQ %GRAPE_ASKPASS_EXPIRES% goto expired',
     'echo %1 | findstr /i "sername" >nul',
     'if errorlevel 1 (echo %GRAPE_ASKPASS_PASSWORD%) else (echo %GRAPE_ASKPASS_USERNAME%)',
     'exit /b 0',
+    ':expired',
+    'echo [grape] git 凭据已过期，请重新换券：再次调用 grape_git_credential 换新券后重试；不静默回退。 1>&2',
+    'exit /b 1',
+    ':expired_guard',
+    'echo [grape] 无法获取有效系统时间（防凭据泄露已终止），请重新换券后重试。 1>&2',
+    'exit /b 1',
     '',
   ].join('\r\n')
+}
+
+const CMD_UNSAFE_RE = /["%&^|<>()!`]/
+
+/**
+ * git 仓库内把 `/.grape/` 写进 `.git/info/exclude`，并用 `git check-ignore --no-index` 复核。
+ * 非 git 工作区（无提交风险）跳过；是 git 仓库但无法确认已排除 → 拒绝写盘（600s 券不得进远端历史）。
+ * worktree 中 `.git` 是文件，用 `git rev-parse --git-path info/exclude` 定位真实 exclude 文件。
+ */
+function ensureGrapeIgnored(ws) {
+  const dotGit = join(ws, '.git')
+  if (!existsSync(dotGit)) return { is_git: false, excluded: false }
+  let rel = join('.git', 'info', 'exclude')
+  try {
+    rel = execFileSync('git', ['rev-parse', '--git-path', 'info/exclude'], { cwd: ws, encoding: 'utf8' }).trim() || rel
+  } catch { /* 保持默认 .git/info/exclude */ }
+  const excludePath = resolve(ws, rel)
+  try {
+    const cur = existsSync(excludePath) ? readFileSync(excludePath, 'utf8') : ''
+    const hasRule = cur.split(/\r?\n/).some((line) => /^\s*\/?\.grape\/?\s*$/.test(line))
+    if (!hasRule) {
+      mkdirSync(dirname(excludePath), { recursive: true })
+      const sep0 = cur && !cur.endsWith('\n') ? '\n' : ''
+      writeFileSync(excludePath, `${cur}${sep0}/.grape/\n`)
+    }
+    execFileSync('git', ['check-ignore', '--no-index', '-q', join(ASKPASS_DIR, ASKPASS_POSIX)], { cwd: ws })
+  } catch (e) {
+    throw new GrapeApiError('拒绝写入 askpass：无法确认 .grape/ 已被 git 排除（600s 券可能被提交进远端历史）', {
+      status: 400,
+      hint: `写入 .git/info/exclude 的 /.grape/ 规则后 check-ignore 复核未通过（${e?.message || e}）。请先修复工作区 git exclude（可手动添加 /.grape/）后重新换券；本次未写入任何凭据文件。`,
+    })
+  }
+  return { is_git: true, excluded: true, exclude_path: excludePath }
 }
 
 function askpassFiles(ws) {
@@ -1263,8 +1314,10 @@ export const TOOLS = [
       '⚠️ 用户决策层动作：确认本地成果可交回后再调用。' +
       '两阶段确认流：先 request-finish（仅报告完成，等用户确认），用户确认后再本工具 finish。' +
       '⚠️ coding 交回产物校验（Issue #31）：agent_type=coding（或直接带 branch/commit/pr_number 任一）时须带齐 branch、commit、PR；' +
+      '未显式声明 agent_type 且无任何产物时回退读取会话记录的 agent_type 判定（不再静默放行 coding 会话）；' +
       'request-finish 只出强 warning，正式 finish 缺项直接拒绝并列出缺失项，补齐后通过；确需带缺项交回时显式 allow_incomplete=true（在 actions 留痕）。' +
-      'finish/abort 会清理本次进程写出的 GIT_ASKPASS（grape_git_credential 产物）。',
+      '校验通过的 branch/commit/PR 自动追加进交回 artifacts 留痕（不写平台顶层字段），下游 QA 可从交回记录读到 PR。' +
+      'finish/abort 会清理本次进程写出的 GIT_ASKPASS（registry + 传入/会话 workspace 兜底，跨进程重启可清）。',
     schema: {
       type: 'object',
       properties: {
@@ -1299,12 +1352,28 @@ export const TOOLS = [
         next_step: a.next_step || '',
         issue_summary: a.issue_summary || '',
       }
-      /* coding 产物校验（Issue #31）：agent_type=coding，或未声明 agent_type 但带了任一产物字段（按 coding 处理）。
+      /* coding 产物校验（Issue #31）：agent_type=coding，或带了任一产物字段（按 coding 处理）；
+       * 未显式声明且无产物时回退读取会话记录的 agent_type，封堵「不传 agent_type 也不传产物 → 静默放行」。
        * request-finish 只强 warning（用户确认前可能还要补 push/PR）；正式 finish 缺项拒绝，allow_incomplete 覆写留痕。 */
       const evidence = codingEvidence(a)
       const declared = asAgentType(a.agent_type)
-      const coding = declared === 'coding' || (!declared && Object.values(evidence).some(Boolean))
+      const hasEvidence = Object.values(evidence).some(Boolean)
+      const workspaceArg = String(a.workspace ?? '').trim()
+      const needsSession = !declared || (!workspaceArg && !ASKPASS_REGISTRY.has(String(a.session_id)))
+      let session = null
+      if (needsSession) {
+        try { session = await api.takeoverGet(a.session_id) } catch { /* 会话不可读：无法证明 coding 时按未声明处理（保持既有行为） */ }
+      }
+      const sessionAgent = asAgentType((session?.session ?? session ?? {}).agent_type)
+      const effective = declared || sessionAgent
+      const coding = effective === 'coding' || (!effective && hasEvidence)
       const missing = coding ? missingCodingEvidence(evidence) : []
+      // 校验到的 branch/commit/PR 追加进 artifacts 留痕（不写平台顶层字段），保证下游 QA 从交回记录读到 PR
+      const evidenceArtifacts = []
+      if (evidence.branch) evidenceArtifacts.push(`branch: ${evidence.branch}`)
+      if (evidence.commit) evidenceArtifacts.push(`commit: ${evidence.commit}`)
+      if (evidence.pr) evidenceArtifacts.push(`PR: ${evidence.pr}`)
+      if (evidenceArtifacts.length) payload.artifacts = [...payload.artifacts, ...evidenceArtifacts]
       if (a.request_only) {
         const json = await api.takeoverRequestFinish(a.session_id, payload)
         const base = json && typeof json === 'object' ? json : { raw: json }
@@ -1325,8 +1394,9 @@ export const TOOLS = [
       if (missing.length) {
         payload.actions = [...payload.actions, `⚠️ allow_incomplete 覆写：coding 交回缺少 ${missing.join('、')}（显式允许，未补齐）`]
       }
-      // 正式交回后不再需要 askpass：清理本次进程为该 session 写出的文件
-      const askpassCleanup = cleanupAskpassFor(a.session_id, a.workspace)
+      // 正式交回后不再需要 askpass：registry（本进程）+ 显式 workspace；都没有时用会话工作区兜底（跨进程重启）
+      const cleanupWs = workspaceArg || sessionWorkspaceOf(session)
+      const askpassCleanup = cleanupAskpassFor(a.session_id, cleanupWs)
       const json = await api.takeoverFinish(a.session_id, { ...payload, outcome: 'completed', handoff: 'a2a' })
       const out = await ensureNextNodeDispatched(json, a)
       const base = out && typeof out === 'object' ? out : { raw: out }
@@ -1476,6 +1546,7 @@ export const TOOLS = [
       '在工作区写 `.grape/git-askpass.sh`（POSIX）/ `.cmd`（Windows），权限 0600；脚本内嵌到期 epoch，' +
       '过期后非零退出并在 stderr 提示「重新换券」，**不存在**静默回退本机 git / CLI 凭据的分支。' +
       '⚠️ 先校验：owner/repo 必须与接管会话绑定的仓库一致（非本仓拒绝），workspace 必须在会话工作区内（越界拒绝且不落盘）。' +
+      '⚠️ 提交防泄漏：.grape 目录或 askpass 目标文件为 symlink 时拒绝写入（不越界写）；git 仓库内写盘前把 `/.grape/` 写入 `.git/info/exclude` 并 `git check-ignore --no-index` 复核，无法确认即拒绝（600s 券不得进远端历史）。' +
       '⚠️ 凭据短时（600s）：push 前重新换券、不缓存；返回只含掩码口令，不回显明文。' +
       'cleanup=true 只删除本工具写出的 askpass 文件（幂等），不换券。',
     schema: {
@@ -1562,7 +1633,14 @@ export const TOOLS = [
           hint: '重新换券（grape_git_credential）后再 push；过期券一律不落盘，不存在静默回退分支。',
         })
       }
-      // ④ 落盘：<ws>/.grape（拒绝 symlink 目录，防写到工作区外）
+      // ④ Windows .cmd 通路：口令含 cmd 元字符会破坏脚本/泄露，直接拒绝（平台 token 为字母数字，正常不命中）
+      if (platform === 'win32' && (CMD_UNSAFE_RE.test(username) || CMD_UNSAFE_RE.test(password))) {
+        throw new GrapeApiError('拒绝写入：凭据含 cmd 元字符（" % & ^ | < > ( ) ! `），会破坏 .cmd 脚本或泄露口令', {
+          status: 400,
+          hint: '重新换券；本次未写入任何文件，不降级为不安全的 .cmd 拼接。',
+        })
+      }
+      // ⑤ 落盘：<ws>/.grape（拒绝 symlink 目录，防写到工作区外）
       const dir = join(ws, ASKPASS_DIR)
       if (existsSync(dir) && lstatSync(dir).isSymbolicLink()) {
         throw new GrapeApiError(`拒绝写入：${dir} 是符号链接（可能指向工作区外）`, {
@@ -1572,6 +1650,17 @@ export const TOOLS = [
       }
       mkdirSync(dir, { recursive: true, mode: 0o700 })
       const file = platform === 'win32' ? join(dir, ASKPASS_WIN) : join(dir, ASKPASS_POSIX)
+      // 文件级 symlink：writeFileSync 会跟随链接写到工作区外（并对外部目标 chmod），写入前 lstat 拒绝
+      let fileStat = null
+      try { fileStat = lstatSync(file) } catch { /* 文件尚不存在 */ }
+      if (fileStat?.isSymbolicLink()) {
+        throw new GrapeApiError(`拒绝写入：${file} 是符号链接（可能指向工作区外）`, {
+          status: 400,
+          hint: '删除该符号链接后重试；凭据文件必须是工作区内的真实普通文件，本次未写入任何凭据。',
+        })
+      }
+      // ⑥ 提交防泄漏：git 仓库内先确保 .grape/ 已 exclude 且 check-ignore 复核通过，否则拒绝写盘
+      const ignore = ensureGrapeIgnored(ws)
       const content = platform === 'win32'
         ? askpassCmd({ username, password, expiresAt })
         : askpassPosix({ username, password, expiresAt })
@@ -1591,8 +1680,9 @@ export const TOOLS = [
         askpass_path: file,
         mode: '0600',
         workspace: ws,
+        git_ignore: ignore,
         clone_url: String(cred?.clone_url ?? ''),
-        note: '凭据一次性（600s）：push 前重新换券、不缓存；过期后脚本非零退出并提示重新换券（无静默回退）。finish/abort 会清理该文件。',
+        note: '凭据一次性（600s）：push 前重新换券、不缓存；过期后脚本非零退出并提示重新换券（无静默回退）。提交前务必排除 .grape/（已写入 .git/info/exclude 并以 check-ignore 复核）。finish/abort 会清理该文件。',
       }
     },
     render(json) {
@@ -1607,6 +1697,13 @@ export const TOOLS = [
       lines.push(`- 用户名: ${json.username} · 口令: ${json.masked_password}（掩码；明文只在 askpass 文件内）`)
       lines.push(`- 到期: ${R.formatEpoch(json.expires_at)}（epoch ${json.expires_at}，TTL ${json.ttl_seconds}s）`)
       lines.push(`- askpass: \`${json.askpass_path}\`（权限 ${json.mode}）`)
+      const gi = json.git_ignore
+      if (gi && gi.is_git) {
+        lines.push(`- git 排除: \`/.grape/\` 已写入 \`${gi.exclude_path}\`，且 \`git check-ignore --no-index\` 复核通过`)
+      } else if (gi) {
+        lines.push('- git 排除: 工作区非 git 仓库（无提交风险，跳过 exclude 写入）')
+      }
+      lines.push('', '**⚠️ 提交前必须排除 .grape/**：不要把凭据文件加入 git（`git add -A` 前先 `git status` 确认 `.grape/` 不在待提交列表；仓内 `.gitignore` 不含该项，本工具靠 `.git/info/exclude` 兜底）。')
       lines.push('', '**push 用法（券在 push 前换，不缓存）**', '', '```bash')
       lines.push(`export GIT_ASKPASS="${json.askpass_path}"`)
       lines.push('export GIT_TERMINAL_PROMPT=0')
