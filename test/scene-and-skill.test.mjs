@@ -152,7 +152,7 @@ test('takeover_finish：平台事件已派发下一节点时只报事实，不�
   assert.equal(json.dispatch.status, 'already_dispatched')
   assert.equal(json.next_seq, 22908)
   const text = finishTool.render(json)
-  assert.match(text, /已由平台派发/)
+  assert.match(text, /已由平台派发（seq=22908），未重复派发/)
   assert.doesNotMatch(text, /pending_dispatch/)
 })
 
@@ -160,7 +160,7 @@ test('takeover_finish：确实没派发时才兜底补发一次', async () => {
   let triggered = 0
   const finishTool = findTool('grape_takeover_finish')
   stubApi({
-    takeoverFinish: async () => ({ ok: true, changed: true, next_agent: 'qa', handoff_seq: 22908 }),
+    takeoverFinish: async () => ({ ok: true, changed: true, next_agent: 'qa', handoff_seq: 22908, session: { id: 'tk_2', agent_type: 'coding', scene_agents: ['coding', 'qa', 'sre'], repo_key: 'gitcode:o/r', issue_number: 16 } }),
     takeoverGet: async () => ({ session: { id: 'tk_2', agent_type: 'coding', repo_key: 'gitcode:o/r', issue_number: 16 } }),
     issueEvents: async () => ({ events: [{ seq: 22908, agent_type: 'coding', event_type: 'a2a_event' }] }),
     triggerPipeline: async (owner, repo, n, ctx, agent) => { triggered += 1; return { seq: 23100, agent } },

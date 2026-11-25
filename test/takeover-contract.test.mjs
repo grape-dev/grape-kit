@@ -148,7 +148,7 @@ async function stubFinish({ finish, trigger, progress, events, dispatch, scenes 
   const calls = []
   const orig = {
     finish: mod.api.takeoverFinish, trigger: mod.api.triggerPipeline, progress: mod.api.takeoverProgress,
-    events: mod.api.issueEvents, dispatch: mod.api.dispatchPipeline, scenes: mod.api.scenesDetail,
+    events: mod.api.issueEvents, dispatch: mod.api.dispatchPipeline, scenes: mod.api.scenesDetail, repoScenes: mod.api.repoScenes,
   }
   mod.api.takeoverFinish = async (...a) => { calls.push(['finish', ...a]); return finish }
   mod.api.triggerPipeline = async (...a) => {
@@ -171,6 +171,12 @@ async function stubFinish({ finish, trigger, progress, events, dispatch, scenes 
     if (scenes instanceof Error) throw scenes
     return scenes
   }
+  mod.api.repoScenes = async (...a) => {
+    calls.push(['repo-scenes', ...a])
+    if (!scenes) return []
+    const row = { id: scenes.id || 'custom-test-scene' }
+    return [row]
+  }
   mod.api.takeoverProgress = async (...a) => {
     calls.push(['progress', ...a])
     if (progress instanceof Error) throw progress
@@ -189,6 +195,7 @@ async function stubFinish({ finish, trigger, progress, events, dispatch, scenes 
       mod.api.issueEvents = orig.events
       mod.api.dispatchPipeline = orig.dispatch
       mod.api.scenesDetail = orig.scenes
+      mod.api.repoScenes = orig.repoScenes
     },
   }
 }

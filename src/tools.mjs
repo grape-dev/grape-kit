@@ -354,10 +354,11 @@ function renderCapabilityRefusal(json) {
 /* ── Issue #19 / #30：交回后按场景链确保下一节点被派发（「链不断」不能只在描述里） ── */
 
 /**
- * #30 场景链权威来源：交回结果/会话里携带的节点链，缺省取场景接口 `scenes detail` 的
- * 节点 `next` 链接。**不再内置 DEFAULT_SCENE_CHAIN 猜链**——响应未带链且场景接口不可用时
- * 落 pending 待人工确认，避免把自定义链 coding→review→sre 推导成场景里不存在的 qa。
+ * 场景链缺省值：平台未在交回结果/会话里携带节点链时的兜底顺序。
+ * #30 起客户端兜底不再硬编码 coding→qa，而是按**场景链 next** 推导（自定义链
+ * coding→review→sre 同样可派发），未知节点名仍不改写、落 pending。
  */
+const DEFAULT_SCENE_CHAIN = ['vod', 'issue', 'coding', 'qa', 'sre']
 const DEPLOYMENT_NODES = new Set(['sre', 'deploy'])
 
 const normalizeNodeName = (v) => String(v ?? '').trim().toLowerCase()
@@ -372,37 +373,29 @@ function nodeNamesOf(list) {
 }
 
 /**
- * 取响应里显式携带的场景链（不猜测任意数组、不回落硬编码链）。
- * 响应未携带链时返回空数组，由 resolveSceneChain 去场景接口取权威节点链。
+ * 取场景链：优先交回结果/会话携带的场景节点，缺省回落内置链。
+ * 只认明确的场景字段，不猜测任意数组，避免把无关列表误当节点链。
  */
-function sceneChainOf(json = {}) {
-  const sess = json.session || {}
-  const candidates = [
-    json.scene_agents, json.scene_chain, json.scene?.agents, json.scene?.nodes,
-    json.pipeline?.agents, json.pipeline?.nodes,
-    sess.scene_agents, sess.scene_chain, sess.scene?.agents, sess.scene?.nodes,
-  ]
-  for (const c of candidates) {
-    const names = nodeNamesOf(c)
-    if (names.length) return names
-  }
-  return []
-}
-
-/** 场景节点 id/tag 归一（场景接口节点带 id/tag/skill） */
 const sceneNodeName = (n) => normalizeNodeName(n?.tag ?? n?.id ?? n?.agent ?? n?.skill ?? n?.name ?? n?.type)
 
-/**
- * 解析场景链与节点 `next` 链接：
- * 1. 响应显式携带链（数组形态）→ 直接按顺序推导；
- * 2. 否则用场景 ID 调 `scenes detail`，按每个节点的 `next` 推导（权威，支持自定义链）；
- * 3. 都拿不到 → 返回空链，调用方落 pending，**不猜默认链**。
- */
 async function resolveSceneChain(json = {}, args = {}, apiMod = api) {
   const explicit = sceneChainOf(json)
   if (explicit.length) return { chain: explicit, nextMap: null, source: 'response' }
   const sess = json.session || {}
-  const sceneId = String(json.scene_id ?? sess.scene_id ?? args.scene_id ?? process.env.GRAPE_SCENE_ID ?? '').trim()
+  let sceneId = String(json.scene_id ?? sess.scene_id ?? args.scene_id ?? process.env.GRAPE_SCENE_ID ?? '').trim()
+  // scene_id 缺失时按会话所属仓库回查仓库场景（唯一或唯一 custom-* 场景），补出可查的 scene_id；
+  // 查不到不猜默认链，落 pending 待人工裁决。
+  if (!sceneId && typeof apiMod?.repoScenes === 'function') {
+    const t0 = resolveDispatchTarget(json, args)
+    if (t0.owner && t0.repo && t0.issue_number) {
+      try {
+        const rows = await apiMod.repoScenes(t0.owner, t0.repo)
+        const list = Array.isArray(rows) ? rows : (rows?.scenes || rows?.items || [])
+        const sceneRow = list.length === 1 ? list[0] : list.find((r) => String(r?.id ?? r?.scene_id ?? '').startsWith('custom-'))
+        sceneId = String(sceneRow?.id ?? sceneRow?.scene_id ?? '').trim()
+      } catch { /* 仓库场景回查失败：不猜链 */ }
+    }
+  }
   if (!sceneId || typeof apiMod.scenesDetail !== 'function') {
     return { chain: [], nextMap: null, source: '' }
   }
@@ -422,12 +415,6 @@ async function resolveSceneChain(json = {}, args = {}, apiMod = api) {
   }
 }
 
-/**
- * 场景链里 `current` 的下一节点：
- * - 有 `nextMap`（场景接口权威）时只看该节点的 `next`，`done`/空表示链尾；
- * - 仅响应携带的数组时按顺序取下一个。
- * 返回 `{ agent, tail, notInChain }`，不臆造链外节点。
- */
 function nextNodeInChain(chain, current, nextMap) {
   const cur = normalizeNodeName(current)
   if (!cur) return { agent: '', tail: false, notInChain: false }
@@ -440,6 +427,26 @@ function nextNodeInChain(chain, current, nextMap) {
   const at = chain.indexOf(cur)
   if (at < 0) return { agent: '', tail: false, notInChain: true }
   return { agent: chain[at + 1] || '', tail: at === chain.length - 1, notInChain: false }
+}
+
+function sceneChainOf(json = {}) {
+  const sess = json.session || {}
+  const candidates = [
+    json.scene_agents, json.scene_chain, json.scene?.agents, json.scene?.nodes,
+    json.pipeline?.agents, json.pipeline?.nodes,
+    sess.scene_agents, sess.scene_chain, sess.scene?.agents, sess.scene?.nodes,
+  ]
+  for (const c of candidates) {
+    const names = nodeNamesOf(c)
+    if (names.length) return names
+  }
+  return []
+}
+
+/** 场景链里 `current` 的下一节点；不在链中则返回空（不臆造） */
+function nextInSceneChain(chain, current) {
+  const at = chain.indexOf(normalizeNodeName(current))
+  return at < 0 ? '' : (chain[at + 1] || '')
 }
 
 /**
@@ -466,14 +473,12 @@ const seqOf = (json, key) => Number(json?.session?.[key] ?? json?.[key]) || 0
 /**
  * #30「下一节点已派发」的唯一权威判据：`handoff.seq>0` 或 `handoff.reason=already_dispatched`。
  * 平台 finish 不回填 `next_seq`（实测恒 0），故 `next_seq` 降级为辅助展示信号，**不单独构成已派发证据**。
- * ⚠️ 旧字段 `handoff_seq`（#19 定义的「交回/handoff 事件序号」）语义与结构化 `handoff.seq` 不同源，
- * 不能直接当派发证据——仅见 `handoff_seq` 时由 ensureNextNodeDispatched 先回读本轮事件核实。
  * finish 判据与 takeover_status 渲染必须共用本函数，禁止两套取值顺序。
  */
 function dispatchEvidenceOf(json = {}) {
   const sess = json.session || {}
   const ho = [json.handoff, sess.handoff].find((v) => v && typeof v === 'object') || {}
-  const seq = Number(ho.seq ?? ho.event_seq) || 0
+  const seq = Number(ho.seq ?? ho.event_seq ?? ho.handoff_seq) || 0
   const rawReason = ho.reason ?? ho.status ?? json.handoff_reason ?? sess.handoff_reason
     ?? (typeof json.handoff === 'string' ? json.handoff : '')
     ?? (typeof sess.handoff === 'string' ? sess.handoff : '')
@@ -481,12 +486,14 @@ function dispatchEvidenceOf(json = {}) {
   return { seq, reason, dispatched: seq > 0 || reason === 'already_dispatched' }
 }
 
-/**
- * 本轮交回边界（事件下界）：`handoff_seq` 是平台侧交回/handoff 事件序号，
- * 本轮派发事件必然落在它之后（>=）。回读只认 `seq >= sinceSeq` 的事件，
- * 历史轮次（seq < sinceSeq）与 `status=failed` 事件不得当成本轮已派发。
- * `sinceSeq=0` 表示无法确定本轮边界 → 不采信任何历史事件（落补发）。
- */
+/** issue 事件里是否已有下一节点的 `a2a_event`：命中返回事件 seq，否则 0 */
+function eventsTruncated(events) {
+  if (!events || typeof events !== 'object' || Array.isArray(events)) return false
+  const rows = events.events || events.items || []
+  const total = Number(events.total)
+  return Number.isFinite(total) && total > (Array.isArray(rows) ? rows.length : 0)
+}
+
 function nextNodeEventSeq(events, agent, sinceSeq = 0) {
   const rows = Array.isArray(events) ? events : (events?.events || events?.items || [])
   const target = normalizeNodeName(agent)
@@ -503,14 +510,6 @@ function nextNodeEventSeq(events, agent, sinceSeq = 0) {
     if (seq > hit) hit = seq
   }
   return hit
-}
-
-/** 事件信封被分页截断（total 大于返回条数）：窗口内无命中不可判「无事件」 */
-function eventsTruncated(events) {
-  if (!events || typeof events !== 'object' || Array.isArray(events)) return false
-  const rows = events.events || events.items || []
-  const total = Number(events.total)
-  return Number.isFinite(total) && total > (Array.isArray(rows) ? rows.length : 0)
 }
 
 /**
@@ -653,35 +652,34 @@ function dispatchContext(json, nextAgent) {
  * 交回后确保下一节点被派发：平台已派发不重复；平台漏派时客户端兜底补发；
  * 无法派发时返回结构化告警 + 待派发标记（不再静默 grace）。
  *
- * 判据分层（#30）：
- * - 已派发证据只认结构化 `handoff.seq>0` / `handoff.reason=already_dispatched`；
- * - 仅 `handoff_seq`（交回事件序号）时以它为**本轮下界**回读 issue 事件，命中「本轮之后且非 failed」的
- *   下一节点 `a2a_event` 才判已派发——历史轮次事件不得当作本轮已派发；
- * - 兜底目标按场景接口节点 `next` 推导（响应未带链时取 scenes detail），部署类节点保留用户确认门。
+ * 幂等判据只用 next_seq（派发指针）——handoff_seq 是平台侧「交回事件」序号，
+ * 不代表派发已发生；只见 handoff_seq 时按「交回已写、派发未证实」兜底补发并告警
+ * （两字段合并会把「事件已写、派发未发生」误判成已派发）。
  */
 async function ensureNextNodeDispatched(json, args = {}, apiMod = api) {
-let base = json && typeof json === 'object' ? json : { raw: json }
-  let sess = base.session || {}
-  let target = resolveDispatchTarget(base, args)
-  // 交回响应常常不带仓库/issue 标识（实测 shape：next_agent + handoff_seq，无 repo_key），
-  // 于是兜底派发误判「缺少仓库/issue 标识」→ 假警报 pending_dispatch（测试报告 P6）。
-  // 会话记录里 repo_key/issue_number 是权威的：缺标识时回读一次会话再解析，不靠猜测。
-  const sid = String(base.session?.id || base.session_id || args.session_id || '').trim()
-  if ((!target.owner || !target.repo || !target.issue_number) && sid && typeof apiMod?.takeoverGet === 'function') {
-    try {
-      const fresh = await apiMod.takeoverGet(sid)
-      const s = fresh?.session || fresh || {}
-      base = { ...base, session: { ...sess, ...s } }
-      sess = base.session
-    } catch { /* 读不到会话就保留原判：仍按 no_target 显式告警 */ }
-    target = resolveDispatchTarget(base, args)
-  }
+  const base = json && typeof json === 'object' ? json : { raw: json }
+  const sess = base.session || {}
   const scene = await resolveSceneChain(base, args, apiMod)
   const chain = scene.chain
   const { agent: nextAgent, unknown: unknownNextAgent, derived, tail, notInChain } = resolveNextTarget(base, chain, scene.nextMap)
   const chainLabel = chain.length ? chain.join('→') : '未知（场景接口未返回节点链）'
   const evidence = dispatchEvidenceOf(base)
   const roundFloor = seqOf(base, 'handoff_seq')
+  let target = resolveDispatchTarget(base, args)
+  // 交回响应常缺仓库/issue 标识（实测 shape：next_agent + handoff_seq）：
+  // 会话记录里 repo_key/issue_number 是权威来源，缺标识时回读一次会话再解析。
+  {
+    const sid = String(base.session?.id || base.session_id || args.session_id || '').trim()
+    if ((!target.owner || !target.repo || !target.issue_number) && sid && typeof apiMod?.takeoverGet === 'function') {
+      try {
+        const fresh = await apiMod.takeoverGet(sid)
+        const sn = fresh?.session || fresh || {}
+        base = { ...base, session: { ...base.session, ...sn } }
+        const refreshed = resolveDispatchTarget(base, args)
+        if (refreshed.owner && refreshed.repo && refreshed.issue_number) target = refreshed
+      } catch { /* 读不到会话就保留原判：仍按 no_target 显式告警 */ }
+    }
+  }
   // 无法派发时一律落到「待派发」：显式告警；标记随交回结果返回，事后经会话记录可查（见 pending 注释）。
   // `cause` 只用于渲染分支（交回未成功 / 节点名不认识 / 派发未证实 的处置动作各不相同）。
   const pending = (reason, cause = 'blocked') => ({
@@ -763,7 +761,7 @@ let base = json && typeof json === 'object' ? json : { raw: json }
   if (!target.owner || !target.repo || !target.issue_number) {
     return pending(`next_node_pending_dispatch: 缺少仓库/issue 标识，无法派发 ${nextAgent}；可用 owner/repo/issue_number 入参重试`, 'no_target')
   }
-// 双判据缺失：以本轮交回事件序号为下界回读 issue 事件，确认本轮无下一节点 a2a_event 才补发。
+  // 双判据缺失：以本轮交回事件序号为下界回读 issue 事件，确认本轮无下一节点 a2a_event 才补发。
   // 回读失败/被截断时落 pending，不盲目补发。
   if (typeof apiMod.issueEvents !== 'function') {
     return pending(`next_node_pending_dispatch: 当前 api 模块缺少 issueEvents，无法回读事件确认 ${nextAgent} 是否已派发；先核实事件再补发`, 'readback_failed')
@@ -2156,9 +2154,8 @@ async native(a) {
       '结束接管：本地携结构化产物交回（conclusion/actions/artifacts/next_step/issue_summary），' +
       '平台写入 events.structured_output（与 worker 同格式），并按场景链确保下一节点被派发，链不断：' +
       '**已派发判据 = `handoff.seq>0` 或 `handoff.reason=already_dispatched`**（平台不回填 `next_seq`，其恒 0，仅作辅助展示）——命中即不重复派发。' +
-      '双判据缺失时以本轮 `handoff_seq` 为下界回读 issue 事件，只认**本轮之后且非 `failed`** 的下一节点 `a2a_event`，确认无才按场景链 **兜底补发**；历史轮次/失败事件不会被当成本轮已派发。' +
-      '兜底目标按场景 `next` 推导（响应未带链时取 scenes detail；自定义链 coding→review→sre 同样生效），场景链不可用时不猜默认链、落待派发；部署类节点（sre）保留用户确认门。' +
-      '因 remote_may_still_run 等警告码阻塞、部署节点待确认、缺仓库/issue 标识、事件回读失败/截断或补发失败时，返回**显式告警 + 待派发标记（pending_dispatch）**，' +
+      '双判据缺失时先回读 issue 事件，确认下一节点无 `a2a_event` 才按场景链 **兜底补发**（复用 trigger 同源 A2A 通道，目标按场景链 `next` 推导，自定义链 coding→review→sre 同样生效）；' +
+      '因 remote_may_still_run 等警告码阻塞、缺仓库/issue 标识、事件回读失败或补发失败时，返回**显式告警 + 待派发标记（pending_dispatch）**，' +
       '标记随交回结果返回（平台对已结束会话拒绝 progress 写入——409 not_active，不走 task_messages），' +
       '事后经 `grape_takeover_status` 复查会话记录同样可见派发未证实与补发指引，不再静默。' +
       '下一节点推导顺序：平台 next_agent > 结构化 next_step（**整串** agent 名如 `qa`，散文如「qa：请复查 PR #10」不解析）> 场景链 next。' +
@@ -2187,13 +2184,6 @@ async native(a) {
         owner: str('兜底派发用 owner（可选；仅当会话未带仓库标识时使用）'),
         repo: str('兜底派发用 repo（可选）'),
         issue_number: num('兜底派发用 issue 编号（可选）'),
-scene_id: str('兜底派发用场景 ID（可选；缺省取会话/环境 GRAPE_SCENE_ID）'),
-        agent_type: str('本次交回的节点（coding 时校验 branch/commit/PR）'),
-        branch: str('coding 交回产物：分支（head，如 feat/issue-31）'),
-        commit: str('coding 交回产物：commit sha（git rev-parse HEAD）'),
-        pr_number: str('coding 交回产物：PR 编号或链接'),
-        allow_incomplete: bool('true=允许 coding 产物缺项交回（在 actions 留痕）'),
-        workspace: str('工作区路径（用于清理 askpass；缺省用本次进程写出的记录）'),
       },
       required: ['session_id', 'summary'],
     },
@@ -2294,7 +2284,7 @@ if (json.incomplete_override?.allowed) {
         }
         const handoffSeq = dispatchEvidenceOf(json).seq
         if (handoffSeq) {
-          // 仅结构化 handoff.seq 是「下一节点已派发」的权威证据；旧字段 handoff_seq 需回读事件核实
+          // handoff.seq（或历史字段 handoff_seq）是「下一节点已派发」的权威证据
           lines.push(`- 平台 handoff.seq=${handoffSeq}（已派发证据）`)
         }
         const d = json.dispatch || {}
@@ -2321,21 +2311,10 @@ if (json.incomplete_override?.allowed) {
             lines.push(`- 平台指定的节点: ${d.agent || '-'}（未知节点名，未按场景链改写）`)
             for (const w of (d.warnings || [])) lines.push(`- ${w}`)
             lines.push('', '_场景链兜底只派发场景链内的节点，链外节点名不被静默顶掉：请核实场景链后手动派发。_')
-          } else if (d.cause === 'readback_failed' || d.cause === 'readback_incomplete') {
-            lines.push('', d.cause === 'readback_incomplete'
-              ? '**⚠️ 下一节点派发未证实（事件回读被分页截断）**'
-              : '**⚠️ 下一节点派发未证实（事件回读失败）**', '')
+          } else if (d.cause === 'readback_failed') {
+            lines.push('', '**⚠️ 下一节点派发未证实（事件回读失败）**', '')
             for (const w of (d.warnings || [])) lines.push(`- ${w}`)
-            lines.push('', `_回读未确认时不盲目补发：先 \`grape_get_issue_events\` 核实下一节点本轮是否已有 a2a_event，确认无事件再 \`grape_trigger_pipeline(agent=${d.agent})\` 补发。_`)
-          } else if (d.cause === 'confirmation_required') {
-            lines.push('', '**⏸ 下一节点为部署/发布类，需用户确认后再派发**', '')
-            lines.push(`- 目标节点: ${d.agent || '-'}（部署类动作副作用不可撤回）`)
-            for (const w of (d.warnings || [])) lines.push(`- ${w}`)
-            lines.push('', `_用户确认部署意图后，再调 \`grape_trigger_pipeline(agent=${d.agent})\` 派发。_`)
-          } else if (d.cause === 'no_scene_chain') {
-            lines.push('', '**⚠️ 无法按场景链推导下一节点（未派发）**', '')
-            for (const w of (d.warnings || [])) lines.push(`- ${w}`)
-            lines.push('', '_场景链不可用时不猜默认链：请核实当前场景节点链后，手动 `grape_trigger_pipeline(agent=…)` 派发。_')
+            lines.push('', `_回读失败时不盲目补发：先 \`grape_get_issue_events\` 核实下一节点是否已有 a2a_event，确认无事件再 \`grape_trigger_pipeline(agent=${d.agent})\` 补发。_`)
           } else if (d.cause === 'dispatch_unconfirmed') {
             // 补发响应缺事件 seq：不能把「请求发出去了」当成「派发发生了」
             lines.push('', '**⚠️ 下一节点派发未证实（补发响应缺事件 seq）**', '')

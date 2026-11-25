@@ -330,7 +330,7 @@ export const api = {
   startIssue: (issueId) => apiRequest('POST', `/api/issues/${issueId}/start`),
 
   // 场景
-//
+  //
   // 三条通道语义不同，别再混用（grape-kit 测试报告 P3/P4/P5 实锤）：
   // - POST /api/scenes/market/{market_id}/apply?owner=&repo=  → 在仓库内“创建”场景副本
   //   （返回新 scene_id=custom-xxxx；同模板重复应用幂等复用）。这是“应用场景”。
@@ -356,7 +356,6 @@ export const api = {
       { body: { fallback_scene: fallbackScene, rules } }),
   /** 场景详情：节点链的权威来源（每节点带 next），客户端兜底派发据此推导下一节点 */
   scenesDetail: (sceneId) => apiRequest('GET', `/api/scenes/${encodeURIComponent(String(sceneId ?? '').trim())}`),
-  applyScene: (owner, repo, sceneId) => apiRequest('POST', `/api/scenes/apply/${owner}/${repo}`, { body: { scene_id: sceneId } }),
 
   // 仓库 / 搜索 / 仪表盘
   managedRepos: () => apiRequest('GET', '/api/repos/managed'),
