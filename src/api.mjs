@@ -127,6 +127,10 @@ export function hintFor(status, ctx = {}) {
       + '更新后需重启宿主会话（已运行的进程读不到新 env，Windows setx 同理）。'
   }
   if (status === 403) {
+    if (/\/git-credential\b/.test(String(ctx.path || ''))) {
+      return 'git-credential 只接受会话级凭据（tk_ / tko_）：用户级 grape_ / JWT 调用必 403，属预期边界。'
+        + '请在接管会话（tko_）或 worker 会话（tk_）内用 grape_git_credential 换一次性本仓凭据，不要更换 token 绕行。'
+    }
     if (/\/finish\b|request-finish/.test(String(ctx.path || ''))) {
       return 'finish 是用户的授权点：需用户级凭据（grape_），接管凭据 tko_ 仅 repo_session、不推进流水线，调用必被 403 拒绝——这是角色分工，不是权限缺失，不要重试。'
         + '标准路径：request-finish（agent）→ 用户在对话中授权 → 由持有用户级 token 的会话执行 finish。'
@@ -194,7 +198,7 @@ export async function apiRequest(method, path, opts = {}) {
   return json
 }
 
-/* ── 端点封装：与 tools.mjs 的 31 个工具一一对应 ─────────────── */
+/* ── 端点封装：与 tools.mjs 的工具面一一对应 ─────────────── */
 
 /** A2A 节点枚举：与平台 pipelines.json 的 agent tag 对齐 */
 export const AGENT_TYPES = ['vod', 'issue', 'coding', 'qa', 'sre']
@@ -264,6 +268,12 @@ export const api = {
     apiRequest('GET', '/api/runtime/issues/takeover-context', { query: { repo_key: `gitcode:${owner}/${repo}`, issue_number: Number(number) } }),
   workerCredentialCreate: (name, scope = 'user', repoKey = '') =>
     apiRequest('POST', '/api/settings/runtime-credentials', { body: { name, scope, ...(repoKey ? { repo_key: repoKey } : {}) } }),
+
+  // git 写回（Issue #31）：一次性本仓凭据 + PR 薄代理（tk_/tko_ 会话级通道；用户级 grape_ 403 属预期）
+  gitCredential: (owner, repo) =>
+    apiRequest('GET', `/api/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git-credential`),
+  createPull: (owner, repo, payload) =>
+    apiRequest('POST', `/api/git-repo/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls`, { body: payload }),
 
   // 端云协同 · takeover 会话（weekly-11+，PR #1268 一等接管资源）
   takeoverStart: (owner, repo, issueNumber, agentType) =>

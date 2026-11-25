@@ -13,7 +13,7 @@
 ```bash
 npm ci            # 按 package-lock.json 安装（CI 同口径）
 npm test          # 单测：fake-grape 替身，不依赖真实服务端
-npm run smoke     # 冒烟：真实 stdio JSON-RPC 往返（39 tools）
+npm run smoke     # 冒烟：真实 stdio JSON-RPC 往返（41 tools）
 ```
 
 - 需要连真实实例自测时，凭据只走环境变量：`GRAPE_API_TOKEN`（勿写入任何 agent 配置文件）。

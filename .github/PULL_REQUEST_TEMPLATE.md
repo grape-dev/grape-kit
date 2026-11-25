@@ -9,7 +9,7 @@
 ## 验证
 
 - [ ] `npm ci && npm test` 全绿（期望 136/136）
-- [ ] `npm run smoke` 通过（期望 39 tools）
+- [ ] `npm run smoke` 通过（期望 41 tools）
 - [ ] 涉及工具面变化 → 已同步 `README.md` / `README.zh.md` / `CHANGELOG.md`
 - [ ] 未提交任何真实凭据、内网地址或个人敏感信息
 

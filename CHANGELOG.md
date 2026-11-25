@@ -6,7 +6,15 @@
 
 ## Unreleased
 
-暂无待发布变更。下一开发周期的用户可见变更先落本段（按 Added / Changed / Fixed 归类，见 CONTRIBUTING §7），发版时并入对应版本节。
+### Added
+
+- git 写回闭环（#31）：新增 `grape_git_credential` —— 用接管凭据 `tko_`（或 `tk_`）调 `/api/repos/{o}/{r}/git-credential` 换一次性本仓券（600s），在工作区写 `GIT_ASKPASS`（POSIX `.grape/git-askpass.sh` / Windows `.cmd`，权限 0600），脚本内嵌到期 epoch、过期非零退出并提示「重新换券」（无静默回退本机 git/CLI 凭据）；`cleanup=true` 幂等清理。新增 `grape_create_pull` 薄代理 `/api/git-repo/{o}/{r}/pulls`（只建 PR，不评审不合并；`issue_number` 映射 `related_issue_nums`）。工具面 39→41。
+- `grape_takeover_finish` 增加 coding 交回产物校验：`agent_type=coding`（或带 branch/commit/pr_number 任一）时须带齐 branch、commit、PR——request-finish 只出强 warning，正式 finish 缺项拒绝并列出缺失项，`allow_incomplete=true` 可覆写并在 actions 留痕；finish/abort 清理本次进程写出的 askpass。
+
+### Changed
+
+- `grape_takeover_start` 的 push 能力边界文案改指向换券工具（`grape_git_credential` → `git push` → `grape_create_pull`），洁净机器不再要求用户先配置 PAT/SSH；tko_ 本身的 repo_session 边界不变。
+- README 双语 / `grape-remote` skill / takeover 架构文档同步 git 写回链路与 41 工具面。
 
 ## 0.4.0 (2026-11-23)
 

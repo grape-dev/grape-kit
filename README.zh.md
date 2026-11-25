@@ -23,17 +23,18 @@
 
 ```
 agent 宿主（MCP stdio：opencode / CodeArts / WorkBuddy / dsh…；其他 MCP 能力宿主可手动接线）
-  → grape-kit（39 工具 · 原生 HTTP 直连 · Markdown 渲染 · initialize instructions 自举）
+  → grape-kit（41 工具 · 原生 HTTP 直连 · Markdown 渲染 · initialize instructions 自举）
     → grape 服务端（流水线 / events / takeover 会话 API；CLI 仅 401 回退用）
 ```
 
-## 能力总览（39 工具）
+## 能力总览（41 工具）
 
 - **流水线遥控**：触发（唯一 A2A 入口）· 等待任务 · 任务状态 · 取消/恢复（带决策门）
 - **需求与事件**：列表/详情/事件流/我的需求 · 建单 · 结构化交回模板
 - **端云协同**（v0.3.2+ 核心）：**接管会话**把云端节点（如 coding）原子让渡到你的 Agent——签发 `tko_` 凭据（12h）并返回完整上下文（prompt/env/workspace/skill/history）；Agent 在本地干活、上报进度，按两阶段交回：`request-finish` 只报告完成，**在对话中经你确认**后再 `finish` 正式交回（结构化产物，链路保持完整）。
   - **凭据语义**：`tko_` 仅 repo_session 能力（继续节点工作 / 回报进度，**不含 git 凭据注入**）——`request-finish` 用 tko_ 即可，但**最终 `finish` 必须用用户级凭据（`grape_`）**，tko_ 调 finish 会 403 属预期边界。平台不提供 UI 确认按钮，确认只发生在你与 Agent 的对话里。
   - 平台要求 weekly-11+；旧平台自动回退只读上下文。完整时序：[docs/20261114-takeover-architecture.md](docs/20261114-takeover-architecture.md)
+  - **git 写回**（Issue #31，干净机器无 PAT/SSH/CLI）：`grape_git_credential` 用接管凭据换一次性本仓券（600s）并在工作区写 `GIT_ASKPASS`（`0600`，内嵌到期 epoch；过期脚本非零退出并提示重新换券，**无静默回退**本机 git/CLI 凭据）；`grape_create_pull` 薄代理 PR 端点（只建 PR、不评审不合并）。凭据绑定会话仓库与工作区：非本仓/工作区外一律拒绝且不落盘，`finish`/`abort` 自动清理 askpass。
 - **场景与仓库**：场景列表 · 应用场景 · 托管仓库 · 同步仓库 · 项目模板 · 项目信息
 - **搜索、知识与技能**：全局搜索 · 技能 ×3 · 知识库 ×2 · 看板
 - **Worker 接入**：把本机注册为 grape 执行引擎（`grape_worker_onboard`）
@@ -140,7 +141,7 @@ npx -y @grape-dev/grape-kit install --target dsh          # 升级后重新装�
 npx -y @grape-dev/grape-kit uninstall --target dsh        # 只删托管块 + skill 副本
 ```
 
-> dsh 走 **MCP 最小路径**（39 工具零改动复用）；完整形态的原生 Cordis 插件由 [grape-dsh](https://gitcode.com/grape-dev/grape-dsh) 承载，二者并存。
+> dsh 走 **MCP 最小路径**（41 工具零改动复用）；完整形态的原生 Cordis 插件由 [grape-dsh](https://gitcode.com/grape-dev/grape-dsh) 承载，二者并存。
 
 ### openclaw（ClawHub 市场）
 
@@ -148,7 +149,7 @@ npx -y @grape-dev/grape-kit uninstall --target dsh        # 只删托管块 + sk
 openclaw plugins install clawhub:grape-kit@latest
 ```
 
-`clawhub:` 为来源前缀（与 devkit 上架同款）。装后用插件 MCP 工具列表验证（39 工具）。市场页：https://clawhub.ai/grape-dev/plugins/grape-kit
+`clawhub:` 为来源前缀（与 devkit 上架同款）。装后用插件 MCP 工具列表验证（41 工具）。市场页：https://clawhub.ai/grape-dev/plugins/grape-kit
 
 ### 版本查询与更新（全宿主通用）
 
@@ -218,7 +219,7 @@ npx -y @grape-dev/grape-kit intro     # 随时重看能力地图
 ```bash
 npm install
 
-npm test        # 270 个单测（fake-grape 替身，不依赖真实服务端）
+npm test        # 283 个单测（fake-grape 替身，不依赖真实服务端）
 
 npm run smoke   # 真实 stdio JSON-RPC 往返：initialize → tools/list → tools/call
 ```
