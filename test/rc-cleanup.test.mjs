@@ -68,6 +68,45 @@ test('Issue #38 planRcCleanup：首行即凭据行时 BOM 迁移到新首行，C
   assert.match(r.masked, /已移除凭据行\] GRAPE_API_TOKEN/, '备份应以注释掩码保留凭据行位置')
 })
 
+/** 用真实 bash source 一次 rc：返回 null 表示本机没有 bash（纯 win32 宿主），调用方跳过该断言 */
+function sourceRc(path) {
+  const r = spawnSync('bash', ['-c', `source ${JSON.stringify(path)}`], { encoding: 'utf8', timeout: 10_000 })
+  return r.error ? null : r
+}
+
+test('Issue #38 planRcCleanup 边界：仅一行凭据且带 BOM → 不留裸 BOM（结果为空，source 无报错）', () => {
+  const r = planRcCleanup('\uFEFFexport GRAPE_API_TOKEN=grape_only_line\n', 'posix')
+
+  assert.equal(r.hits, 1, '唯一一行凭据行应计 1 行命中')
+  assert.equal(r.cleaned, '', '结果全为空时不得贴 BOM——3 字节裸 BOM 会被 bash 当成命令名')
+  const h = home()
+  const p = join(h, '.bashrc')
+  writeFileSync(p, r.cleaned)
+  const s = sourceRc(p)
+  if (s) {
+    assert.equal(`${s.stdout}${s.stderr}`.trim(), '', `清理后的 rc 被 bash source 必须无输出（PR #36 QA 复审判据），实际: ${s.stdout}${s.stderr}`)
+  }
+})
+
+test('Issue #38 planRcCleanup 边界：凭据行后紧跟空行 → 首行非裸 BOM，BOM 不落到非首行（source 无报错）', () => {
+  const text = '\uFEFFexport GRAPE_API_TOKEN=grape_then_blank\n\nexport PATH=$PATH:/bin\n'
+  const r = planRcCleanup(text, 'posix')
+
+  assert.equal(r.hits, 1)
+  assert.doesNotMatch(r.cleaned, /grape_then_blank|GRAPE_API_TOKEN/)
+  assert.equal(r.cleaned.split('\n')[0].includes('\uFEFF'), false, '首行不得是裸 BOM')
+  // BOM 只在文件 offset 0 才是 BOM；贴到中间行会变成命令词里的 U+FEFF，
+  // bash 实测 `line 2: export: command not found` 且该行（含 PATH 导出）整行不执行
+  assert.equal(r.cleaned, '\nexport PATH=$PATH:/bin\n', '首行为空的场合不迁移 BOM，其余行原样保留')
+  const h = home()
+  const p = join(h, '.bashrc')
+  writeFileSync(p, r.cleaned)
+  const s = sourceRc(p)
+  if (s) {
+    assert.equal(`${s.stdout}${s.stderr}`.trim(), '', `清理后的 rc 被 bash source 必须无输出，实际: ${s.stdout}${s.stderr}`)
+  }
+})
+
 /* ── 切片 2：rc 扫描不再有平台门禁（#38 主修复的单一扫描源） ── */
 
 test('Issue #38 scanRcResidues：rc 三形态全部命中，无平台门禁', () => {
