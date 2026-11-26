@@ -1,0 +1,9 @@
+{
+  "name": "grape-kit",
+  "version": "0.5.1",
+  "description": "Remote control for Grape DevOps pipelines: trigger, track, and take over multi-agent tasks. 50 MCP tools via grape-kit MCP server.",
+  "author": "grape-dev",
+  "license": "MIT",
+  "homepage": "https://www.grapedev.cn",
+  "repository": "https://gitcode.com/grape-dev/grape-kit"
+}

@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "grape-kit": {
+      "command": "npx",
+      "args": ["-y", "-p", "@grape-dev/grape-kit", "grape-kit-mcp"],
+      "env": {
+        "GRAPE_API_TOKEN": "${GRAPE_API_TOKEN}",
+        "GRAPE_BASE_URL": "https://www.grapedev.cn"
+      }
+    }
+  }
+}
