@@ -6,6 +6,14 @@
 
 ## Unreleased
 
+## 0.5.2 (2026-11-26)
+
+> **0.5.2-next 线转正版**（next.0/next.1/next.2 三候选合并转正）。转正条件全绿：真机 @next 回归（0.5.2-next.2 深链 + atomcode 5.2.8 全链实测）+ **#41 B1/B2/D 组深链回补完成**（载体 eos-cloud-album #67：workspace 入参优先 ✓、引用形态技能显式拒绝+零副作用 ✓、重复接管幂等 ✓、finish handoff.seq=116256 判据 ✓，证据评论 id 204345666）+ 用户批准。
+
+### Changed
+
+- 0.5.2-next 全部载荷转正进入 latest：#37 workspace 入参 / #38 win32 rc 双通道 / #39 OBS 引用物化修复 / atomcode 插件分发（根 manifest + integrations/ + 官方策展市场 PR #8）/ 0.5.1 线的 #28 技能物化、#30 派发判据、#31 git 写回、#32 capabilities 握手。
+
 ## 0.5.2-next.2 (2026-11-26)
 
 > **npm next 通道候选版**：latest 仍指 0.5.1。载荷：AtomCode 官方策展市场（community 层）投稿所需的仓根 manifest。

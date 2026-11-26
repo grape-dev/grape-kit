@@ -1,12 +1,22 @@
 {
   "name": "grape-kit",
-  "version": "0.5.2-next.2",
+  "version": "0.5.2",
   "description": "Remote control for Grape DevOps pipelines: trigger and track multi-agent workflows (vod→issue→coding→qa→sre), manage issues end-to-end, and take over running cloud tasks into the local session. MCP wiring: after install, run `atomcode mcp add --global grape-kit npx -- -y -p @grape-dev/grape-kit grape-kit-mcp` to register the 50-tool MCP server.",
-  "author": { "name": "grape-dev", "url": "https://github.com/grape-dev" },
+  "author": {
+    "name": "grape-dev",
+    "url": "https://github.com/grape-dev"
+  },
   "homepage": "https://www.grapedev.cn",
   "repository": "https://github.com/grape-dev/grape-kit",
   "license": "MIT",
-  "keywords": ["grape", "devops", "pipeline", "ai-agents", "takeover", "mcp"],
+  "keywords": [
+    "grape",
+    "devops",
+    "pipeline",
+    "ai-agents",
+    "takeover",
+    "mcp"
+  ],
   "skills": "skills",
   "strict": true
 }
