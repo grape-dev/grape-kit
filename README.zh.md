@@ -95,7 +95,7 @@ npx -y @grape-dev/grape-kit doctor     # 展示完整 runtime > env > file 优�
 
 `auth init` 在 `GRAPE_AUTH_FILE` 已设置时写它，否则写 `GRAPE_HOME/config.json`——写入目标始终与解析目标一致，写盘后回读校验。`doctor` 输出中命中档显示 `[ok]`；未命中/被覆盖档显示 `[--]`（信息行，无需处理）。
 
-普通 `uninstall` 只移除宿主条目并提示残留凭据；加 `--clean-global` 才会删除 `~/.grape`（文件通道 + worker 注册产物）、用户级 `GRAPE_API_TOKEN`/`GRAPE_BASE_URL`（POSIX：从 rc 文件精确删除 `export` 行，备份只保留非凭据行——含凭据的备份等于换个文件名把 token 留盘；Windows 用 `reg delete`），并仅清理含 `node_modules/@grape-dev` 的 `_npx` 缓存条目。`--clean-global` 带不带 `--target` 均可执行（零宿主痕迹时也照跑全局清理）；`--dry-run` 先预览将删除项、不动盘：
+普通 `uninstall` 只移除宿主条目并提示残留凭据；加 `--clean-global` 才会删除 `~/.grape`（文件通道 + worker 注册产物）、用户级 `GRAPE_API_TOKEN`/`GRAPE_BASE_URL`（POSIX：从 rc 文件精确删除 `export` 行，备份只保留非凭据行——含凭据的备份等于换个文件名把 token 留盘；Windows：两条通道并列——`reg delete` 删用户级环境变量 + 同一套 rc 清理处理 Git Bash 读取的 `.bashrc` / `.bash_profile` / `config.fish`，rc 不是只有 POSIX 才会留下凭据行），并仅清理含 `node_modules/@grape-dev` 的 `_npx` 缓存条目。`--clean-global` 带不带 `--target` 均可执行（零宿主痕迹时也照跑全局清理）；`--dry-run` 先预览将删除项、不动盘：
 
 ```bash
 npx -y @grape-dev/grape-kit uninstall --clean-global --dry-run   # 先预览
@@ -308,7 +308,7 @@ npx -y @grape-dev/grape-kit intro     # 随时重看能力地图
 ```bash
 npm install
 
-npm test        # 503 个单测（fake-grape 替身，不依赖真实服务端）
+npm test        # 521 个单测（fake-grape 替身，不依赖真实服务端）
 
 npm run smoke   # 真实 stdio JSON-RPC 往返：initialize → tools/list → tools/call
 ```

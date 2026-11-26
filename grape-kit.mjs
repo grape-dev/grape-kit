@@ -21,6 +21,7 @@ import { spawnSync } from 'node:child_process'
 import { checkUpdateStatus, formatUpdateNotice } from './src/update-check.mjs'
 import { resolveCredentials, getBaseUrl, grapeHome, readAuthChannel, npxCacheRoot } from './src/api.mjs'
 import { classifyRegQuery, REG_QUERY } from './src/registry.mjs'
+import { CREDENTIAL_ENV_KEYS, BACKUP_NAMESPACE, scanRcResidues, cleanCredentialChannels } from './src/credential-channels.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const DEFAULT_SCRIPT = resolve(HERE, 'grape-kit-mcp.mjs')
@@ -33,6 +34,24 @@ const configPath = () => join(grapeHome(), 'config.json')
 
 /** npx 免全局安装的启动参数（workbuddy / codearts / officeace 共用，与 opencode 的本地脚本模式并列） */
 const NPX_ARGS = ['-y', '-p', '@grape-dev/grape-kit', 'grape-kit-mcp']
+
+/**
+ * 清理/扫描链路的平台判定，**可注入**（`GRAPE_KIT_PLATFORM`）。
+ *
+ * 为什么需要注入：win32 双通道（注册表 + Git Bash rc）正是本 Issue 的修复面，而 CI/审阅环境是
+ * Linux——旧实现把 rc 扫描包在 `if (process.platform !== 'win32')` 里时，Linux 上跑测试永远绿，
+ * 把该门禁还原回扫描侧也全绿（PR #36 QA 复审判断项 1 实测）。注入后非 win32 宿主可端到端复跑
+ * win32 口径：注册表分支被走到（reg 不可用会如实点名）、rc 分支同时生效，任一侧被门禁挡住即红。
+ *
+ * 作用域仅限清理/扫描判定（scanResidues 的注册表查询、cleanCredentialChannels 的通道选择、
+ * --dry-run 预览文案）；路径分隔、权限位、install 提示等其它平台相关行为不随之改变。
+ * 正常使用无需设置该变量。
+ */
+const cliPlatform = () => {
+  const injected = String(process.env.GRAPE_KIT_PLATFORM || '').trim()
+  return injected || process.platform
+}
+
 /** 备份时间戳精确到秒：分钟精度会让同一分钟内的多次写入互相覆盖 */
 const stamp = () => {
   const d = new Date()
@@ -41,7 +60,7 @@ const stamp = () => {
 }
 /** 备份路径；同名备份已存在时追加 -2/-3… 去重，绝不覆盖既有备份 */
 function backupPathFor(file) {
-  const base = `${file}.bak-grapemcp-${stamp()}`
+  const base = `${file}.${BACKUP_NAMESPACE}${stamp()}`
   if (!existsSync(base)) return base
   for (let n = 2; ; n++) {
     const p = `${base}-${n}`
@@ -78,7 +97,7 @@ function credentialSourceCheck() {
       : c.sourceKind === 'env' ? '环境变量 GRAPE_API_TOKEN'
         : c.sourceKind === 'file' ? `文件 ${String(c.source).slice('file:'.length)}`
           : ''
-  return ['当前生效凭据来源', c.token ? `ok（${label}；base_url=${c.baseUrl}，不回显 token）` : '未配置（FAIL）：看上一行修复动作']
+  return ['当前生效凭据来源', c.token ? `ok（${label}；base_url=${c.baseUrl}，不回显 token）` : '未配置（需先配置凭据）：看上一行修复动作']
 }
 /**
  * base_url 展示：值取自 getBaseUrl()（唯一事实源），此处只「补一份来源标签」——env / 文件通道 / 默认。
@@ -136,12 +155,13 @@ const envChecks = () => {
   const fileToken = f.exists && !f.parseError && f.cfg && f.cfg.token
   let tokenLine
   // QA 复审（合入后基线）可疑项：runtime 档已命中时 env/file 未命中不是失败——
-  // 否则同一屏「[!!] 未设置（FAIL）」与「[ok] 一次性命中」并存，与「没有 [!!] 即就绪」自相矛盾
+  // 否则同一屏「[!!] 未设置」与「[ok] 一次性命中」并存，与「没有 [!!] 即就绪」自相矛盾。
+  // Issue #38：无凭据档不再写 (FAIL)——它只是缺配置，按三态约定渲染成 [!!] 并给修复动作即可。
   if (c.token && c.sourceKind === 'runtime') tokenLine = 'note（未设置：runtime 档 GRAPE_API_TOKEN_ONCE 已命中，当前生效，不影响使用）'
   else if (process.env.GRAPE_API_TOKEN) tokenLine = 'ok（已设置，不回显）'
   else if (fileToken) tokenLine = `ok（文件通道 ${f.authFile}）`
-  else if (f.exists && f.parseError) tokenLine = `未设置（FAIL）：${f.authFile} 解析失败（内容不回显）`
-  else tokenLine = '未设置（FAIL）：打开 https://www.grapedev.cn/app/#account/profile 生成用户级 API Key（自部署实例用「你的地址/app/#account/profile」），用环境变量或 ~/.grape/config.json 提供'
+  else if (f.exists && f.parseError) tokenLine = `未设置（需修复配置）：${f.authFile} 解析失败（内容不回显）`
+  else tokenLine = '未设置（需配置凭据）：打开 https://www.grapedev.cn/app/#account/profile 生成用户级 API Key（自部署实例用「你的地址/app/#account/profile」），用环境变量或 ~/.grape/config.json 提供'
   return [
     (() => { const { base, source } = baseUrlInfo(); return ['GRAPE_BASE_URL', `ok（${base}；来源=${source}）`] })(),
     ['GRAPE_API_TOKEN', tokenLine],
@@ -688,7 +708,7 @@ function writeDshPatch(patchPath, nextText, originalText, mode) {
 function removeInstalledOnlyDshPatch(patchPath) {
   rmSync(patchPath, { force: true })
   const dir = dirname(patchPath)
-  const prefix = `${basename(patchPath)}.bak-grapemcp-`
+  const prefix = `${basename(patchPath)}.${BACKUP_NAMESPACE}`
   for (const f of readdirSync(dir)) {
     if (!f.startsWith(prefix)) continue
     try {
@@ -2135,32 +2155,7 @@ async function resolveTargetAuto() {
 
 /* ---------- 凭据写入单入口 / 全局清理（Issue #20） ---------- */
 
-const CREDENTIAL_ENV_KEYS = ['GRAPE_API_TOKEN', 'GRAPE_BASE_URL']
-/** 凭据导出行三种形态（QA#PR13 判断项 3：旧实现只认 `export`，`declare -x`、`.bash_profile`
- *  与 fish 的 `set -x` 全都不清不掩，「未发现导出行（跳过）」等于谎报）： */
-const POSIX_CREDENTIAL_LINE_RE = /^\s*(?:export|declare\s+-x)\s+(GRAPE_API_TOKEN|GRAPE_BASE_URL)\s*=/
-const FISH_CREDENTIAL_LINE_RE = /^\s*set\s+(?:-x|-gx|--export)\s+(GRAPE_API_TOKEN|GRAPE_BASE_URL)(?:\s|$)/
-/** 扫描目标：POSIX 常见 rc（含仅登录 shell 读的 .bash_profile）+ fish 配置；kind 决定行形态 */
-const rcTargets = () => [
-  { path: join(homedir(), '.zshrc'), kind: 'posix' },
-  { path: join(homedir(), '.bashrc'), kind: 'posix' },
-  { path: join(homedir(), '.bash_profile'), kind: 'posix' },
-  { path: join(homedir(), '.profile'), kind: 'posix' },
-  { path: join(homedir(), '.config', 'fish', 'config.fish'), kind: 'fish' },
-]
-
-/** 该行是否导出凭据：命中返回变量名，否则 null（扫描、清理、掩码共用同一判据） */
-function credentialLineKey(line, kind) {
-  const m = (kind === 'fish' ? FISH_CREDENTIAL_LINE_RE : POSIX_CREDENTIAL_LINE_RE).exec(line)
-  return m ? m[1] : null
-}
-
-/** rc 文件的 .bak-grapemcp-* 备份清单（本工具备份命名空间，与 rc 同目录同名前缀） */
-function rcBackupPathsOf(rcPath) {
-  const dir = dirname(rcPath)
-  const prefix = `${basename(rcPath)}.bak-grapemcp-`
-  try { return readdirSync(dir).filter((f) => f.startsWith(prefix)).map((f) => join(dir, f)) } catch { return [] }
-}
+/* rc 凭据行判据 / 扫描 / 清理实现见 src/credential-channels.mjs——单一实现两平台共用，CLI 不再本地分叉（Issue #38） */
 
 /**
  * 残留扫描单一 collector：默认 uninstall 的残留提示与 --clean-global 的三路清理
@@ -2190,26 +2185,18 @@ function scanResidues() {
     // 不查注册表会让默认 uninstall 在 Windows 假零残留。reg query 仅 win32 执行（实机回归覆盖）。
     // QA#PR13 判断项 4：非零退出必须区分「确实不存在」与「查不了」——拒绝访问/reg 缺失时
     // 静默当成不存在就是假零残留，与 CHANGELOG「不再吞错」相反，故登记 regErrors 供提示点名人工核对。
-    if (process.platform === 'win32') {
+    if (cliPlatform() === 'win32') {
       const verdict = classifyRegQuery(spawnSync('reg', ['query', 'HKCU\\Environment', '/v', k], { encoding: 'utf8' }))
       if (verdict.state === REG_QUERY.PRESENT) out.envKeys.push(k)
       else if (verdict.state === REG_QUERY.ERROR) out.regErrors.push({ key: k, detail: verdict.detail })
     }
   }
-  if (process.platform !== 'win32') {
-    for (const { path: rc, kind } of rcTargets()) {
-      if (!existsSync(rc)) continue
-      let lines
-      try { lines = readFileSync(rc, 'utf8').split('\n') } catch { continue }
-      const hits = lines.filter((line) => credentialLineKey(line, kind)).length
-      if (hits) out.rcHits.push({ path: rc, kind, hits })
-      for (const b of rcBackupPathsOf(rc)) {
-        try {
-          if (readFileSync(b, 'utf8').split('\n').some((line) => credentialLineKey(line, kind))) out.rcCredentialBackups.push(b)
-        } catch { /* 忽略 */ }
-      }
-    }
-  }
+  // Issue #38：rc 扫描不再有平台门禁——注册表判定仍仅 win32（上方分支），rc 则是两平台并列的
+  // 凭据通道（win32 下 rcTargets() 基于 USERPROFILE，与 Git Bash 读取位置一致）。扫描实现单列在
+  // src/credential-channels.mjs，与清理/备份掩码同源。
+  const rc = scanRcResidues()
+  out.rcHits = rc.rcHits
+  out.rcCredentialBackups = rc.rcCredentialBackups
   const npxRoot = npxCacheRoot()
   if (existsSync(npxRoot)) {
     try {
@@ -2307,50 +2294,14 @@ async function authInit() {
   console.log('优先级：GRAPE_API_TOKEN_ONCE（runtime）> GRAPE_API_TOKEN（env）> GRAPE_AUTH_FILE / GRAPE_HOME/config.json（file）')
 }
 
-/** 删除用户级环境变量：POSIX 精确删 rc 中的 export 行，Windows 用 reg delete。
- *  备份取「原文但凭据行掩码」（QA 判断项：备份=剔除凭据后的全文与清理结果逐字节相同，无回滚价值）：
- *  非凭据行原样保留可回滚，凭据行以注释掩码标注位置（名称保留、值与等号不出现——
- *  含凭据的备份等于换个文件名把 token 留盘）；旧版本留下的含凭据 .bak-grapemcp-* 备份一并删除。 */
+/**
+ * 删除用户级环境变量：rc 文件（POSIX 与 Git Bash 同源）与 Windows 注册表是两条并列通道，
+ * 统一由 src/credential-channels.mjs 的 cleanCredentialChannels 处理——win32 删完 `reg delete`
+ * 不再提前 return，继续走与非 win32 同一份 rc 清理器（Issue #38 主修复）。
+ * 扫描只读 scanResidues() 这一份结果（与残留提示、--dry-run 同源），备份实现由本文件注入。
+ */
 function cleanEnvVars() {
-  if (process.platform === 'win32') {
-    // QA 判断项：win32 不得自行 reg query，必须读 scanResidues() 单一扫描结果（与残留提示同源）。
-    // 扫描已包含「process.env 命中」与「HKCU\Environment 注册表命中」；删除失败必须可见，不吞错。
-    const s = scanResidues()
-    for (const name of CREDENTIAL_ENV_KEYS) {
-      const unreadable = s.regErrors.find((e) => e.key === name)
-      // 查询失败 ≠ 不存在：不得报「未发现（跳过）」蒙混过去（QA#PR13 判断项 4）
-      if (unreadable && !s.envKeys.includes(name)) {
-        console.warn(`  无法确认用户环境变量 ${name} 是否存在（${unreadable.detail}），请人工核对 HKCU\\Environment`)
-        continue
-      }
-      if (!s.envKeys.includes(name)) { console.log(`  未发现用户环境变量: ${name}（跳过）`); continue }
-      const d = spawnSync('reg', ['delete', 'HKCU\\Environment', '/v', name, '/f'], { encoding: 'utf8' })
-      if (d.status === 0) console.log(`  已删除用户环境变量: ${name}`)
-      else console.warn(`  删除用户环境变量 ${name} 失败（reg exit=${d.status}，可能仅存在于当前会话环境），请人工处理`)
-    }
-    console.log('  提示：已运行中的宿主会话读不到删除结果，需重启宿主/终端后生效。')
-    return
-  }
-  const s = scanResidues()
-  let changed = false
-  for (const hit of s.rcHits) {
-    const lines = readFileSync(hit.path, 'utf8').split('\n')
-    const kept = lines.filter((line) => !credentialLineKey(line, hit.kind))
-    const masked = lines.map((line) => {
-      const key = credentialLineKey(line, hit.kind)
-      return key ? `# [grape-kit --clean-global 已移除凭据行] ${key}` : line
-    })
-    const backup = backupOf(hit.path, masked.join('\n'))
-    writeFileSync(hit.path, kept.join('\n'))
-    console.log(`  已从 ${hit.path} 删除 ${hit.hits} 行 GRAPE_* 导出（备份保留非凭据原文+凭据行掩码: ${backup}）`)
-    changed = true
-  }
-  for (const b of s.rcCredentialBackups) {
-    rmSync(b, { force: true })
-    console.log(`  已删除含凭据的旧备份: ${b}`)
-    changed = true
-  }
-  if (!changed) console.log('  未在 shell 配置文件发现 GRAPE_API_TOKEN/GRAPE_BASE_URL 导出行（跳过）')
+  cleanCredentialChannels({ scan: scanResidues, backupOf, platform: cliPlatform() })
 }
 
 /** 清理本包 npx 缓存：仅认 node_modules/@grape-dev/grape-kit 实体（scanResidues 白名单，
@@ -2525,7 +2476,7 @@ function cleanGlobalPlan() {
     any = true
   }
   if (s.envKeys.length) {
-    console.log(`  环境变量 ${s.envKeys.join('/')}：${process.platform === 'win32' ? 'reg delete 用户级注册表项' : '删除 rc 中的导出行'}（已运行会话需重启后生效）`)
+    console.log(`  环境变量 ${s.envKeys.join('/')}：${cliPlatform() === 'win32' ? 'reg delete 用户级注册表项' : '删除 rc 中的导出行'}（已运行会话需重启后生效）`)
     any = true
   }
   for (const e of s.regErrors) {
@@ -2576,6 +2527,10 @@ function printResidualHint() {
 
 /* ---------- main ---------- */
 
+// 本文件是 CLI 入口（package.json bin.grape-kit），脚本主体即 main：不做「入口 vs import.meta.url」
+// 比较守卫——POSIX 安装后真正被执行的是 node_modules/.bin/grape-kit 符号链接，Node 的
+// process.argv[1] 保留链接路径而 import.meta.url 已是 realpath，守卫为假会整块跳过 main，
+// 静默 exit=0 无输出（PR #36 QA P0）。需要单测的清理逻辑放在 src/credential-channels.mjs。
 if (cmd === '--version' || cmd === 'version' || cmd === '-v') {
   console.log(JSON.parse(readFileSync(join(HERE, 'package.json'), 'utf8')).version)
   process.exit(0)
