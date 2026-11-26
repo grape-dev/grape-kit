@@ -4,7 +4,10 @@ Grape DevOps 流水线遥控插件：触发/跟踪多 agent 流水线（vod→is
 
 ## 组成
 
-- **MCP server**：`mcp.json` 声明 `@grape-dev/grape-kit`（npx stdio，50 工具）——若你的 atomcode 版本支持插件内 mcp.json 自动注册，装完即用；否则按下方手动一步合并进 `~/.atomcode/mcp.json`。
+- **MCP server**：`mcp.json` 声明 `@grape-dev/grape-kit`（npx stdio，50 工具）。**实测（atomcode 5.2.8）插件内 mcp.json 不自动注册**，装完插件后执行下面一条命令注册（也写进了手动兜底）：
+  ```bash
+  atomcode mcp add --global grape-kit npx -- -y -p @grape-dev/grape-kit grape-kit-mcp
+  ```
 - **skill**：`skills/grape-remote/` 教模型「什么时候、怎么调用 grape 工具」（遥控纪律、接管两阶段、工具速查）。
 - **commands**：`/grape-status` 快捷口令。
 
