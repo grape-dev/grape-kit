@@ -7,6 +7,8 @@
   <a href="https://www.npmjs.com/package/@grape-dev/grape-kit"><img src="https://img.shields.io/npm/dm/@grape-dev/grape-kit" alt="npm downloads"></a>
   <a href="https://gitcode.com/grape-dev/grape-kit/blob/main/LICENSE"><img src="https://img.shields.io/npm/l/@grape-dev/grape-kit" alt="License: MIT"></a>
   <img src="https://img.shields.io/node/v/@grape-dev/grape-kit" alt="node">
+  <a href="https://glama.ai/mcp/servers/grape-dev/grape-kit"><img src="https://glama.ai/mcp/servers/grape-dev/grape-kit/badges/score.svg" alt="Glama 评分"></a>
+  <a href="https://github.com/grape-dev/grape-kit"><img src="https://img.shields.io/badge/MCP_Registry-已收录-2563eb" alt="Official MCP Registry: io.github.grape-dev/grape-kit"></a>
   <a href="https://www.grapedev.cn/"><img src="https://img.shields.io/badge/grape-www.grapedev.cn-2563eb" alt="grape"></a>
 </p>
 
@@ -14,7 +16,7 @@
   <strong>Grape DevOps 流水线工具 × 主流 Agent</strong><br>
   在 opencode / CodeArts / WorkBuddy 等 Agent 里触发、观察、推进 Grape 多 agent DevOps 流水线，<br>
   并以<strong>接管会话（takeover）原语</strong>把云端节点原子让渡到本地——链不断、成果结构化交回。<br>
-  <a href="https://www.npmjs.com/package/@grape-dev/grape-kit">npm</a> · <a href="https://www.grapedev.cn/">Grape 官网</a> · <a href="https://gitcode.com/grape-dev/grape-kit">源码仓库</a>
+  <a href="https://www.npmjs.com/package/@grape-dev/grape-kit">npm</a> · <a href="https://clawhub.ai/grape-dev/plugins/grape-kit">ClawHub</a> · <a href="https://glama.ai/mcp/servers/grape-dev/grape-kit">Glama</a> · <a href="https://github.com/grape-dev/grape-kit">GitHub</a> · <a href="https://www.grapedev.cn/">Grape 官网</a> · <a href="https://gitcode.com/grape-dev/grape-kit">源码仓库</a>
 </p>
 
 ---
