@@ -1,0 +1,1 @@
+0.5.2-next.0 test marker — Issue #41 接管链路真机测试产物（B1/B2/D 组 / docs write-back）
