@@ -6,6 +6,14 @@
 
 ## Unreleased
 
+## 0.5.2-next.1 (2026-11-26)
+
+> **npm next 通道候选版**：latest 仍指 0.5.1。载荷为 0.5.2-next.0 之上新增的 AtomCode 插件分发支持。
+
+### Added
+
+- AtomCode 插件分发（devkit 先例落位）：根 `plugin.json`（agent-plugins.org 插件身份）+ `integrations/atomcode/` 完整 marketplace（`.atomcode-plugin/marketplace.json` + `plugins/grape-kit/`：plugin.json / mcp.json / skills/grape-remote / commands/grape-status.md）。安装：`atomcode plugin marketplace add <repo>` + `atomcode plugin install grape-kit@grape-kit-marketplace`；npm 发布面不受影响（files 白名单不含新目录）。**实测（atomcode 5.2.8）**：marketplace add → install → 9 文件落地全通；插件内 mcp.json 不自动注册，插件 README 与安装引导改为明确给出 `atomcode mcp add --global grape-kit npx -- -y -p @grape-dev/grape-kit grape-kit-mcp` 注册命令；MCP stdio 真实往返 50 工具 + 真实调用通过。
+
 ## 0.5.2-next.0 (2026-11-26)
 
 > **npm next 通道候选版**：以 `npm publish --tag next` 发布——latest 仍指 0.5.1，`npm i -g @grape-dev/grape-kit` 默认不落本版。转正 0.5.2 stable 的条件：真机 `@next` 回归通过 + B1（workspace 入参物化落盘）/ B2（幂等）/ D 组（finish 判据）真机回补后另行批准。#39（OBS 物化误判）修复已并入本版。

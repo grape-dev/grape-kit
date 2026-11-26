@@ -65,10 +65,12 @@ test('CHANGELOG 保留 Unreleased 段（下一周期入口），候选节 0.5.2-
     'Unreleased 段有条目时必须按 Added/Changed/Fixed 归类（发版后允许空段）',
   )
   // 0.5.2-next.0 是 npm next 通道候选节（预发布号），排在全部已发布节之前（changelog.test 同口径断言）
-  assert.match(md.slice(firstVersion, firstVersion + 40), /^## 0\.5\.2-next\.0 \(2026-11-26\)/, '首个版本节应为候选节 0.5.2-next.0 (2026-11-26)')
-  // 0.5.1 转正后：stable 节 0.5.1 与 next 候选节 0.5.1-next.0 依次紧随其后（发布史不删）
+  // 0.5.2-next 线多候选节倒序：最新的 next.1 在最前，next.0 与 stable 0.5.1 依次随后（发布史不删）
+  assert.match(md.slice(firstVersion, firstVersion + 40), /^## 0\.5\.2-next\.1 \(2026-11-26\)/, '首个版本节应为候选节 0.5.2-next.1 (2026-11-26)')
+  const at0n0 = md.search(/^## 0\.5\.2-next\.0 \(2026-11-26\)/m)
+  assert.ok(at0n0 > firstVersion, '候选节 0.5.2-next.0 应保留在 next.1 节之后（发布史不删）')
   const at051 = md.search(/^## 0\.5\.1 \(2026-11-25\)/m)
-  assert.ok(at051 > firstVersion, 'stable 节 0.5.1 应保留在 0.5.2-next.0 节之后（发布史不删）')
+  assert.ok(at051 > at0n0, 'stable 节 0.5.1 应保留在 0.5.2-next.0 节之后（发布史不删）')
   const atNext = md.search(/^## 0\.5\.1-next\.0 \(2026-11-25\)/m)
   assert.ok(atNext > at051, '候选节 0.5.1-next.0 应保留在 0.5.1 节之后（发布史不删）')
   // #26 五宿主 + #20 场景/技能 + #27 自管理工具批已随 0.5.0 发布：候选节上移后按 0.5.0 节锚点取段（不再用 firstVersion 切段）
