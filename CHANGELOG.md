@@ -6,6 +6,14 @@
 
 ## Unreleased
 
+## 0.5.2-next.2 (2026-11-26)
+
+> **npm next 通道候选版**：latest 仍指 0.5.1。载荷：AtomCode 官方策展市场（community 层）投稿所需的仓根 manifest。
+
+### Added
+
+- 仓根 `.atomcode-plugin/plugin.json`（AtomCode 插件 manifest，声明 skills/grape-remote）：AtomCode 官方策展市场（atomcode-plugins-official）community 层收录的前提——引擎按「仓根即插件」处理，需根 manifest 声明资产；经官方 validate.py 校验口径预检通过（skills frontmatter name/description 齐、name 合法、版本一致）。官方市场条目将 pin `v0.5.2-next.2`（与 npm 同号同源）；自建 marketplace 通道（integrations/atomcode/）并行保留。
+
 ## 0.5.2-next.1 (2026-11-26)
 
 > **npm next 通道候选版**：latest 仍指 0.5.1。载荷为 0.5.2-next.0 之上新增的 AtomCode 插件分发支持。
