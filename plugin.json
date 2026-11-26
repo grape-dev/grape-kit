@@ -1,0 +1,14 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "grape-kit",
+  "version": "0.5.1",
+  "description": "Grape DevOps pipeline tools for coding agents — remote control for multi-agent pipelines, issue management, and cloud-local takeover. 50 MCP tools, zero Python.",
+  "author": {
+    "name": "grape-dev",
+    "url": "https://github.com/grape-dev"
+  },
+  "homepage": "https://www.grapedev.cn",
+  "repository": "https://github.com/grape-dev/grape-kit",
+  "license": "MIT",
+  "keywords": ["grape", "devops", "mcp", "pipeline", "ai-agents", "takeover", "model-context-protocol"]
+}

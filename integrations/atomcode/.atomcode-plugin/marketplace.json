@@ -1,0 +1,10 @@
+{
+  "name": "grape-kit-marketplace",
+  "plugins": [
+    {
+      "name": "grape-kit",
+      "source": "plugins/grape-kit",
+      "description": "Grape DevOps 流水线遥控：在 atomcode 里触发/跟踪多 agent 流水线（vod→issue→coding→qa→sre）、issue 全周期管理、把云端任务接管到本地会话。50 个 MCP 工具（grape-kit MCP server 随插件自动接入），零 Python。"
+    }
+  ]
+}
