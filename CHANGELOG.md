@@ -6,6 +6,10 @@
 
 ## Unreleased
 
+## 0.5.2-next.0 (2026-11-26)
+
+> **npm next 通道候选版**：以 `npm publish --tag next` 发布——latest 仍指 0.5.1，`npm i -g @grape-dev/grape-kit` 默认不落本版。转正 0.5.2 stable 的条件：真机 `@next` 回归通过 + B1（workspace 入参物化落盘）/ B2（幂等）/ D 组（finish 判据）真机回补后另行批准。#39（OBS 物化误判）修复已并入本版。
+
 ### Added
 
 - 本地接管 workspace 覆盖（#37）：`grape_takeover_start` 新增可选 `workspace`（本机绝对路径）。统一解析优先级 `args.workspace` > `bundle.workspace.cwd_hint` > `process.cwd()`（`resolveLocalWorkspace`，纯优先级、不探测存在性），技能物化目录、接管脚本 `{{CWD}}`、`GRAPE_AUTH_FILE` 均以解析出的本地路径为准，返回体带 `workspace_effective`；与云端 `cwd_hint` 不一致时渲染显式披露「云端工作区路径在本机不存在（<hint>），已改用 <本地路径>」，不静默替换。本地接管不再被云端路径锁死，且不依赖平台 #3620。
